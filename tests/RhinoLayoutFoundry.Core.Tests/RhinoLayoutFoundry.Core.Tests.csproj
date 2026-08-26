@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject Condition="'$(UseLocalTestHarness)' != 'true'">true</IsTestProject>
+    <IsTestProject Condition="'$(UseLocalTestHarness)' == 'true'">false</IsTestProject>
+    <OutputType Condition="'$(UseLocalTestHarness)' == 'true'">Exe</OutputType>
+    <DefineConstants Condition="'$(UseLocalTestHarness)' == 'true'">$(DefineConstants);LOCAL_TEST_HARNESS</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\RhinoLayoutFoundry.Core\RhinoLayoutFoundry.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(UseLocalTestHarness)' != 'true'">
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+</Project>

@@ -1,0 +1,29 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build",
+      "type": "process",
+      "command": "dotnet",
+      "args": ["build", "${workspaceFolder}/RhinoLayoutFoundry.sln"],
+      "problemMatcher": "$msCompile",
+      "group": { "kind": "build", "isDefault": true }
+    },
+    {
+      "label": "test",
+      "type": "process",
+      "command": "dotnet",
+      "args": ["test", "${workspaceFolder}/RhinoLayoutFoundry.sln", "--no-build"],
+      "problemMatcher": "$msCompile",
+      "group": "test"
+    },
+    {
+      "label": "install-macos",
+      "type": "process",
+      "command": "${workspaceFolder}/scripts/install-dev-macos.sh",
+      "args": ["Debug"],
+      "dependsOn": "build",
+      "problemMatcher": []
+    }
+  ]
+}

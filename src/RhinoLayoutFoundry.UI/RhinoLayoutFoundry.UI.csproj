@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>RhinoLayoutFoundry.UI</RootNamespace>
+    <AssemblyName>RhinoLayoutFoundry.UI</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\RhinoLayoutFoundry.Core\RhinoLayoutFoundry.Core.csproj" />
+    <PackageReference Include="RhinoCommon" ExcludeAssets="runtime" />
+  </ItemGroup>
+</Project>
+

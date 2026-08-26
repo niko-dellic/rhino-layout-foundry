@@ -1,0 +1,14 @@
+bin/
+obj/
+.vs/
+.vscode/*.user
+.idea/
+.DS_Store
+TestResults/
+coverage/
+artifacts/
+dist/
+*.user
+*.suo
+*.yak
+

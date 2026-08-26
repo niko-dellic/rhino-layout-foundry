@@ -1,0 +1,25 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Rhino 8 (macOS)",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "install-macos",
+      "program": "/Applications/Rhino 8.app/Contents/MacOS/Rhinoceros",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Rhino 8 (Windows)",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build",
+      "program": "C:\\Program Files\\Rhino 8\\System\\Rhino.exe",
+      "args": ["/netcore"],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "RHINO_PACKAGE_DIRS": "${workspaceFolder}/src/RhinoLayoutFoundry.Rhino/bin/Debug/net8.0"
+      }
+    }
+  ]
+}

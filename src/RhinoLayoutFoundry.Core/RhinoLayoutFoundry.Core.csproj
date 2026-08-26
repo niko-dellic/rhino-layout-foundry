@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>RhinoLayoutFoundry.Core</RootNamespace>
+    <AssemblyName>RhinoLayoutFoundry.Core</AssemblyName>
+  </PropertyGroup>
+</Project>
+
