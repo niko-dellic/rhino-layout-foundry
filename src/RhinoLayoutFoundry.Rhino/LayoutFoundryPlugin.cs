@@ -32,8 +32,10 @@ public sealed class LayoutFoundryPlugin : PlugIn
             snapshotProvider,
             mutationService,
             new RhinoDocumentOverviewNavigationService(_stateStore, _revisionTracker),
+            new RhinoLayoutPdfExportService(),
             new RhinoDocumentThumbnailProvider(),
-            new RhinoMutationCapabilityProvider());
+            new RhinoMutationCapabilityProvider(),
+            new RhinoTemplateCaptureContextProvider());
         Panels.RegisterPanel(this, typeof(LayoutFoundryPanel), "Layout Foundry", null);
         _eventBridge = new RhinoDocumentEventBridge(
             _revisionTracker,

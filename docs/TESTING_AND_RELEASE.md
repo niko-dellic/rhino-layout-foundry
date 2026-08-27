@@ -41,11 +41,16 @@ No mutation feature is complete until its success, validation failure, unexpecte
 - Confirm folder rules gain/lose targets when membership changes.
 - Confirm sheet rules follow current details.
 - Deduplicate overlapping selectors.
+- Normalize mixed folder/sheet/detail selections for Duplicate and Delete; cover multiple sheets, multiple folders, mixed types, selected descendants, stale rows, and all-or-nothing duplication rollback.
 - Apply enabled state and deterministic later-rule-wins precedence.
 - Produce the minimal override delta.
 - Preserve unresolved objects, details, and display modes as diagnostics.
 
 ### 2.4 Title blocks and mappings
+
+- Assign, replace, and remove a designated title block across one and many sheets from an existing page-space block instance.
+- Preserve the source instance, copy its transform/attributes, remove only previously designated instances, reject stale source objects, and restore semantic before-state on partial failure.
+- Verify display-mode and title-block combobox results narrow case-insensitively on every typed substring and restore all choices when cleared.
 
 - Enforce zero-or-one active designation per sheet.
 - Evaluate document, sheet, token, fixed, Document User Text, and Layout User Text sources.
@@ -57,6 +62,11 @@ No mutation feature is complete until its success, validation failure, unexpecte
 
 - Round-trip every recipe and document-state field.
 - Migrate every historical schema fixture to the current model.
+- Expand mixed template quantities deterministically and reject names that collide within the batch or existing document.
+- Reject invalid page dimensions and detail rectangles before Rhino mutation.
+- Inject failure after each generated page and confirm the adapter removes the complete partial batch.
+- Compare captured/recreated detail camera, projection, scale, lock, and display mode in millimeter and inch documents.
+- Verify explicit page-space title-block selection, same-document definition reuse, missing-definition warnings, and zero unintended block deletion.
 - Reject unsupported newer major schemas without mutation.
 - Retain readable data and diagnostics from corrupt/partial fixtures.
 - Resolve depth-first folder and explicit sheet ordering for PDF pages.

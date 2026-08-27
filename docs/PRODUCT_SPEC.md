@@ -32,7 +32,7 @@ The initial audience is architects, designers, fabricators, and documentation te
 Core jobs:
 
 1. Understand the full drawing set without opening every layout.
-2. Organize sheets into delivery or discipline folders and filter them with tags.
+2. Organize sheets into delivery or discipline folders using familiar file-explorer behavior.
 3. Apply the same property change to a deliberate subset of sheets or details.
 4. Keep names, title blocks, and viewport presentation consistent.
 5. Generate standardized sheets from known layouts and named views.
@@ -53,7 +53,7 @@ Document
 
 - Each sheet has exactly one parent folder.
 - Folders may nest without an application-defined depth limit.
-- Sheets may also have zero or more tags for cross-cutting filters.
+- Tag controls are not part of the active product UI. Older document payloads retain any stored values for compatibility, but folders and search are the primary organization model.
 - Foundry persists one internal root container, but never renders it as an "Unorganized" folder. Root-level sheets and folders appear together as top-level siblings, like files and folders in one directory.
 - A detail always belongs to its Rhino sheet and cannot be moved independently to another folder.
 - Folder organization is Foundry metadata. Rhino continues to show a flat ordered list of layout tabs.
@@ -73,7 +73,7 @@ Document
 
 1. Run `LayoutFoundry` or open the panel from Rhino.
 2. The tree becomes usable before thumbnails finish rendering.
-3. Expand folders and sheets, filter by text/tag/status, and inspect sheet/detail properties.
+3. Expand folders and sheets, filter by text/status, and inspect sheet/detail properties.
 4. Double-click a sheet or detail to activate it in Rhino.
 5. Diagnostics badges expose missing references, invalid templates, title-block ambiguity, or stale rules.
 
@@ -87,14 +87,14 @@ Document
 6. Review validation errors and the resolved target summary.
 7. Apply once, producing one Rhino undo action.
 
-Supported properties grow by milestone and include page name, order, paper dimensions, detail projection, scale, display mode, layer visibility, and named-view assignment.
+Supported properties grow by milestone and include page name, order, paper dimensions, active title block, detail projection, scale, display mode, layer visibility, and named-view assignment. Searchable selectors filter their visible choices as the user types; they do not merely jump to the nearest match.
 
 ### 4.3 Organize sheets
 
 - Create, rename, reorder, nest, and remove folders.
 - Drag sheets between folders or use a move command.
-- Add and remove tags from one or many sheets.
-- Removing a non-empty folder requires choosing a destination for its children; it never deletes Rhino sheets.
+- Duplicate and Delete operate on any multiselection of folders, sheets, or detail rows. Selecting a detail targets its containing sheet. Folder descendants are normalized so a selected folder and a selected child are processed exactly once.
+- Deleting a non-empty folder recursively deletes its nested folders and Rhino sheets only after a warning that enumerates the affected counts. A metadata-only folder deletion remains undoable; Rhino layout deletion is explicitly reported as non-undoable.
 - Moving a sheet across a folder boundary previews any change caused by live folder-scoped display rules and commits the move and rule reconciliation atomically.
 
 ### 4.4 Automatic naming
@@ -104,7 +104,6 @@ Naming rules support:
 - `{project}`
 - `{discipline}`
 - `{folder}`
-- `{tag}`
 - `{view}`
 - `{index}` and `{index:format}`, such as `{index:000}`
 
@@ -131,6 +130,7 @@ Rules retain stable Rhino object IDs, ordered hierarchy selectors, the display-m
 
 - A user explicitly designates a page-space block instance as the active title block for a sheet.
 - A sheet may have at most one active title block. Zero or multiple candidates are diagnostic states.
+- Batch Properties lists document page-space block instances by definition and source sheet. Applying one duplicates that instance and its page-space transform onto every included sheet, replacing only the previously designated title block; Remove clears the designation and deletes that designated instance.
 - A definition can be registered as an allowed title-block definition without automatically designating every instance.
 - Batch replacement uses the selected template anchor and preserves mapped sheet metadata.
 - Batch removal deletes only explicitly designated title-block instances and is undoable.
@@ -166,10 +166,12 @@ A sheet template is a versioned recipe, not a block instance. It records:
 - page size, orientation, paper name, and page units;
 - ordered detail rectangles and default viewport settings;
 - title-block definition, transform/anchor, and field mapping;
-- default metadata, folder, tags, and naming pattern;
+- default metadata, folder, and naming pattern;
 - optional named-view assignment profiles.
 
 Users create a template by capturing an existing sheet. Templates may be document-local or stored in an optional shared folder. Batch creation accepts a quantity per template, supports mixed sizes, previews names and dependencies, imports required block definitions safely, creates all sheets in one undoable operation, and reports partial incompatibilities before mutation.
+
+Current implementation note: the first slice supports document-local capture and same-document definition reuse, with atomic rollback of all newly created pages on failure. Shared recipe folders, block-definition import/fingerprint conflict handling, per-slot named-view assignment, and a supported native page-creation Undo path remain follow-up gates.
 
 Creation modes include one sheet per named view and multiple template-based sheets whose detail slots are filled by selected or dragged named views.
 

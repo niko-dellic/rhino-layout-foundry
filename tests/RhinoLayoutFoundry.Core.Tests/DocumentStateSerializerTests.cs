@@ -36,7 +36,18 @@ public sealed class DocumentStateSerializerTests
             ],
             new Dictionary<Guid, SheetRecord> { [sheetId] = sheet },
             [rule],
-            new Dictionary<string, string> { ["project"] = "Foundry" });
+            new Dictionary<string, string> { ["project"] = "Foundry" },
+            [new SheetTemplateRecipe(
+                Guid.NewGuid(),
+                SheetTemplateRecipe.CurrentRecipeVersion,
+                "A3 plan",
+                new PaperRecipe(420, 297, "Millimeters"),
+                [new DetailSlotRecipe(Guid.NewGuid(), "Plan", 10, 10, 410, 270,
+                    "Top", 0.02, true, null, "Level 1")],
+                null,
+                ["Permit"],
+                new Dictionary<string, string> { ["discipline"] = "A" },
+                "A-{index:000}")]);
 
         var restored = DocumentStateSerializer.Deserialize(DocumentStateSerializer.Serialize(state));
 
@@ -49,13 +60,27 @@ public sealed class DocumentStateSerializerTests
         Assert.Equal(titleBlock.InstanceObjectId, restored.Sheets[sheetId].TitleBlock!.InstanceObjectId);
         Assert.Equal(rule.DisplayModeId, restored.DisplayRules.Single().DisplayModeId);
         Assert.Equal("Foundry", restored.Metadata["project"]);
+        Assert.Equal("A3 plan", restored.Templates.Single().Name);
+    }
+
+    [Fact]
+    public void VersionOneStateMigratesWithAnEmptyTemplateLibrary()
+    {
+        var payload = DocumentStateSerializer.Serialize(DocumentState.Empty())
+            .Replace("\"SchemaVersion\":2", "\"SchemaVersion\":1", StringComparison.Ordinal)
+            .Replace(",\"SheetTemplates\":[]", string.Empty, StringComparison.Ordinal);
+
+        var restored = DocumentStateSerializer.Deserialize(payload);
+
+        Assert.Equal(DocumentState.CurrentSchemaVersion, restored.SchemaVersion);
+        Assert.Empty(restored.Templates);
     }
 
     [Fact]
     public void UnsupportedSchemaIsRejected()
     {
         var payload = DocumentStateSerializer.Serialize(DocumentState.Empty())
-            .Replace("\"SchemaVersion\":1", "\"SchemaVersion\":99", StringComparison.Ordinal);
+            .Replace("\"SchemaVersion\":2", "\"SchemaVersion\":99", StringComparison.Ordinal);
 
         Assert.Throws<NotSupportedException>(() => DocumentStateSerializer.Deserialize(payload));
     }

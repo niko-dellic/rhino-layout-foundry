@@ -212,11 +212,10 @@ public static class OverviewTreeBuilder
             return null;
         }
 
-        var tags = sheet.Tags.Count == 0 ? "No tags" : string.Join(", ", sheet.Tags);
         return new OverviewTreeNode(
             new OverviewNodeKey(OverviewNodeKind.Sheet, sheet.PageViewId),
             sheet.Name,
-            $"{Pluralize(sheet.DetailCount, "detail")} · {tags}",
+            Pluralize(sheet.DetailCount, "detail"),
             details,
             sheet,
             new OverviewNavigationTarget(sheet.PageViewId),

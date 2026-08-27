@@ -1,4 +1,5 @@
 using RhinoLayoutFoundry.Core.Diagnostics;
+using RhinoLayoutFoundry.Core.Domain;
 using RhinoLayoutFoundry.Core.Operations;
 using RhinoLayoutFoundry.Core.Overview;
 
@@ -10,8 +11,10 @@ public static class LayoutFoundryUiHost
     private static IDocumentSnapshotProvider? _snapshotProvider;
     private static IDocumentMutationService? _mutationService;
     private static IDocumentOverviewNavigationService? _navigationService;
+    private static ILayoutPdfExportService? _pdfExportService;
     private static IDocumentThumbnailProvider? _thumbnailProvider;
     private static IMutationCapabilityProvider? _capabilityProvider;
+    private static ITemplateCaptureContextProvider? _templateCaptureContextProvider;
     private static EventHandler<OverviewInvalidationEventArgs>? _overviewChanged;
 
     public static event EventHandler<OverviewInvalidationEventArgs> OverviewChanged
@@ -25,15 +28,20 @@ public static class LayoutFoundryUiHost
         IDocumentSnapshotProvider snapshotProvider,
         IDocumentMutationService mutationService,
         IDocumentOverviewNavigationService navigationService,
+        ILayoutPdfExportService pdfExportService,
         IDocumentThumbnailProvider thumbnailProvider,
-        IMutationCapabilityProvider capabilityProvider)
+        IMutationCapabilityProvider capabilityProvider,
+        ITemplateCaptureContextProvider templateCaptureContextProvider)
     {
         _overviewProvider = overviewProvider ?? throw new ArgumentNullException(nameof(overviewProvider));
         _snapshotProvider = snapshotProvider ?? throw new ArgumentNullException(nameof(snapshotProvider));
         _mutationService = mutationService ?? throw new ArgumentNullException(nameof(mutationService));
         _navigationService = navigationService ?? throw new ArgumentNullException(nameof(navigationService));
+        _pdfExportService = pdfExportService ?? throw new ArgumentNullException(nameof(pdfExportService));
         _thumbnailProvider = thumbnailProvider ?? throw new ArgumentNullException(nameof(thumbnailProvider));
         _capabilityProvider = capabilityProvider ?? throw new ArgumentNullException(nameof(capabilityProvider));
+        _templateCaptureContextProvider = templateCaptureContextProvider ??
+            throw new ArgumentNullException(nameof(templateCaptureContextProvider));
         NotifyOverviewChanged(OverviewInvalidation.All);
     }
 
@@ -58,6 +66,30 @@ public static class LayoutFoundryUiHost
         {
             var snapshot = _snapshotProvider.Capture();
             return (snapshot.DocumentRuntimeSerialNumber, snapshot.Revision);
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    public static DocumentSnapshot? CaptureSnapshot()
+    {
+        try
+        {
+            return _snapshotProvider?.Capture();
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    public static TemplateCaptureContext? CaptureTemplateContext(Guid sourcePageViewId)
+    {
+        try
+        {
+            return _templateCaptureContextProvider?.Capture(sourcePageViewId);
         }
         catch (InvalidOperationException)
         {
@@ -118,6 +150,17 @@ public static class LayoutFoundryUiHost
     {
         return _navigationService?.RunSheetCommand(sheetPageViewId, command) ??
                new OverviewNavigationResult(false, "Foundry is not connected to an active Rhino plug-in.");
+    }
+
+    public static Task<LayoutPdfExportResult> ExportPdfAsync(
+        LayoutPdfExportRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        return _pdfExportService?.ExportAsync(request, cancellationToken) ??
+               Task.FromResult(new LayoutPdfExportResult(
+                   false,
+                   0,
+                   "Foundry is not connected to a PDF export service."));
     }
 
     public static Task<OverviewThumbnailResult> CaptureThumbnailAsync(
@@ -299,6 +342,84 @@ public static class LayoutFoundryUiHost
         }
     }
 
+    public static async Task<OperationResult> DuplicateFolderAsync(
+        Guid folderId,
+        string expectedName,
+        CancellationToken cancellationToken = default)
+    {
+        if (_snapshotProvider is null || _mutationService is null)
+            return UnavailableResult("Foundry is not connected to an active Rhino plug-in.");
+        try
+        {
+            var snapshot = _snapshotProvider.Capture();
+            var plan = new DuplicateFolderPlanner().Plan(new DuplicateFolderRequest(
+                snapshot.DocumentRuntimeSerialNumber,
+                snapshot.Revision,
+                folderId,
+                expectedName), snapshot);
+            return await ApplyHierarchyPlanAsync(plan, snapshot.DocumentRuntimeSerialNumber,
+                new HashSet<Guid> { folderId }, cancellationToken);
+        }
+        catch (InvalidOperationException exception)
+        {
+            return UnavailableResult(exception.Message);
+        }
+    }
+
+    public static async Task<OperationResult> DuplicateSelectionAsync(
+        IReadOnlyList<OverviewNodeKey> selection,
+        CancellationToken cancellationToken = default)
+    {
+        if (_snapshotProvider is null || _mutationService is null)
+            return UnavailableResult("Foundry is not connected to an active Rhino plug-in.");
+        try
+        {
+            var snapshot = _snapshotProvider.Capture();
+            var plan = new DuplicateHierarchySelectionPlanner().Plan(
+                new DuplicateHierarchySelectionRequest(
+                    snapshot.DocumentRuntimeSerialNumber,
+                    snapshot.Revision,
+                    selection),
+                snapshot);
+            return await ApplyHierarchyPlanAsync(
+                plan,
+                snapshot.DocumentRuntimeSerialNumber,
+                selection.Select(item => item.Id).ToHashSet(),
+                cancellationToken);
+        }
+        catch (InvalidOperationException exception)
+        {
+            return UnavailableResult(exception.Message);
+        }
+    }
+
+    public static async Task<OperationResult> DeleteSelectionAsync(
+        IReadOnlyList<OverviewNodeKey> selection,
+        CancellationToken cancellationToken = default)
+    {
+        if (_snapshotProvider is null || _mutationService is null)
+            return UnavailableResult("Foundry is not connected to an active Rhino plug-in.");
+        try
+        {
+            var snapshot = _snapshotProvider.Capture();
+            var plan = new DeleteHierarchySelectionPlanner().Plan(
+                new DeleteHierarchySelectionRequest(
+                    snapshot.DocumentRuntimeSerialNumber,
+                    snapshot.Revision,
+                    selection),
+                snapshot);
+            return await ApplyHierarchyPlanAsync(
+                plan,
+                snapshot.DocumentRuntimeSerialNumber,
+                selection.Select(item => item.Id).ToHashSet(),
+                cancellationToken);
+        }
+        catch (InvalidOperationException exception)
+        {
+            return UnavailableResult(exception.Message);
+        }
+    }
+
     public static async Task<OperationResult> MoveSheetsAsync(
         Guid destinationFolderId,
         IReadOnlyList<Guid> sheetPageViewIds,
@@ -395,14 +516,108 @@ public static class LayoutFoundryUiHost
         }
     }
 
+    public static async Task<OperationResult> CaptureSheetTemplateAsync(
+        Guid sourcePageViewId,
+        string name,
+        string defaultNamingPattern,
+        Guid? titleBlockInstanceObjectId,
+        CancellationToken cancellationToken = default)
+    {
+        if (_snapshotProvider is null || _mutationService is null)
+            return UnavailableResult("Foundry is not connected to an active Rhino plug-in.");
+        try
+        {
+            var snapshot = _snapshotProvider.Capture();
+            var plan = new CaptureSheetTemplatePlanner().Plan(new CaptureSheetTemplateRequest(
+                snapshot.DocumentRuntimeSerialNumber,
+                snapshot.Revision,
+                Guid.NewGuid(),
+                sourcePageViewId,
+                name,
+                defaultNamingPattern,
+                titleBlockInstanceObjectId), snapshot);
+            var result = plan.CanApply
+                ? await _mutationService.ApplyAsync(plan, cancellationToken)
+                : new OperationResult(false, plan.Diagnostics);
+            if (result.Succeeded)
+                NotifyOverviewChanged(new OverviewInvalidation(snapshot.DocumentRuntimeSerialNumber,
+                    OverviewInvalidationKind.Metadata | OverviewInvalidationKind.Diagnostics));
+            return result;
+        }
+        catch (InvalidOperationException exception)
+        {
+            return UnavailableResult(exception.Message);
+        }
+    }
+
+    public static async Task<OperationResult> BatchCreateSheetsAsync(
+        BatchCreateSheetsRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (_snapshotProvider is null || _mutationService is null)
+            return UnavailableResult("Foundry is not connected to an active Rhino plug-in.");
+        try
+        {
+            var snapshot = _snapshotProvider.Capture();
+            var currentRequest = request with
+            {
+                DocumentRuntimeSerialNumber = snapshot.DocumentRuntimeSerialNumber,
+                SourceRevision = snapshot.Revision,
+            };
+            var plan = new BatchCreateSheetsPlanner().Plan(currentRequest, snapshot);
+            var result = plan.CanApply
+                ? await _mutationService.ApplyAsync(plan, cancellationToken)
+                : new OperationResult(false, plan.Diagnostics);
+            if (result.Succeeded)
+                NotifyOverviewChanged(new OverviewInvalidation(snapshot.DocumentRuntimeSerialNumber,
+                    OverviewInvalidationKind.All));
+            return result;
+        }
+        catch (InvalidOperationException exception)
+        {
+            return UnavailableResult(exception.Message);
+        }
+    }
+
+    public static async Task<OperationResult> BatchUpdateSheetsAsync(
+        BatchUpdateSheetsRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (_snapshotProvider is null || _mutationService is null)
+            return UnavailableResult("Foundry is not connected to an active Rhino plug-in.");
+        try
+        {
+            var snapshot = _snapshotProvider.Capture();
+            var current = request with
+            {
+                DocumentRuntimeSerialNumber = snapshot.DocumentRuntimeSerialNumber,
+                SourceRevision = snapshot.Revision,
+            };
+            var plan = new BatchUpdateSheetsPlanner().Plan(current, snapshot);
+            var result = plan.CanApply
+                ? await _mutationService.ApplyAsync(plan, cancellationToken)
+                : new OperationResult(false, plan.Diagnostics);
+            if (result.Succeeded)
+                NotifyOverviewChanged(new OverviewInvalidation(snapshot.DocumentRuntimeSerialNumber,
+                    OverviewInvalidationKind.All));
+            return result;
+        }
+        catch (InvalidOperationException exception)
+        {
+            return UnavailableResult(exception.Message);
+        }
+    }
+
     public static void Reset()
     {
         _overviewProvider = null;
         _snapshotProvider = null;
         _mutationService = null;
         _navigationService = null;
+        _pdfExportService = null;
         _thumbnailProvider = null;
         _capabilityProvider = null;
+        _templateCaptureContextProvider = null;
         _overviewChanged = null;
     }
 

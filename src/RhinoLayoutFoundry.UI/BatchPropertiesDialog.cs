@@ -1,59 +1,107 @@
 using Eto.Drawing;
 using Eto.Forms;
+using System.Linq.Expressions;
+using RhinoLayoutFoundry.Core.Domain;
 using RhinoLayoutFoundry.Core.Operations;
 
 namespace RhinoLayoutFoundry.UI;
 
 internal sealed class BatchPropertiesDialog : Dialog
 {
-    private readonly BatchPropertiesSession _session;
-    private readonly bool _mutationCapabilityAvailable;
-    private readonly string _capabilityReason;
-    private readonly Label _validationLabel;
-    private readonly Label _reviewLabel;
+    private readonly DocumentSnapshot _snapshot;
+    private readonly TargetRow[] _targets;
+    private readonly IReadOnlyDictionary<Guid, string> _displayModes;
+    private readonly TitleBlockChoice[] _titleBlocks;
+    private readonly CheckBox _renameCheck;
+    private readonly TextBox _patternBox;
+    private readonly NumericStepper _startStepper;
+    private readonly NumericStepper _stepStepper;
+    private readonly CheckBox _paperCheck;
+    private readonly DropDown _paperPreset;
+    private readonly NumericStepper _widthStepper;
+    private readonly NumericStepper _heightStepper;
+    private readonly DropDown _unitDropDown;
+    private readonly CheckBox _displayModeCheck;
+    private readonly FilteredPicker _displayModePicker;
+    private readonly CheckBox _titleBlockCheck;
+    private readonly FilteredPicker _titleBlockPicker;
+    private readonly TextArea _review;
+    private readonly Label _status;
     private readonly Button _applyButton;
 
-    internal BatchPropertiesDialog(
-        uint documentRuntimeSerialNumber,
-        long sourceRevision,
-        IReadOnlyList<BatchTarget> targets,
-        FoundryMutationCapabilities capabilities)
+    internal BatchPropertiesDialog(DocumentSnapshot snapshot, IReadOnlyList<BatchTarget> targets)
     {
-        ArgumentNullException.ThrowIfNull(targets);
-        _session = new BatchPropertiesSession(
-            documentRuntimeSerialNumber,
-            sourceRevision,
-            targets);
-        _mutationCapabilityAvailable = capabilities.AtomicBatchUndo.IsSupported;
-        _capabilityReason = capabilities.AtomicBatchUndo.Reason;
-
+        _snapshot = snapshot;
+        _targets = targets.Select(target => new TargetRow(target)).ToArray();
+        _displayModes = snapshot.DisplayModes;
+        _titleBlocks = new[] { new TitleBlockChoice(null, "Remove title block") }
+            .Concat(snapshot.TitleBlockInstances.Values
+                .OrderBy(instance => instance.InstanceDefinitionName, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(instance => instance.SourcePageName, StringComparer.OrdinalIgnoreCase)
+                .Select(instance => new TitleBlockChoice(
+                    instance.InstanceObjectId,
+                    $"{instance.InstanceDefinitionName}  ·  {instance.SourcePageName}  ·  {instance.InstanceObjectId.ToString()[..8]}")))
+            .ToArray();
         Title = "Batch properties";
-        MinimumSize = new Size(520, 500);
+        MinimumSize = new Size(980, 720);
         Resizable = true;
         Padding = new Padding(FoundryTheme.Space4);
+        BackgroundColor = FoundryTheme.PanelBackground;
 
-        _validationLabel = FoundryTheme.MutedLabel();
-        _reviewLabel = FoundryTheme.MutedLabel();
-        _reviewLabel.Wrap = WrapMode.Word;
-        _applyButton = FoundryTheme.ConfigureButton(new Button
+        _renameCheck = new CheckBox { Text = "Rename layouts" };
+        _patternBox = new TextBox { PlaceholderText = "Example: A-{index:000}" };
+        _startStepper = IntegerStepper(1);
+        _stepStepper = IntegerStepper(1);
+        _paperCheck = new CheckBox { Text = "Set paper size" };
+        _paperPreset = new DropDown
         {
-            Text = "Apply changes",
-            Enabled = false,
-            ToolTip = "Apply unlocks after Rhino page-property Undo is verified",
-        }, minimumWidth: 110);
-        var cancelButton = FoundryTheme.ConfigureButton(new Button { Text = "Close" });
-        cancelButton.Click += (_, _) => Close();
-
-        var tabs = new TabControl
-        {
-            Pages =
-            {
-                new TabPage { Text = "Targets", Content = CreateTargetsPage(targets) },
-                new TabPage { Text = "Properties", Content = CreatePropertiesPage() },
-                new TabPage { Text = "Review", Content = CreateReviewPage() },
-            },
+            DataStore = new[] { "Custom", "A0 — 841 × 1189 mm", "A1 — 594 × 841 mm", "A2 — 420 × 594 mm", "A3 — 297 × 420 mm", "A4 — 210 × 297 mm", "ANSI A — 8.5 × 11 in", "ANSI B — 11 × 17 in", "ANSI C — 17 × 22 in", "ANSI D — 22 × 34 in" },
+            SelectedIndex = 0,
         };
-        tabs.SelectedIndexChanged += (_, _) => UpdateValidation();
+        var first = targets.FirstOrDefault();
+        _widthStepper = DimensionStepper(first?.PageWidth > 0 ? first.PageWidth : 420);
+        _heightStepper = DimensionStepper(first?.PageHeight > 0 ? first.PageHeight : 297);
+        _unitDropDown = new DropDown
+        {
+            DataStore = new[] { "Millimeters", "Centimeters", "Meters", "Inches", "Feet" },
+            SelectedIndex = UnitIndex(first?.PageUnitSystem),
+        };
+        _displayModeCheck = new CheckBox { Text = "Set detail display mode" };
+        _displayModePicker = new FilteredPicker(
+            _displayModes.Values,
+            "Search display modes");
+        _titleBlockCheck = new CheckBox { Text = "Assign, replace, or remove title block" };
+        _titleBlockPicker = new FilteredPicker(
+            _titleBlocks.Select(choice => choice.Label),
+            "Search title-block instances");
+        _displayModePicker.Opened += (_, _) => _titleBlockPicker.CloseResults();
+        _titleBlockPicker.Opened += (_, _) => _displayModePicker.CloseResults();
+        var firstTitleBlock = targets.Count == 1
+            ? snapshot.Sheets.GetValueOrDefault(targets[0].Key.Id)?.TitleBlockInstanceObjectId
+            : null;
+        if (firstTitleBlock is { } currentTitleBlock)
+            _titleBlockPicker.Text = _titleBlocks.FirstOrDefault(choice => choice.InstanceObjectId == currentTitleBlock)?.Label ?? string.Empty;
+        _review = new TextArea { ReadOnly = true, Wrap = false, Height = 120 };
+        _status = FoundryTheme.MutedLabel();
+        _status.Wrap = WrapMode.Word;
+        _applyButton = FoundryTheme.ConfigureButton(new Button { Text = "Apply changes" }, 112);
+        var cancel = FoundryTheme.ConfigureButton(new Button { Text = "Cancel" });
+        cancel.Click += (_, _) => Close();
+        _applyButton.Click += async (_, _) => await ApplyAsync();
+        AbortButton = cancel;
+
+        var targetGrid = CreateTargetGrid();
+        foreach (var check in new[] { _renameCheck, _paperCheck, _displayModeCheck, _titleBlockCheck })
+            check.CheckedChanged += (_, _) => RefreshEditor();
+        _patternBox.TextChanged += (_, _) => RefreshEditor();
+        _startStepper.ValueChanged += (_, _) => RefreshEditor();
+        _stepStepper.ValueChanged += (_, _) => RefreshEditor();
+        _widthStepper.ValueChanged += (_, _) => RefreshEditor();
+        _heightStepper.ValueChanged += (_, _) => RefreshEditor();
+        _unitDropDown.SelectedIndexChanged += (_, _) => RefreshEditor();
+        _displayModePicker.ValueChanged += (_, _) => RefreshEditor();
+        _titleBlockPicker.ValueChanged += (_, _) => RefreshEditor();
+        _paperPreset.SelectedIndexChanged += (_, _) => ApplyPreset();
 
         Content = new StackLayout
         {
@@ -61,166 +109,430 @@ internal sealed class BatchPropertiesDialog : Dialog
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Items =
             {
-                CreateHeader(targets.Count),
-                new StackLayoutItem(tabs, expand: true),
-                _validationLabel,
-                CreateFooter(cancelButton),
-            },
-        };
-        UpdateValidation();
-    }
-
-    private static Control CreateHeader(int targetCount)
-    {
-        return new StackLayout
-        {
-            Spacing = FoundryTheme.Space1,
-            Items =
-            {
-                new Label
+                Header(targets.Count),
+                new Label { Text = "Targets", Font = SystemFonts.Bold(13) },
+                new StackLayoutItem(targetGrid, true),
+                new TableLayout
                 {
-                    Text = "Batch properties",
-                    Font = SystemFonts.Bold(16),
-                    TextColor = FoundryTheme.PrimaryText,
+                    Spacing = new Size(FoundryTheme.Space4, 0),
+                    Rows =
+                    {
+                        new TableRow(
+                            new TableCell(PropertyCard("Naming", _renameCheck, CreateNamingEditor()), true),
+                            new TableCell(PropertyCard("Page", _paperCheck, CreatePaperEditor()), true),
+                            new TableCell(new StackLayout
+                            {
+                                Spacing = FoundryTheme.Space3,
+                                Items =
+                                {
+                                    PropertyCard("Details", _displayModeCheck, CreateDisplayEditor()),
+                                    PropertyCard("Title block", _titleBlockCheck, CreateTitleBlockEditor()),
+                                },
+                            }, true)),
+                    },
                 },
-                FoundryTheme.MutedLabel(
-                    $"Stage one atomic change across {targetCount} selected item{(targetCount == 1 ? string.Empty : "s")}.")
-            },
-        };
-    }
-
-    private Control CreateTargetsPage(IEnumerable<BatchTarget> targets)
-    {
-        var rows = new StackLayout
-        {
-            Padding = new Padding(FoundryTheme.Space2),
-            Spacing = FoundryTheme.Space1,
-            HorizontalContentAlignment = HorizontalAlignment.Stretch,
-        };
-        foreach (var target in targets)
-        {
-            var checkBox = new CheckBox
-            {
-                Text = target.Label,
-                Checked = target.Included,
-                ToolTip = "Include or exclude this item from the pending batch; nothing is deleted.",
-            };
-            checkBox.CheckedChanged += (_, _) =>
-            {
-                _session.SetIncluded(target.Key, checkBox.Checked == true);
-                UpdateValidation();
-            };
-            rows.Items.Add(checkBox);
-        }
-
-        return new Scrollable { Content = rows };
-    }
-
-    private Control CreatePropertiesPage()
-    {
-        var namePattern = CreateField(
-            "Name pattern",
-            "Example: {folder}-{index:00}",
-            BatchPropertyKind.NamePattern);
-        var paperSize = CreateField(
-            "Paper size",
-            "Mixed / unchanged",
-            BatchPropertyKind.PaperSize);
-        var tags = CreateField(
-            "Tags",
-            "Comma-separated tags",
-            BatchPropertyKind.Tags);
-        var displayMode = CreateField(
-            "Detail display mode",
-            "Mixed / unchanged",
-            BatchPropertyKind.DetailDisplayMode);
-
-        return new Scrollable
-        {
-            Content = new StackLayout
-            {
-                Padding = new Padding(FoundryTheme.Space3),
-                Spacing = FoundryTheme.Space3,
-                HorizontalContentAlignment = HorizontalAlignment.Stretch,
-                Items =
+                new Label { Text = "Review", Font = SystemFonts.Bold(13) },
+                _review,
+                _status,
+                new TableLayout
                 {
-                    namePattern,
-                    paperSize,
-                    tags,
-                    displayMode,
+                    Rows = { new TableRow(new TableCell(null, true), cancel, _applyButton) },
+                    Spacing = new Size(FoundryTheme.Space2, 0),
                 },
             },
         };
+        RefreshEditor();
     }
 
-    private Control CreateField(
-        string label,
-        string placeholder,
-        BatchPropertyKind property)
+    internal bool Succeeded { get; private set; }
+
+    private GridView CreateTargetGrid()
     {
-        var textBox = new TextBox { PlaceholderText = placeholder };
-        textBox.TextChanged += (_, _) =>
+        var grid = new GridView
         {
-            _session.Stage(property, textBox.Text);
-            UpdateValidation();
+            DataStore = _targets,
+            AllowMultipleSelection = false,
+            Height = 220,
         };
-        return new StackLayout
+        grid.Columns.Add(new GridColumn
         {
-            Spacing = FoundryTheme.Space1,
-            Items =
+            HeaderText = "Use",
+            Width = 44,
+            Editable = true,
+            DataCell = new CheckBoxCell
             {
-                new Label { Text = label, Font = SystemFonts.Bold() },
-                textBox,
+                Binding = Binding.Property<TargetRow, bool?>(row => row.Included),
             },
-        };
+        });
+        grid.Columns.Add(TextColumn("Layout", row => row.Name, 210, true));
+        grid.Columns.Add(TextColumn("Paper", row => row.Paper, 190));
+        grid.Columns.Add(TextColumn("Details", row => row.DetailCountText, 70));
+        grid.Columns.Add(TextColumn("Display mode", row => row.DisplayModes, 180, true));
+        grid.Columns.Add(TextColumn("Title block", row => row.TitleBlock, 180, true));
+        grid.CellEdited += (_, _) => RefreshEditor();
+        return grid;
     }
 
-    private Control CreateReviewPage()
+    private Control CreateNamingEditor() => new StackLayout
     {
-        return FoundryTheme.Surface(
+        Spacing = FoundryTheme.Space2,
+        Items =
+        {
+            _patternBox,
             new StackLayout
             {
-                Padding = new Padding(FoundryTheme.Space3),
+                Orientation = Orientation.Horizontal,
                 Spacing = FoundryTheme.Space2,
+                Items = { new Label { Text = "Start" }, _startStepper, new Label { Text = "Step" }, _stepStepper },
+            },
+        },
+    };
+
+    private Control CreatePaperEditor() => new StackLayout
+    {
+        Spacing = FoundryTheme.Space2,
+        Items =
+        {
+            _paperPreset,
+            new TableLayout
+            {
+                Spacing = new Size(FoundryTheme.Space2, FoundryTheme.Space2),
+                Rows =
+                {
+                    new TableRow(new Label { Text = "Width" }, _widthStepper),
+                    new TableRow(new Label { Text = "Height" }, _heightStepper),
+                    new TableRow(new Label { Text = "Units" }, _unitDropDown),
+                },
+            },
+        },
+    };
+
+    private Control CreateDisplayEditor() => new StackLayout
+    {
+        Spacing = FoundryTheme.Space2,
+        Items =
+        {
+            new Label { Text = "Search or choose a Rhino display mode." },
+            _displayModePicker,
+        },
+    };
+
+    private Control CreateTitleBlockEditor() => new StackLayout
+    {
+        Spacing = FoundryTheme.Space2,
+        Items =
+        {
+            new Label { Text = "Search page-space block instances or remove the assigned title block." },
+            _titleBlockPicker,
+        },
+    };
+
+    private static Control PropertyCard(string title, CheckBox toggle, Control editor) =>
+        FoundryTheme.Surface(new StackLayout
+        {
+            Padding = new Padding(FoundryTheme.Space3),
+            Spacing = FoundryTheme.Space2,
+            Items =
+            {
+                new Label { Text = title, Font = SystemFonts.Bold(13) },
+                toggle,
+                editor,
+            },
+        });
+
+    private BatchUpdateSheetsRequest Request()
+    {
+        var ids = _targets.Where(row => row.Included == true).Select(row => row.Id).ToArray();
+        var modeId = _displayModeCheck.Checked == true
+            ? _displayModes.FirstOrDefault(pair => string.Equals(pair.Value, _displayModePicker.Text.Trim(), StringComparison.OrdinalIgnoreCase)).Key
+            : (Guid?)null;
+        if (modeId == Guid.Empty) modeId = null;
+        var changesTitleBlock = _titleBlockCheck.Checked == true;
+        var titleBlockChoice = changesTitleBlock
+            ? _titleBlocks.FirstOrDefault(choice => string.Equals(
+                choice.Label,
+                _titleBlockPicker.Text.Trim(),
+                StringComparison.OrdinalIgnoreCase))
+            : null;
+        return new BatchUpdateSheetsRequest(
+            _snapshot.DocumentRuntimeSerialNumber,
+            _snapshot.Revision,
+            ids,
+            _renameCheck.Checked == true ? _patternBox.Text : null,
+            (int)_startStepper.Value,
+            (int)_stepStepper.Value,
+            _paperCheck.Checked == true ? _widthStepper.Value : null,
+            _paperCheck.Checked == true ? _heightStepper.Value : null,
+            _paperCheck.Checked == true ? _unitDropDown.SelectedValue?.ToString() : null,
+            modeId,
+            changesTitleBlock,
+            titleBlockChoice?.InstanceObjectId);
+    }
+
+    private void RefreshEditor()
+    {
+        var rename = _renameCheck.Checked == true;
+        _patternBox.Enabled = rename;
+        _startStepper.Enabled = rename;
+        _stepStepper.Enabled = rename;
+        var paper = _paperCheck.Checked == true;
+        _paperPreset.Enabled = paper;
+        _widthStepper.Enabled = paper;
+        _heightStepper.Enabled = paper;
+        _unitDropDown.Enabled = paper;
+        var display = _displayModeCheck.Checked == true;
+        _displayModePicker.Enabled = display;
+        var titleBlock = _titleBlockCheck.Checked == true;
+        _titleBlockPicker.Enabled = titleBlock;
+
+        var plan = new BatchUpdateSheetsPlanner().Plan(Request(), _snapshot);
+        var change = plan.Changes.OfType<BatchUpdateSheetsChange>().SingleOrDefault();
+        var review = new List<string>();
+        if (change is not null)
+        {
+            review.Add($"{change.SheetPageViewIds.Count} layout{(change.SheetPageViewIds.Count == 1 ? string.Empty : "s")} included");
+            if (change.NewNames.Count > 0)
+                review.AddRange(change.NewNames.Select(pair =>
+                    $"{_snapshot.Sheets[pair.Key].Name}  →  {pair.Value}"));
+            if (change.PaperWidth is { } width && change.PaperHeight is { } height)
+                review.Add($"Paper  →  {width:0.###} × {height:0.###} {change.PaperUnitSystem}");
+            if (change.DetailDisplayModeId is { } modeId)
+                review.Add($"All included details  →  {_displayModes.GetValueOrDefault(modeId, "Unknown")}");
+            if (change.ChangeTitleBlock)
+            {
+                var choice = _titleBlocks.FirstOrDefault(item =>
+                    item.InstanceObjectId == change.TitleBlockSourceInstanceObjectId);
+                review.Add(change.TitleBlockSourceInstanceObjectId is null
+                    ? "Title block  →  Remove assigned title block"
+                    : $"Title block  →  {choice?.Label ?? "Unavailable instance"}");
+            }
+        }
+        _review.Text = review.Count == 0 ? "Choose a property to change." : string.Join(Environment.NewLine, review);
+        var localError = display && !_displayModes.Values.Any(name =>
+            string.Equals(name, _displayModePicker.Text.Trim(), StringComparison.OrdinalIgnoreCase))
+            ? "Choose an available Rhino display mode."
+            : null;
+        localError ??= titleBlock && !_titleBlocks.Any(choice =>
+            string.Equals(choice.Label, _titleBlockPicker.Text.Trim(), StringComparison.OrdinalIgnoreCase))
+            ? "Choose an available title-block instance or Remove title block."
+            : null;
+        _status.Text = localError ?? string.Join(" ", plan.Diagnostics.Select(item => item.Message));
+        _applyButton.Enabled = plan.CanApply && localError is null;
+    }
+
+    private async Task ApplyAsync()
+    {
+        _applyButton.Enabled = false;
+        _status.Text = "Applying batch changes…";
+        var result = await LayoutFoundryUiHost.BatchUpdateSheetsAsync(Request());
+        if (!result.Succeeded)
+        {
+            _status.Text = string.Join(" ", result.Diagnostics.Select(item => item.Message));
+            RefreshEditor();
+            return;
+        }
+        Succeeded = true;
+        Close();
+    }
+
+    private void ApplyPreset()
+    {
+        var preset = _paperPreset.SelectedIndex switch
+        {
+            1 => (841d, 1189d, "Millimeters"),
+            2 => (594d, 841d, "Millimeters"),
+            3 => (420d, 594d, "Millimeters"),
+            4 => (297d, 420d, "Millimeters"),
+            5 => (210d, 297d, "Millimeters"),
+            6 => (8.5d, 11d, "Inches"),
+            7 => (11d, 17d, "Inches"),
+            8 => (17d, 22d, "Inches"),
+            9 => (22d, 34d, "Inches"),
+            _ => ((double?)null, (double?)null, (string?)null),
+        };
+        if (preset.Item1 is not { } width || preset.Item2 is not { } height || preset.Item3 is not { } unit) return;
+        _widthStepper.Value = width;
+        _heightStepper.Value = height;
+        _unitDropDown.SelectedIndex = UnitIndex(unit);
+        RefreshEditor();
+    }
+
+    private static GridColumn TextColumn(
+        string header,
+        Expression<Func<TargetRow, string>> property,
+        int width,
+        bool expand = false) => new()
+    {
+        HeaderText = header,
+        Width = width,
+        Expand = expand,
+        DataCell = new TextBoxCell { Binding = Binding.Property(property) },
+    };
+
+    private static NumericStepper IntegerStepper(double value) => new()
+    {
+        Value = value, MinValue = -999999, MaxValue = 999999, DecimalPlaces = 0, Width = 72,
+    };
+
+    private static NumericStepper DimensionStepper(double value) => new()
+    {
+        Value = value, MinValue = 0.001, MaxValue = 1000000, DecimalPlaces = 3,
+    };
+
+    private static int UnitIndex(string? unit) => unit?.ToLowerInvariant() switch
+    {
+        "centimeters" => 1,
+        "meters" => 2,
+        "inches" => 3,
+        "feet" => 4,
+        _ => 0,
+    };
+
+    private static Control Header(int count) => new StackLayout
+    {
+        Spacing = FoundryTheme.Space1,
+        Items =
+        {
+            new Label { Text = "Batch properties", Font = SystemFonts.Bold(17), TextColor = FoundryTheme.PrimaryText },
+            FoundryTheme.MutedLabel($"Review {count} resolved layout{(count == 1 ? string.Empty : "s")}, then apply only the properties you enable."),
+        },
+    };
+
+    private sealed class TargetRow
+    {
+        internal TargetRow(BatchTarget target)
+        {
+            Id = target.Key.Id;
+            Included = target.Included;
+            Name = target.Label;
+            Paper = target.PageWidth > 0
+                ? $"{target.PageWidth:0.###} × {target.PageHeight:0.###} {target.PageUnitSystem}"
+                : "—";
+            DetailCountText = target.DetailCount.ToString();
+            DisplayModes = target.DisplayModeSummary;
+            TitleBlock = target.TitleBlockSummary;
+        }
+
+        public Guid Id { get; }
+        public bool? Included { get; set; }
+        public string Name { get; }
+        public string Paper { get; }
+        public string DetailCountText { get; }
+        public string DisplayModes { get; }
+        public string TitleBlock { get; }
+    }
+
+    private sealed record TitleBlockChoice(Guid? InstanceObjectId, string Label);
+
+    private sealed class FilteredPicker : Panel
+    {
+        private readonly string[] _allLabels;
+        private readonly TextBox _textBox;
+        private readonly Button _toggleButton;
+        private readonly ListBox _results;
+        private bool _settingValue;
+
+        internal FilteredPicker(IEnumerable<string> labels, string placeholder)
+        {
+            _allLabels = labels.Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(label => label, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            _textBox = new TextBox { PlaceholderText = placeholder };
+            _toggleButton = new Button { Text = "⌄", Width = 30, ToolTip = "Show matching choices" };
+            _results = new ListBox
+            {
+                DataStore = _allLabels,
+                Height = 96,
+                Visible = false,
+            };
+            _textBox.TextChanged += (_, _) =>
+            {
+                if (_settingValue) return;
+                Filter(showResults: true);
+                ValueChanged?.Invoke(this, EventArgs.Empty);
+            };
+            _toggleButton.Click += (_, _) =>
+            {
+                Filter(showResults: !_results.Visible, showAllForExactValue: true);
+                _textBox.Focus();
+            };
+            _results.SelectedIndexChanged += (_, _) =>
+            {
+                if (_results.SelectedValue is not string selected) return;
+                _settingValue = true;
+                _textBox.Text = selected;
+                _textBox.CaretIndex = selected.Length;
+                _settingValue = false;
+                _results.Visible = false;
+                ValueChanged?.Invoke(this, EventArgs.Empty);
+            };
+            Content = new StackLayout
+            {
+                Spacing = FoundryTheme.Space1,
                 Items =
                 {
-                    new Label { Text = "Pending operation", Font = SystemFonts.Bold(13) },
-                    _reviewLabel,
+                    new StackLayout
+                    {
+                        Orientation = Orientation.Horizontal,
+                        Spacing = 0,
+                        Items =
+                        {
+                            new StackLayoutItem(_textBox, true),
+                            _toggleButton,
+                        },
+                    },
+                    _results,
                 },
-            });
-    }
+            };
+        }
 
-    private Control CreateFooter(Button cancelButton)
-    {
-        return new TableLayout
+        internal event EventHandler? ValueChanged;
+        internal event EventHandler? Opened;
+
+        internal string Text
         {
-            Spacing = new Size(FoundryTheme.Space2, 0),
-            Rows =
+            get => _textBox.Text;
+            set
             {
-                new TableRow(
-                    new TableCell(null, scaleWidth: true),
-                    cancelButton,
-                    _applyButton),
-            },
-        };
-    }
+                _settingValue = true;
+                _textBox.Text = value ?? string.Empty;
+                _settingValue = false;
+                Filter(showResults: false);
+            }
+        }
 
-    private void UpdateValidation()
-    {
-        var validation = _session.Validate(_mutationCapabilityAvailable);
-        _applyButton.Enabled = validation.CanApply;
-        _validationLabel.Text = string.Join(
-            " ",
-            validation.Errors
-                .Concat(validation.Warnings)
-                .Concat(_mutationCapabilityAvailable ? [] : [_capabilityReason]));
-        var included = _session.Targets.Count(target => target.Included);
-        var properties = _session.StagedValues.Count == 0
-            ? "No property changes staged."
-            : string.Join(
-                Environment.NewLine,
-                _session.StagedValues.Select(pair => $"{pair.Key}: {pair.Value}"));
-        _reviewLabel.Text =
-            $"{included} of {_session.Targets.Count} targets included.{Environment.NewLine}{Environment.NewLine}{properties}";
+        public new bool Enabled
+        {
+            get => base.Enabled;
+            set
+            {
+                base.Enabled = value;
+                _textBox.Enabled = value;
+                _toggleButton.Enabled = value;
+                _results.Enabled = value;
+                if (!value) _results.Visible = false;
+            }
+        }
+
+        internal void CloseResults()
+        {
+            _results.Visible = false;
+        }
+
+        private void Filter(bool showResults, bool showAllForExactValue = false)
+        {
+            var current = _textBox.Text.Trim();
+            var query = showAllForExactValue && _allLabels.Contains(current, StringComparer.OrdinalIgnoreCase)
+                ? string.Empty
+                : current;
+            var matches = _allLabels
+                .Where(label => query.Length == 0 || label.Contains(query, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(label => query.Length > 0 && label.StartsWith(query, StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+                .ThenBy(label => label, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            _results.DataStore = matches;
+            _results.Visible = showResults && Enabled;
+            if (_results.Visible) Opened?.Invoke(this, EventArgs.Empty);
+        }
     }
 }

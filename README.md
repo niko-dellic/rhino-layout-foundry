@@ -11,11 +11,11 @@ Folder
     └── Detail viewport
 ```
 
-Development is completing Milestone 1 and has a substantial read-only Milestone 2 prototype. The plug-in now includes a folder → sheet → detail tree-table, multiselect, filtering, diagnostics, bounded lazy sheet previews, typed/coalesced invalidation, a staged batch-properties shell, lifecycle event routing, persistence, CI, and executable domain tests. The `net8.0` macOS build, installed plug-in, standard/compact panel states, previews, navigation, and batch dialog have passed live smoke checks. Windows plus mutation, lifecycle, and persistence verification remain release gates. See the [development status](docs/DEVELOPMENT_STATUS.md) for the current gate and prioritized next work.
+Development now includes a functional existing-sheet batch editor and the first Milestone 5 creation slice. The plug-in provides a folder → sheet → detail tree-table, Finder-style hierarchy editing, mixed-selection folder/layout duplication and confirmed deletion, table-driven batch renaming, unit-aware page sizing, live-filtered detail display-mode assignment, batch title-block assignment/replacement/removal from document instances, hierarchy-ordered folder/all multipage PDF output, and a review-first layout creator with quantities, built-in detail arrangements, captured templates, paper presets, title blocks, display modes, and named views. Windows validation, shared-template asset import, title-block field mappings, richer PDF presets/progress, and observer mode remain release gates. See the [development status](docs/DEVELOPMENT_STATUS.md) for exact capability and verification status.
 
 ## What it will do
 
-- Organize Rhino sheets in nested folders with optional tags while leaving Rhino's native layout list intact.
+- Organize Rhino sheets in nested folders while leaving Rhino's native layout list intact.
 - Select folders, sheets, or individual details and change their properties in one operation.
 - Rename sheets from previewable token and sequence rules.
 - Create and maintain saved per-detail layer visibility and per-object display-mode rules.
@@ -47,7 +47,7 @@ Rhino documentation and users often use “page,” “layout,” and “sheet�
 
 RhinoCommon is Rhino's supported [cross-platform .NET plug-in SDK](https://developer.rhino3d.com/guides/rhinocommon/). Rhino 8.20 and later default to .NET 8, which is the project's initial runtime target. Rust is not part of the initial implementation; it would be considered only for an isolated workload after profiling demonstrates a material need.
 
-The current Windows hierarchy uses the full multi-column table with inline previews. The macOS dock uses a resize-safe single text column with detail/tag metadata and diagnostics folded into each row; inline previews remain disabled there until a stable native presentation path replaces the affected Rhino/Eto multi-column image table.
+The current Windows hierarchy uses the full multi-column table with inline previews. The macOS dock uses a resize-safe single text column with detail metadata and diagnostics folded into each row; inline previews remain disabled there until a stable native presentation path replaces the affected Rhino/Eto multi-column image table.
 
 ## Documentation
 

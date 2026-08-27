@@ -21,3 +21,21 @@ public interface IDocumentOverviewNavigationService
 
     OverviewNavigationResult RunSheetCommand(Guid sheetPageViewId, LayoutSheetCommand command);
 }
+
+public sealed record LayoutPdfExportRequest(
+    uint DocumentRuntimeSerialNumber,
+    IReadOnlyList<Guid> SheetPageViewIds,
+    string FilePath,
+    double DotsPerInch = 300);
+
+public sealed record LayoutPdfExportResult(
+    bool Succeeded,
+    int PageCount,
+    string Message = "");
+
+public interface ILayoutPdfExportService
+{
+    Task<LayoutPdfExportResult> ExportAsync(
+        LayoutPdfExportRequest request,
+        CancellationToken cancellationToken = default);
+}

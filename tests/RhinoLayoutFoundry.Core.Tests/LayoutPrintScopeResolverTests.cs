@@ -1,0 +1,79 @@
+using RhinoLayoutFoundry.Core.Overview;
+
+namespace RhinoLayoutFoundry.Core.Tests;
+
+public sealed class LayoutPrintScopeResolverTests
+{
+    [Fact]
+    public void ResolveAllMatchesVisibleRecursiveTreeOrder()
+    {
+        var overview = CreateOverview();
+
+        var result = LayoutPrintScopeResolver.Resolve(overview, null);
+
+        Assert.True(result.Exists);
+        Assert.Equal("All Layouts", result.Name);
+        Assert.Equal([NestedSheetId, FolderSheetId, RootSheetId], result.SheetPageViewIds);
+    }
+
+    [Fact]
+    public void ResolveFolderIncludesNestedFoldersAndDirectSheets()
+    {
+        var result = LayoutPrintScopeResolver.Resolve(CreateOverview(), FolderId);
+
+        Assert.True(result.Exists);
+        Assert.Equal("Issue Set", result.Name);
+        Assert.Equal([NestedSheetId, FolderSheetId], result.SheetPageViewIds);
+    }
+
+    [Fact]
+    public void ResolveEmptyFolderReturnsAnExistingEmptyScope()
+    {
+        var result = LayoutPrintScopeResolver.Resolve(CreateOverview(), EmptyFolderId);
+
+        Assert.True(result.Exists);
+        Assert.False(result.HasSheets);
+        Assert.Empty(result.SheetPageViewIds);
+    }
+
+    [Fact]
+    public void ResolveMissingFolderIsDiagnosable()
+    {
+        var result = LayoutPrintScopeResolver.Resolve(CreateOverview(), Guid.NewGuid());
+
+        Assert.False(result.Exists);
+        Assert.Empty(result.SheetPageViewIds);
+    }
+
+    private static readonly Guid RootId = Guid.Parse("10000000-0000-0000-0000-000000000001");
+    private static readonly Guid FolderId = Guid.Parse("10000000-0000-0000-0000-000000000002");
+    private static readonly Guid NestedFolderId = Guid.Parse("10000000-0000-0000-0000-000000000003");
+    private static readonly Guid EmptyFolderId = Guid.Parse("10000000-0000-0000-0000-000000000004");
+    private static readonly Guid RootSheetId = Guid.Parse("20000000-0000-0000-0000-000000000001");
+    private static readonly Guid FolderSheetId = Guid.Parse("20000000-0000-0000-0000-000000000002");
+    private static readonly Guid NestedSheetId = Guid.Parse("20000000-0000-0000-0000-000000000003");
+
+    private static DocumentOverview CreateOverview()
+    {
+        return new DocumentOverview(
+            42,
+            "Print fixture",
+            RootId,
+            [
+                new FolderOverview(RootId, null, "Root", 0),
+                new FolderOverview(FolderId, RootId, "Issue Set", 1),
+                new FolderOverview(NestedFolderId, FolderId, "Nested", 0),
+                new FolderOverview(EmptyFolderId, RootId, "Empty", 0),
+            ],
+            [
+                Sheet(RootSheetId, RootId, "Root sheet", 0),
+                Sheet(FolderSheetId, FolderId, "Folder sheet", 0),
+                Sheet(NestedSheetId, NestedFolderId, "Nested sheet", 0),
+            ]);
+    }
+
+    private static SheetOverview Sheet(Guid id, Guid folderId, string name, int order)
+    {
+        return new SheetOverview(id, folderId, name, order, [], []);
+    }
+}

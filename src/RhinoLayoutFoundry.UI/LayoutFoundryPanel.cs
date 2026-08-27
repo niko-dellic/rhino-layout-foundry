@@ -22,6 +22,8 @@ public sealed class LayoutFoundryPanel : Panel
     private readonly Button _manageButton;
     private readonly Button _clearSelectionButton;
     private readonly Button _addFolderButton;
+    private readonly Button _captureTemplateButton;
+    private readonly Button _batchCreateButton;
     private readonly bool _usesMacSafeHierarchy = OperatingSystem.IsMacOS();
     private readonly TreeGridView _treeGrid;
     private readonly GridColumn _layoutsColumn;
@@ -32,14 +34,17 @@ public sealed class LayoutFoundryPanel : Panel
     private ButtonMenuItem _setCurrentMenuItem = null!;
     private ButtonMenuItem _newFolderMenuItem = null!;
     private ButtonMenuItem _newPageMenuItem = null!;
-    private ButtonMenuItem _duplicatePageMenuItem = null!;
-    private ButtonMenuItem _deletePageMenuItem = null!;
+    private ButtonMenuItem _duplicateSelectionMenuItem = null!;
+    private ButtonMenuItem _deleteSelectionMenuItem = null!;
     private ButtonMenuItem _renamePageMenuItem = null!;
     private ButtonMenuItem _newDetailMenuItem = null!;
     private ButtonMenuItem _printPageMenuItem = null!;
+    private ButtonMenuItem _printScopeMenuItem = null!;
     private ButtonMenuItem _propertiesPageMenuItem = null!;
     private ButtonMenuItem _renameFolderMenuItem = null!;
-    private ButtonMenuItem _deleteFolderMenuItem = null!;
+    private readonly ContextMenu _creationMenu;
+    private readonly ButtonMenuItem _creationFolderMenuItem;
+    private readonly ButtonMenuItem _creationPageMenuItem;
     private readonly UITimer _layoutPollTimer;
     private readonly UITimer _invalidationTimer;
     private readonly UITimer _responsiveTimer;
@@ -66,6 +71,7 @@ public sealed class LayoutFoundryPanel : Panel
     private IReadOnlyList<OverviewNodeKey> _dragSourceKeys = [];
     private InlineDraft? _inlineDraft;
     private Guid? _contextDestinationFolderId;
+    private Guid? _contextPrintFolderId;
 
     public LayoutFoundryPanel()
     {
@@ -84,13 +90,13 @@ public sealed class LayoutFoundryPanel : Panel
         _filterTextBox = new SearchBox
         {
             PlaceholderText = "Search",
-            ToolTip = "Search layouts, folders, details, and tags",
+            ToolTip = "Search layouts, folders, and details",
         };
         _filterKindDropDown = new DropDown
         {
             ToolTip = "Choose which layout rows to show",
             Width = 108,
-            DataStore = new[] { "All rows", "Sheets", "Details", "Tagged", "Untagged" },
+            DataStore = new[] { "All rows", "Sheets", "Details" },
             SelectedIndex = 0,
         };
         _clearFilterButton = FoundryTheme.ConfigureToolbarButton(new Button
@@ -110,7 +116,19 @@ public sealed class LayoutFoundryPanel : Panel
         _addFolderButton = FoundryTheme.ConfigureToolbarButton(new Button
         {
             Text = "+",
-            ToolTip = "Create folder at the hierarchy root",
+            ToolTip = "Create a folder or layout",
+            Enabled = false,
+        });
+        _batchCreateButton = FoundryTheme.ConfigureToolbarButton(new Button
+        {
+            Text = "⊞",
+            ToolTip = "Batch create layouts from templates",
+            Enabled = false,
+        });
+        _captureTemplateButton = FoundryTheme.ConfigureToolbarButton(new Button
+        {
+            Text = "◇",
+            ToolTip = "Capture selected layout as a template",
             Enabled = false,
         });
         _openButton = FoundryTheme.ConfigureToolbarButton(new Button
@@ -131,6 +149,11 @@ public sealed class LayoutFoundryPanel : Panel
             ToolTip = "Clear selection",
             Enabled = false,
         });
+        _creationFolderMenuItem = new ButtonMenuItem { Text = "New Folder" };
+        _creationPageMenuItem = new ButtonMenuItem { Text = "New Layout" };
+        _creationFolderMenuItem.Click += (_, _) => BeginInlineCreation(InlineDraftKind.Folder);
+        _creationPageMenuItem.Click += (_, _) => QueueOpenCreateLayouts(ResolveCreationDestinationFolderId());
+        _creationMenu = new ContextMenu(_creationFolderMenuItem, _creationPageMenuItem);
 
         (_treeGrid, _layoutsColumn, _detailsColumn) = CreateTreeGrid();
         CreateHierarchyContextMenu();
@@ -167,7 +190,9 @@ public sealed class LayoutFoundryPanel : Panel
         _filterKindDropDown.SelectedIndexChanged += (_, _) => OnFilterChanged();
         _clearFilterButton.Click += (_, _) => ClearFilter();
         _clearSelectionButton.Click += (_, _) => ClearSelection();
-        _addFolderButton.Click += (_, _) => BeginInlineCreation(InlineDraftKind.Folder);
+        _addFolderButton.Click += (_, _) => ShowCreationMenu();
+        _batchCreateButton.Click += (_, _) => OpenCreateLayouts(ResolveCreationDestinationFolderId());
+        _captureTemplateButton.Click += (_, _) => OpenCaptureTemplate();
         _openButton.Click += (_, _) => NavigateSelected();
         _manageButton.Click += (_, _) => OpenBatchProperties();
         _renameButton.Click += async (_, _) => await RenameSelectedSheetAsync();
@@ -215,7 +240,7 @@ public sealed class LayoutFoundryPanel : Panel
         treeGrid.Columns.Add(layoutsColumn);
         var detailsColumn = new GridColumn
         {
-            HeaderText = "Details / tags",
+            HeaderText = "Details",
             DataCell = new TextBoxCell
             {
                 Binding = Binding.Property<HierarchyTreeItem, string>(item => item.SecondaryText),
@@ -291,6 +316,8 @@ public sealed class LayoutFoundryPanel : Panel
                     Items =
                     {
                         _addFolderButton,
+                        _batchCreateButton,
+                        _captureTemplateButton,
                         _openButton,
                         _manageButton,
                         _clearSelectionButton,
@@ -318,47 +345,45 @@ public sealed class LayoutFoundryPanel : Panel
         _setCurrentMenuItem = new ButtonMenuItem { Text = "Set Current" };
         _newFolderMenuItem = new ButtonMenuItem { Text = "New Folder" };
         _newPageMenuItem = new ButtonMenuItem { Text = "New Layout…" };
-        _duplicatePageMenuItem = new ButtonMenuItem { Text = "Duplicate Layout" };
-        _deletePageMenuItem = new ButtonMenuItem { Text = "Delete" };
+        _duplicateSelectionMenuItem = new ButtonMenuItem { Text = "Duplicate" };
+        _deleteSelectionMenuItem = new ButtonMenuItem { Text = "Delete…" };
         _renamePageMenuItem = new ButtonMenuItem { Text = "Rename" };
         _newDetailMenuItem = new ButtonMenuItem { Text = "New Detail" };
         _printPageMenuItem = new ButtonMenuItem { Text = "Print…" };
+        _printScopeMenuItem = new ButtonMenuItem { Text = "Print All…" };
         _propertiesPageMenuItem = new ButtonMenuItem { Text = "Properties…" };
         _renameFolderMenuItem = new ButtonMenuItem { Text = "Rename Folder…" };
-        _deleteFolderMenuItem = new ButtonMenuItem { Text = "Delete Folder…" };
 
         _setCurrentMenuItem.Click += (_, _) => NavigateSelected();
         _newFolderMenuItem.Click += (_, _) => BeginInlineCreation(
             InlineDraftKind.Folder,
             _contextDestinationFolderId);
-        _newPageMenuItem.Click += (_, _) => BeginInlineCreation(
-            InlineDraftKind.Sheet,
-            _contextDestinationFolderId);
-        _duplicatePageMenuItem.Click += async (_, _) => await DuplicateSelectedSheetAsync();
-        _deletePageMenuItem.Click += async (_, _) => await DeleteSelectedSheetAsync();
+        _newPageMenuItem.Click += (_, _) => QueueOpenCreateLayouts(_contextDestinationFolderId);
+        _duplicateSelectionMenuItem.Click += async (_, _) => await DuplicateSelectionAsync();
+        _deleteSelectionMenuItem.Click += async (_, _) => await DeleteSelectionAsync();
         _renamePageMenuItem.Click += (_, _) => BeginInlineSheetRename();
         _newDetailMenuItem.Click += (_, _) => RunSelectedSheetCommand(LayoutSheetCommand.NewDetail);
         _printPageMenuItem.Click += (_, _) => RunSelectedSheetCommand(LayoutSheetCommand.Print);
+        _printScopeMenuItem.Click += async (_, _) => await PrintHierarchyScopeAsync();
         _propertiesPageMenuItem.Click += (_, _) => RunSelectedSheetCommand(LayoutSheetCommand.Properties);
         _renameFolderMenuItem.Click += async (_, _) => await RenameSelectedFolderAsync();
-        _deleteFolderMenuItem.Click += async (_, _) => await DeleteSelectedFolderAsync();
 
         var contextMenu = new ContextMenu(
             _setCurrentMenuItem,
             new SeparatorMenuItem(),
             _newFolderMenuItem,
             _newPageMenuItem,
-            _duplicatePageMenuItem,
-            _deletePageMenuItem,
+            _duplicateSelectionMenuItem,
+            _deleteSelectionMenuItem,
             _renamePageMenuItem,
             new SeparatorMenuItem(),
             _newDetailMenuItem,
             new SeparatorMenuItem(),
             _printPageMenuItem,
+            _printScopeMenuItem,
             _propertiesPageMenuItem,
             new SeparatorMenuItem(),
-            _renameFolderMenuItem,
-            _deleteFolderMenuItem);
+            _renameFolderMenuItem);
         contextMenu.Opening += (_, _) => UpdateContextMenuActions();
         _treeGrid.ContextMenu = contextMenu;
     }
@@ -417,8 +442,6 @@ public sealed class LayoutFoundryPanel : Panel
         {
             1 => OverviewFilterKind.Sheets,
             2 => OverviewFilterKind.Details,
-            3 => OverviewFilterKind.Tagged,
-            4 => OverviewFilterKind.Untagged,
             _ => OverviewFilterKind.All,
         });
 
@@ -479,6 +502,13 @@ public sealed class LayoutFoundryPanel : Panel
             ClearSelection();
             eventArgs.Handled = true;
         }
+        else if (eventArgs.Modifiers == Keys.None &&
+                 eventArgs.Key is Keys.Delete or Keys.Backspace &&
+                 SelectedItemCount() > 0)
+        {
+            _ = DeleteSelectionAsync();
+            eventArgs.Handled = true;
+        }
     }
 
     private void NavigateSelected()
@@ -496,6 +526,55 @@ public sealed class LayoutFoundryPanel : Panel
 
         var result = LayoutFoundryUiHost.Navigate(targets[0]);
         _statusLabel.Text = result.Succeeded ? string.Empty : result.Message;
+    }
+
+    private async Task PrintHierarchyScopeAsync()
+    {
+        var scope = LayoutPrintScopeResolver.Resolve(_overview, _contextPrintFolderId);
+        if (!scope.Exists)
+        {
+            _statusLabel.Text = "That folder no longer exists. Refresh and try again.";
+            return;
+        }
+
+        if (!scope.HasSheets || _overview.DocumentRuntimeSerialNumber is not { } documentSerialNumber)
+        {
+            _statusLabel.Text = scope.HasSheets
+                ? "The active Rhino document is unavailable."
+                : "There are no layouts in this print scope.";
+            return;
+        }
+
+        var safeName = string.Concat(scope.Name.Select(character =>
+            Path.GetInvalidFileNameChars().Contains(character) ? '-' : character)).Trim();
+        if (safeName.Length == 0)
+        {
+            safeName = "Layouts";
+        }
+
+        var dialog = new SaveFileDialog
+        {
+            Title = _contextPrintFolderId is null ? "Print All Layouts" : $"Print {scope.Name}",
+            FileName = $"{safeName}.pdf",
+        };
+        dialog.Filters.Add(new FileFilter("PDF document", ".pdf"));
+        if (dialog.ShowDialog(this) != DialogResult.Ok)
+        {
+            return;
+        }
+
+        var filePath = dialog.FileName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase)
+            ? dialog.FileName
+            : $"{dialog.FileName}.pdf";
+        _statusLabel.Text = $"Creating {scope.SheetPageViewIds.Count}-page PDF…";
+        await Task.Yield();
+        var result = await LayoutFoundryUiHost.ExportPdfAsync(new LayoutPdfExportRequest(
+            documentSerialNumber,
+            scope.SheetPageViewIds,
+            filePath));
+        _statusLabel.Text = result.Succeeded
+            ? $"Printed {result.PageCount} layout{(result.PageCount == 1 ? string.Empty : "s")} to {Path.GetFileName(filePath)}."
+            : result.Message;
     }
 
     private async Task RenameSelectedSheetAsync()
@@ -526,58 +605,63 @@ public sealed class LayoutFoundryPanel : Panel
         }
     }
 
-    private Task DuplicateSelectedSheetAsync()
+    private async Task DuplicateSelectionAsync()
     {
-        var pageViewId = SelectedItems().Count == 1
-            ? ResolveSheetPageViewId(SelectedItems()[0])
-            : null;
-        if (pageViewId is null)
+        var keys = SelectedItems().Select(item => item.Node.Key).Distinct().ToArray();
+        if (keys.Length == 0) return;
+        _statusLabel.Text = $"Duplicating {keys.Length} selected item{(keys.Length == 1 ? string.Empty : "s")}…";
+        var result = await LayoutFoundryUiHost.DuplicateSelectionAsync(keys);
+        if (!result.Succeeded)
         {
-            return Task.CompletedTask;
+            _statusLabel.Text = DiagnosticMessage(result);
+            return;
         }
 
-        var result = LayoutFoundryUiHost.DuplicateSheet(pageViewId.Value);
-        _statusLabel.Text = result.Succeeded ? "Layout duplicated." : result.Message;
-        if (result.Succeeded)
-        {
-            RefreshOverview();
-        }
-
-        return Task.CompletedTask;
+        _statusLabel.Text = $"Duplicated {keys.Length} selected item{(keys.Length == 1 ? string.Empty : "s")}.";
+        RefreshOverview();
     }
 
-    private Task DeleteSelectedSheetAsync()
+    private async Task DeleteSelectionAsync()
     {
-        var selectedItems = SelectedItems();
-        var pageViewId = selectedItems.Count == 1
-            ? ResolveSheetPageViewId(selectedItems[0])
-            : null;
-        if (pageViewId is null)
+        var keys = SelectedItems().Select(item => item.Node.Key).Distinct().ToArray();
+        var snapshot = LayoutFoundryUiHost.CaptureSnapshot();
+        if (keys.Length == 0 || snapshot is null) return;
+        var resolved = HierarchySelectionResolver.Resolve(snapshot, keys);
+        if (resolved.SelectedItemCount == 0 || resolved.UnresolvedKeys.Count > 0)
         {
-            return Task.CompletedTask;
+            _statusLabel.Text = "One or more selected items no longer exist. Refresh and try again.";
+            return;
         }
 
-        var sheet = _overview.Sheets.FirstOrDefault(candidate => candidate.PageViewId == pageViewId.Value);
-        if (sheet is null || MessageBox.Show(
-                this,
-                $"Delete the layout '{sheet.Name}'?",
-                "Delete layout",
-                MessageBoxButtons.YesNo,
-                MessageBoxType.Warning,
-                MessageBoxDefaultButton.No) != DialogResult.Yes)
+        var folderCount = resolved.ExpandedFolderIds.Count;
+        var sheetCount = resolved.AllSheetPageViewIds.Count;
+        var summary = folderCount > 0 && sheetCount > 0
+            ? $"{folderCount} folder{(folderCount == 1 ? string.Empty : "s")} and {sheetCount} Rhino layout{(sheetCount == 1 ? string.Empty : "s")}"
+            : folderCount > 0
+                ? $"{folderCount} folder{(folderCount == 1 ? string.Empty : "s")}"
+                : $"{sheetCount} Rhino layout{(sheetCount == 1 ? string.Empty : "s")}";
+        var response = MessageBox.Show(
+            this,
+            sheetCount == 0
+                ? $"Delete {summary}?\n\nThis metadata-only deletion can be undone in Rhino."
+                : $"Permanently delete {summary}?\n\nLayout deletion cannot be undone.",
+            keys.Length == 1 ? "Delete selected item" : "Delete selected items",
+            MessageBoxButtons.YesNo,
+            sheetCount == 0 ? MessageBoxType.Question : MessageBoxType.Warning,
+            MessageBoxDefaultButton.No);
+        if (response != DialogResult.Yes) return;
+
+        _statusLabel.Text = $"Deleting {summary}…";
+        var result = await LayoutFoundryUiHost.DeleteSelectionAsync(keys);
+        if (!result.Succeeded)
         {
-            return Task.CompletedTask;
+            _statusLabel.Text = DiagnosticMessage(result);
+            return;
         }
 
-        var result = LayoutFoundryUiHost.DeleteSheet(pageViewId.Value);
-        _statusLabel.Text = result.Succeeded ? $"Deleted '{sheet.Name}'." : result.Message;
-        if (result.Succeeded)
-        {
-            ClearSelection();
-            RefreshOverview();
-        }
-
-        return Task.CompletedTask;
+        ClearSelection();
+        _statusLabel.Text = $"Deleted {summary}.";
+        RefreshOverview();
     }
 
     private void BeginInlineSheetRename()
@@ -901,13 +985,15 @@ public sealed class LayoutFoundryPanel : Panel
         var capabilities = LayoutFoundryUiHost.CaptureMutationCapabilities();
 
         _addFolderButton.Enabled = _overview.DocumentRuntimeSerialNumber is not null;
+        _batchCreateButton.Enabled = _overview.DocumentRuntimeSerialNumber is not null;
+        _captureTemplateButton.Enabled = canRename;
         var folderDestination = FolderCreationDestination.Resolve(
             _overview,
             selectedItems.Select(item => item.Node.Key));
         _addFolderButton.ToolTip = folderDestination is not null &&
                                    folderDestination.ParentFolderId != _overview.RootFolderId
-            ? $"Create folder inside {folderDestination.DisplayName}"
-            : "Create folder at the hierarchy root";
+            ? $"Create a folder or layout inside {folderDestination.DisplayName}"
+            : "Create a folder or layout at the hierarchy root";
         _openButton.Enabled = canOpen;
         _manageButton.Enabled = selectionCount > 0;
         _clearSelectionButton.Enabled = selectionCount > 0;
@@ -1101,6 +1187,7 @@ public sealed class LayoutFoundryPanel : Panel
     {
         var folder = SelectedFolderItem();
         var selectedItems = SelectedItems();
+        var selectionCount = selectedItems.Count;
         var selectedSheet = selectedItems.Count == 1
             ? ResolveSheetPageViewId(selectedItems[0])
             : null;
@@ -1108,6 +1195,8 @@ public sealed class LayoutFoundryPanel : Panel
         var isSheetContext = selectedSheet is not null;
         var isRootContext = selectedItems.Count == 0;
         _contextDestinationFolderId = ResolveCreationDestinationFolderId();
+        _contextPrintFolderId = folder?.Node.Key.Id;
+        var printScope = LayoutPrintScopeResolver.Resolve(_overview, _contextPrintFolderId);
         var destinationName = _overview.Folders
             .FirstOrDefault(candidate => candidate.Id == _contextDestinationFolderId)?.Name;
         _setCurrentMenuItem.Visible = isSheetContext;
@@ -1122,22 +1211,33 @@ public sealed class LayoutFoundryPanel : Panel
         _newPageMenuItem.Text = destinationName is null || _contextDestinationFolderId == _overview.RootFolderId
             ? "New Layout…"
             : $"New Layout in {destinationName}…";
-        _duplicatePageMenuItem.Visible = isSheetContext;
-        _duplicatePageMenuItem.Enabled = isSheetContext;
-        _deletePageMenuItem.Visible = isSheetContext;
-        _deletePageMenuItem.Enabled = isSheetContext;
+        _duplicateSelectionMenuItem.Visible = selectionCount > 0;
+        _duplicateSelectionMenuItem.Enabled = selectionCount > 0;
+        _deleteSelectionMenuItem.Visible = selectionCount > 0;
+        _deleteSelectionMenuItem.Enabled = selectionCount > 0;
+        _duplicateSelectionMenuItem.Text = folder is not null
+            ? "Duplicate Folder"
+            : isSheetContext
+                ? "Duplicate Layout"
+                : $"Duplicate {selectionCount} Items";
+        _deleteSelectionMenuItem.Text = folder is not null
+            ? "Delete Folder…"
+            : isSheetContext
+                ? "Delete Layout…"
+                : $"Delete {selectionCount} Items…";
         _renamePageMenuItem.Visible = isSheetContext;
         _renamePageMenuItem.Enabled = isSheetContext;
         _newDetailMenuItem.Visible = isSheetContext;
         _newDetailMenuItem.Enabled = isSheetContext;
         _printPageMenuItem.Visible = isSheetContext;
         _printPageMenuItem.Enabled = isSheetContext;
+        _printScopeMenuItem.Visible = isFolderContext || isRootContext;
+        _printScopeMenuItem.Enabled = printScope.Exists && printScope.HasSheets;
+        _printScopeMenuItem.Text = isFolderContext ? "Print Folder…" : "Print All…";
         _propertiesPageMenuItem.Visible = isSheetContext;
         _propertiesPageMenuItem.Enabled = isSheetContext;
         _renameFolderMenuItem.Enabled = folder is not null;
         _renameFolderMenuItem.Visible = folder is not null;
-        _deleteFolderMenuItem.Enabled = folder is not null && folder.Node.Children.Count == 0;
-        _deleteFolderMenuItem.Visible = folder is not null;
     }
 
     private async Task RenameSelectedFolderAsync()
@@ -1172,45 +1272,18 @@ public sealed class LayoutFoundryPanel : Panel
         RefreshOverview();
     }
 
-    private async Task DeleteSelectedFolderAsync()
+
+    private void ShowCreationMenu()
     {
-        var folder = SelectedFolderItem();
-        if (folder is null)
-        {
-            return;
-        }
-
-        if (folder.Node.Children.Count > 0)
-        {
-            _statusLabel.Text = "Move this folder's sheets and nested folders before deleting it.";
-            return;
-        }
-
-        var response = MessageBox.Show(
-            this,
-            $"Delete the empty folder '{folder.Node.Label}'?\n\nYou can undo this in Rhino.",
-            "Delete folder",
-            MessageBoxButtons.YesNo,
-            MessageBoxType.Question,
-            MessageBoxDefaultButton.No);
-        if (response != DialogResult.Yes)
-        {
-            return;
-        }
-
-        _statusLabel.Text = "Deleting folder…";
-        var result = await LayoutFoundryUiHost.DeleteFolderAsync(
-            folder.Node.Key.Id,
-            folder.Node.Label);
-        if (!result.Succeeded)
-        {
-            _statusLabel.Text = DiagnosticMessage(result);
-            return;
-        }
-
-        ClearSelection();
-        _statusLabel.Text = $"Deleted '{folder.Node.Label}'.";
-        RefreshOverview();
+        var destination = ResolveCreationDestinationFolderId();
+        var folderName = _overview.Folders.FirstOrDefault(folder => folder.Id == destination)?.Name;
+        _creationFolderMenuItem.Text = destination == _overview.RootFolderId || folderName is null
+            ? "New Folder"
+            : $"New Folder in {folderName}";
+        _creationPageMenuItem.Text = destination == _overview.RootFolderId || folderName is null
+            ? "New Layout"
+            : $"New Layout in {folderName}";
+        _creationMenu.Show(_addFolderButton, new PointF(0, _addFolderButton.Height));
     }
 
     private void OnTreeMouseDown(object? sender, MouseEventArgs eventArgs)
@@ -1450,22 +1523,72 @@ public sealed class LayoutFoundryPanel : Panel
 
     private void OpenBatchProperties()
     {
-        var targets = SelectedItems()
-            .Select(item => new BatchTarget(item.Node.Key, item.Node.Label))
-            .ToArray();
-        var context = LayoutFoundryUiHost.CaptureDocumentContext();
-        if (targets.Length == 0 || context is null)
+        var snapshot = LayoutFoundryUiHost.CaptureSnapshot();
+        if (snapshot is null)
         {
             _statusLabel.Text = "The active Rhino document is unavailable.";
             return;
         }
-
-        var dialog = new BatchPropertiesDialog(
-            context.Value.DocumentRuntimeSerialNumber,
-            context.Value.Revision,
-            targets,
-            LayoutFoundryUiHost.CaptureMutationCapabilities());
+        var targets = BatchTargetResolver.Resolve(snapshot, SelectedItems().Select(item => item.Node.Key));
+        if (targets.Count == 0)
+        {
+            _statusLabel.Text = "The selection does not contain any layouts.";
+            return;
+        }
+        var dialog = new BatchPropertiesDialog(snapshot, targets);
         dialog.ShowModal(this);
+        if (dialog.Succeeded)
+        {
+            _statusLabel.Text = $"Updated {targets.Count} layout{(targets.Count == 1 ? string.Empty : "s")}.";
+            RefreshOverview();
+        }
+    }
+
+    private void OpenCaptureTemplate()
+    {
+        var selected = SelectedSheets().Take(2).ToArray();
+        if (selected.Length != 1 || SelectedItemCount() != 1)
+        {
+            _statusLabel.Text = "Select one layout to capture as a template.";
+            return;
+        }
+        var context = LayoutFoundryUiHost.CaptureTemplateContext(selected[0].PageViewId);
+        if (context is null)
+        {
+            _statusLabel.Text = "The layout is no longer available.";
+            return;
+        }
+        var dialog = new CaptureTemplateDialog(selected[0].PageViewId, selected[0].Name, context);
+        dialog.ShowModal(this);
+        if (dialog.Captured)
+        {
+            _statusLabel.Text = $"Captured '{selected[0].Name}' as a reusable template.";
+            RefreshOverview();
+        }
+    }
+
+    private void OpenCreateLayouts(Guid? preferredFolderId)
+    {
+        var snapshot = LayoutFoundryUiHost.CaptureSnapshot();
+        if (snapshot is null)
+        {
+            _statusLabel.Text = "Open a Rhino document before creating layouts.";
+            return;
+        }
+        var dialog = new BatchCreateLayoutsDialog(snapshot, preferredFolderId);
+        dialog.ShowModal(this);
+        if (dialog.Succeeded)
+        {
+            _statusLabel.Text = $"Created {dialog.CreatedCount} layout{(dialog.CreatedCount == 1 ? string.Empty : "s")}.";
+            RefreshOverview();
+        }
+    }
+
+    private void QueueOpenCreateLayouts(Guid? preferredFolderId)
+    {
+        // Native macOS menus finish dismissing after their click callback. Delay
+        // Rhino display-mode and block enumeration until that tracking loop exits.
+        Application.Instance.AsyncInvoke(() => OpenCreateLayouts(preferredFolderId));
     }
 
     private void ApplyResponsiveLayout()

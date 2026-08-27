@@ -18,25 +18,24 @@ public sealed class DeleteFolderPlannerTests
         var plan = _planner.Plan(Request(), snapshot);
 
         Assert.True(plan.CanApply);
-        Assert.Equal(
-            new DeleteFolderChange(
-                TestSnapshots.ChildFolderId,
-                TestSnapshots.RootFolderId,
-                "Plans"),
-            AssertChange(plan));
+        var change = AssertChange(plan);
+        Assert.Equal(TestSnapshots.ChildFolderId, change.FolderId);
+        Assert.Empty(change.DescendantFolderIds!);
+        Assert.Empty(change.SheetPageViewIds!);
     }
 
     [Fact]
-    public void FolderContainingSheetsIsRejected()
+    public void FolderContainingSheetsProducesConfirmedCascadePlan()
     {
         var plan = _planner.Plan(Request(), TestSnapshots.Create());
 
-        Assert.False(plan.CanApply);
-        Assert.Contains(plan.Diagnostics, item => item.Code == "folder.has_sheets");
+        Assert.True(plan.CanApply);
+        Assert.Contains(TestSnapshots.SheetOneId, AssertChange(plan).SheetPageViewIds!);
+        Assert.Contains(plan.Diagnostics, item => item.Code == "folder.delete_contains_sheets");
     }
 
     [Fact]
-    public void FolderContainingNestedFolderIsRejected()
+    public void FolderContainingNestedFolderIncludesItInCascadePlan()
     {
         var nestedId = Guid.NewGuid();
         var snapshot = TestSnapshots.Create() with
@@ -50,8 +49,8 @@ public sealed class DeleteFolderPlannerTests
 
         var plan = _planner.Plan(Request(), snapshot);
 
-        Assert.False(plan.CanApply);
-        Assert.Contains(plan.Diagnostics, item => item.Code == "folder.has_children");
+        Assert.True(plan.CanApply);
+        Assert.Contains(nestedId, AssertChange(plan).DescendantFolderIds!);
     }
 
     [Fact]

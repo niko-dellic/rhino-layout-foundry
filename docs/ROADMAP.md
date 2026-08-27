@@ -47,7 +47,7 @@ Prove that the hierarchy, synchronization, and preview architecture remain respo
 
 - Implement folder, sheet, and detail view models and the flattened virtualized tree-table.
 - Establish a native Eto visual system with semantic spacing, typography, surfaces, actionable empty states, contextual actions, and platform theme adaptation. Use shadcn-style component discipline as a quality reference while keeping controls native to Rhino.
-- Add expansion, multiselection, keyboard navigation, text filtering, tag filtering, and status filters.
+- Add expansion, multiselection, keyboard navigation, text filtering, and status filters.
 - Keep the persistence root invisible: root-level folders and sheets render as top-level siblings with no synthetic "Unorganized" row.
 - Add document-event routing, targeted snapshot invalidation, refresh coalescing, and active-document cleanup.
 - Implement lazy thumbnail scheduling, cache keys, memory bounds, cancellation, and stale-result rejection.
@@ -79,7 +79,7 @@ Deliver safe, useful batch mutation for existing drawing sets.
 
 ### Work
 
-- Folder creation and nesting now persist with Rhino custom Undo/Redo; add folder rename/removal/reordering, sheet moves, and tags.
+- Folder creation and nesting now persist with Rhino custom Undo/Redo; add folder rename/removal/reordering and sheet moves.
 - Add inline and modal staging models, mixed-value controls, operation summaries, and optimistic conflict detection.
 - Implement atomic batch mutations, before-state restoration, progress, cancellation boundaries, and undo/redo synchronization.
 - Add page naming, order, width, height, paper/orientation handling, and token-based rename preview.
@@ -94,7 +94,7 @@ Deliver safe, useful batch mutation for existing drawing sets.
 
 ### Exit criteria
 
-- Folder and tag organization survives reopen and does not change Rhino's native flat tab model.
+- Folder organization survives reopen and does not change Rhino's native flat tab model.
 - Each inline edit creates one undo action; each batch Apply creates one undo action.
 - Validation prevents known partial failures; injected unexpected failures restore the before-state.
 - Duplicate/empty generated names cannot be applied.
@@ -136,12 +136,14 @@ Complete the first broadly useful beta for managing and publishing existing shee
 
 Generate standardized sheets and details from captured, reusable recipes.
 
+Implementation status: the document-local core is now present. It captures real sheet recipes, accepts mixed template quantities, previews generated names, assigns an optional named view, recreates details and same-document title blocks, persists schema-v2 state, and rolls back failed batches. Shared libraries, dependency import/fingerprints, per-slot assignment UI, layer profiles, and cross-platform live equivalence testing remain.
+
 ### Work
 
 - Define and validate the shared JSON recipe schema and optional `.3dm` asset-library convention.
 - Add document-local and shared template browsers, indexing, diagnostics, and refresh.
 - Capture a selected sheet's page, details, title block, mappings, defaults, and profiles as a template.
-- Add batch creation with mixed templates/sizes, quantities, folder destinations, tags, metadata, and naming preview.
+- Add batch creation with mixed templates/sizes, quantities, folder destinations, metadata, and naming preview.
 - Import or reuse title-block definitions using content fingerprints and explicit conflict choices.
 - Add one-sheet-per-named-view creation.
 - Add multi-detail templates and assignment of named views to detail slots.

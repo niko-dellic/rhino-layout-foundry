@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace RhinoLayoutFoundry.Core.Domain;
 
 public static class WellKnownIds
@@ -11,9 +13,13 @@ public sealed record DocumentState(
     IReadOnlyList<FolderRecord> Folders,
     IReadOnlyDictionary<Guid, SheetRecord> Sheets,
     IReadOnlyList<DisplayRule> DisplayRules,
-    IReadOnlyDictionary<string, string> Metadata)
+    IReadOnlyDictionary<string, string> Metadata,
+    IReadOnlyList<SheetTemplateRecipe>? SheetTemplates = null)
 {
-    public const int CurrentSchemaVersion = 1;
+    public const int CurrentSchemaVersion = 2;
+
+    [JsonIgnore]
+    public IReadOnlyList<SheetTemplateRecipe> Templates => SheetTemplates ?? [];
 
     public static DocumentState Empty()
     {
@@ -25,7 +31,8 @@ public sealed record DocumentState(
             [root],
             new Dictionary<Guid, SheetRecord>(),
             [],
-            new Dictionary<string, string>(StringComparer.Ordinal));
+            new Dictionary<string, string>(StringComparer.Ordinal),
+            []);
     }
 }
 

@@ -52,6 +52,25 @@ public sealed record RenameFolderChange(
 public sealed record DeleteFolderChange(
     Guid FolderId,
     Guid ParentFolderId,
+    string ExpectedName,
+    IReadOnlyList<Guid>? DescendantFolderIds = null,
+    IReadOnlyList<Guid>? SheetPageViewIds = null) : OperationChange;
+
+public sealed record DuplicateFolderChange(
+    Guid SourceFolderId,
+    Guid DestinationParentFolderId,
+    string ExpectedName,
+    string NewName,
+    IReadOnlyDictionary<Guid, Guid> FolderIdMap) : OperationChange;
+
+public sealed record DeleteSheetChange(
+    Guid PageViewId,
+    Guid ExpectedFolderId,
+    string ExpectedName) : OperationChange;
+
+public sealed record DuplicateSheetChange(
+    Guid PageViewId,
+    Guid ExpectedFolderId,
     string ExpectedName) : OperationChange;
 
 public sealed record MoveSheetChange(
@@ -70,6 +89,34 @@ public sealed record CreateSheetChange(
     Guid DestinationFolderId,
     string Name,
     int Order) : OperationChange;
+
+public sealed record CaptureSheetTemplateChange(
+    Guid TemplateId,
+    Guid SourcePageViewId,
+    string Name,
+    string DefaultNamingPattern,
+    Guid? TitleBlockInstanceObjectId) : OperationChange;
+
+public sealed record DeleteSheetTemplateChange(
+    Guid TemplateId,
+    string ExpectedName) : OperationChange;
+
+public sealed record CreateSheetFromTemplateChange(
+    Guid DestinationFolderId,
+    string Name,
+    int Order,
+    SheetTemplateRecipe Template,
+    IReadOnlyDictionary<Guid, string> NamedViewAssignments) : OperationChange;
+
+public sealed record BatchUpdateSheetsChange(
+    IReadOnlyList<Guid> SheetPageViewIds,
+    IReadOnlyDictionary<Guid, string> NewNames,
+    double? PaperWidth,
+    double? PaperHeight,
+    string? PaperUnitSystem,
+    Guid? DetailDisplayModeId,
+    bool ChangeTitleBlock = false,
+    Guid? TitleBlockSourceInstanceObjectId = null) : OperationChange;
 
 public sealed record OperationResult(
     bool Succeeded,

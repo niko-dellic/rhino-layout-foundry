@@ -43,27 +43,26 @@ public sealed class DeleteFolderPlanner : IOperationPlanner<DeleteFolderRequest>
                 $"The folder is now named '{folder.Name}', so it was not deleted."));
         }
 
-        if (snapshot.Folders.Values.Any(candidate => candidate.ParentId == request.FolderId))
-        {
-            diagnostics.Add(Error(
-                "folder.has_children",
-                "Move or delete this folder's nested folders before deleting it."));
-        }
-
-        if (snapshot.Sheets.Values.Any(sheet => sheet.FolderId == request.FolderId))
-        {
-            diagnostics.Add(Error(
-                "folder.has_sheets",
-                "Move this folder's sheets before deleting it."));
-        }
-
         var changes = new List<OperationChange>();
         if (folder is not null && diagnostics.All(item => item.Severity != DiagnosticSeverity.Error))
         {
+            var descendants = Descendants(request.FolderId, snapshot.Folders);
+            var sheets = snapshot.Sheets.Values
+                .Where(sheet => descendants.Contains(sheet.FolderId))
+                .OrderBy(sheet => sheet.Order)
+                .Select(sheet => sheet.PageViewId)
+                .ToArray();
             changes.Add(new DeleteFolderChange(
                 folder.Id,
                 folder.ParentId!.Value,
-                folder.Name));
+                folder.Name,
+                descendants.Where(id => id != folder.Id).ToArray(),
+                sheets));
+            if (sheets.Length > 0)
+                diagnostics.Add(new Diagnostic(
+                    "folder.delete_contains_sheets",
+                    DiagnosticSeverity.Warning,
+                    $"Deleting this folder will permanently delete {sheets.Length} Rhino layout{(sheets.Length == 1 ? string.Empty : "s")} inside it."));
         }
 
         return new OperationPlan(
@@ -77,5 +76,21 @@ public sealed class DeleteFolderPlanner : IOperationPlanner<DeleteFolderRequest>
     private static Diagnostic Error(string code, string message)
     {
         return new Diagnostic(code, DiagnosticSeverity.Error, message);
+    }
+
+    private static HashSet<Guid> Descendants(
+        Guid rootId,
+        IReadOnlyDictionary<Guid, FolderRecord> folders)
+    {
+        var result = new HashSet<Guid> { rootId };
+        var changed = true;
+        while (changed)
+        {
+            changed = false;
+            foreach (var folder in folders.Values.Where(folder =>
+                         folder.ParentId is { } parent && result.Contains(parent)))
+                changed |= result.Add(folder.Id);
+        }
+        return result;
     }
 }

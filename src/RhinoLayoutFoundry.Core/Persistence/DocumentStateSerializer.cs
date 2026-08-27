@@ -24,6 +24,15 @@ public static class DocumentStateSerializer
         var state = JsonSerializer.Deserialize<DocumentState>(payload, Options)
             ?? throw new JsonException("The document state payload was empty.");
 
+        if (state.SchemaVersion == 1)
+        {
+            return state with
+            {
+                SchemaVersion = DocumentState.CurrentSchemaVersion,
+                SheetTemplates = [],
+            };
+        }
+
         if (state.SchemaVersion != DocumentState.CurrentSchemaVersion)
         {
             throw new NotSupportedException(
@@ -33,4 +42,3 @@ public static class DocumentStateSerializer
         return state;
     }
 }
-

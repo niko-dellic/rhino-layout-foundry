@@ -13,6 +13,16 @@ dotnet build RhinoLayoutFoundry.sln
 dotnet test RhinoLayoutFoundry.sln --no-build
 ```
 
+## Template and batch-creation smoke test
+
+1. Open a document with at least one layout containing a detail; optionally place one block instance in page space.
+2. Select that layout in Foundry and click the diamond toolbar action. Name the template, choose the page-space block explicitly if it is the title block, and capture it.
+3. Click the boxed-plus toolbar action. Set quantities on at least two templates with different paper sizes, choose a destination folder, and verify the before/after list contains unique expected names.
+4. Optionally choose one named view, create the layouts, and confirm each generated page has the expected dimensions, detail rectangles/cameras, metadata, and title block.
+5. Save, close, and reopen the 3DM; confirm the template library remains available and the hierarchy is intact, including for a document first saved with schema v1.
+6. Test one missing block-definition case and confirm preflight warns while sheets remain creatable without the block.
+7. Record that Rhino page creation is currently non-undoable; verify an injected failed batch leaves no generated pages rather than relying on Undo.
+
 Confirm that the output directory contains the plug-in and both project dependencies:
 
 ```text
@@ -61,7 +71,7 @@ Alternatively, launch the `Rhino 8 (Windows)` configuration from VS Code.
 6. Confirm `Layout Foundry` is white/primary-color and left aligned, the Rhino filename is not repeated, and `Layouts · n sheets · n details` appears in the hierarchy header.
 7. Create, rename, or delete a layout in Rhino and confirm the panel updates automatically without a Refresh control.
 8. Confirm Add Folder, Open, Manage, and Clear occupy a thin first toolbar row. Confirm the native styled Search control, including its magnifier, and row filter occupy the second row; unavailable actions are visibly disabled.
-9. Exercise All rows, Sheets, Details, Tagged, and Untagged filters, then clear them with `×`.
+9. Exercise All rows, Sheets, and Details filters, then clear them with `×`.
 10. Double-click a sheet and a detail, then repeat with Enter; confirm Rhino activates the corresponding page/detail. Press Escape and confirm selection clears.
 11. Expand and collapse folders and sheets.
 12. Select multiple rows using the platform-standard modifier key.
@@ -73,14 +83,21 @@ Alternatively, launch the `Rhino 8 (Windows)` configuration from VS Code.
 17. Run Rhino Undo and Redo; confirm the nested folder disappears and returns as one named undo action.
 18. Save As, close, and reopen the 3DM; confirm both folders and their nesting survive.
 19. Right-click root whitespace, a folder, a sheet, and a detail. Confirm New Folder and New Layout target the root, selected folder, or containing folder as appropriate. Folder-only Rename/Delete actions must only appear for a folder target. Sheet/detail targets must expose Set Current, New Layout, Duplicate Layout, Delete, Rename, New Detail, Print, and Properties.
+20. Right-click a populated folder and confirm `Print Folder…` is available; confirm it is disabled for an empty folder. Export the populated folder and verify the PDF contains only that folder's layouts, including nested folders, in visible tree order. Right-click hierarchy whitespace, choose `Print All…`, and verify the PDF contains every layout in tree order.
 20. Choose Rename on a sheet, enter a distinct name directly in its hierarchy row, and press Return. Confirm both Foundry and Rhino's native Layouts panel update and Foundry reports that the page rename is not undoable.
 20. Right-click an empty folder, delete it after the confirmation, then Undo/Redo. Confirm each state updates automatically and the Rhino Edit menu names the folder action.
 21. Drag a sheet row onto a folder. Confirm the sheet becomes a child of that folder and one Undo returns it to its original location.
 22. Expand a sheet and drag its detail row onto a different folder. Confirm the containing sheet moves, the detail remains beneath that sheet, and no detail is deleted or detached.
+23. Select two layouts, right-click either selected row, and confirm Duplicate and Delete remain available. Duplicate once and verify both copies retain folder metadata.
+24. Repeat with two folders and then with one folder plus one layout outside it. Confirm the full selection is duplicated once, and cancel the Delete warning after verifying its folder/layout totals.
+25. Select a folder and one of its contained layouts. Duplicate and confirm the contained layout is copied only once as part of the folder subtree.
+26. Open Batch Properties, enable display mode, type a distinctive substring, and confirm the open list contains only matching modes; clear the text and confirm the full list returns.
+27. Add page-space block instances to two source sheets. Confirm the Title block selector distinguishes them by definition, source sheet, and short object ID. Assign one to two other sheets, then replace and remove it; confirm only the designated instances change.
 23. Select multiple sheet/detail rows and drag one selected row onto a folder. Confirm each distinct containing sheet moves once in one Undo action.
 24. Drag a sheet to hierarchy whitespace/root. Confirm it returns to the top level.
 25. Drag a folder onto another folder and confirm its complete subtree moves. Attempt to drag a folder onto itself and onto one of its descendants; confirm both are rejected without changing Rhino.
-26. Right-click a folder and choose New Page. Confirm an inline `New Page` draft appears in that folder and Return creates one native Rhino layout in that folder. Confirm Foundry clearly reports that Rhino does not support Undo for layout creation and that pressing Undo does not partially detach the page from its Foundry folder.
+26. Choose New Layout from the `+` menu, folder menu, and root context menu. Confirm each opens the review-first creation dialog with the correct destination. Set a quantity greater than one and verify the result table shows every proposed name, layout type, paper size, detail count, display mode, and title block before Apply.
+27. Exercise Blank, 1 Detail, both 2 Detail arrangements, 4 Detail Grid, and one captured template. Change A/ANSI paper size, orientation, custom dimensions/units, display mode, title block, and named view. Confirm the preview updates immediately and the created Rhino layouts match it. Confirm Foundry reports that Rhino does not support Undo for layout creation and rolls back the whole batch if one layout fails.
 27. Repeat sheet and folder drags several times, including after panel resize. Confirm Rhino remains responsive, native move feedback appears, and no AppKit exception or crash occurs.
 
 ## 5. Preview, diagnostics, and responsive checks

@@ -9,13 +9,13 @@ public sealed class BatchPropertiesSessionTests
     public void StagingAndInclusionRemainLocalUntilApply()
     {
         var session = CreateSession();
-        session.Stage(BatchPropertyKind.Tags, " Issue A ");
+        session.Stage(BatchPropertyKind.PaperSize, " 420 × 297 mm ");
         session.SetIncluded(
             new OverviewNodeKey(OverviewNodeKind.Sheet, TestSnapshots.SheetTwoId),
             false);
 
         Assert.True(session.IsDirty);
-        Assert.Equal("Issue A", session.StagedValues[BatchPropertyKind.Tags]);
+        Assert.Equal("420 × 297 mm", session.StagedValues[BatchPropertyKind.PaperSize]);
         Assert.Single(session.Targets.Where(target => target.Included));
     }
 
