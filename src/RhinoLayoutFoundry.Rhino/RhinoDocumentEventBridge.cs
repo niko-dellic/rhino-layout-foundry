@@ -1,4 +1,5 @@
 using Rhino;
+using Rhino.Commands;
 using Rhino.Display;
 using Rhino.DocObjects;
 
@@ -28,7 +29,12 @@ internal sealed class RhinoDocumentEventBridge : IDisposable
 
         RhinoView.Create += OnViewChanged;
         RhinoView.Destroy += OnViewChanged;
+        RhinoView.SetActive += OnViewChanged;
         RhinoView.Rename += OnViewChanged;
+        RhinoView.Modified += OnViewChanged;
+        RhinoPageView.PageViewPropertiesChange += OnPageViewPropertiesChanged;
+        Command.EndCommand += OnCommandEnded;
+        Command.UndoRedo += OnUndoRedo;
         RhinoDoc.DocumentPropertiesChanged += OnDocumentChanged;
         RhinoDoc.AddRhinoObject += OnObjectChanged;
         RhinoDoc.DeleteRhinoObject += OnObjectChanged;
@@ -46,7 +52,12 @@ internal sealed class RhinoDocumentEventBridge : IDisposable
 
         RhinoView.Create -= OnViewChanged;
         RhinoView.Destroy -= OnViewChanged;
+        RhinoView.SetActive -= OnViewChanged;
         RhinoView.Rename -= OnViewChanged;
+        RhinoView.Modified -= OnViewChanged;
+        RhinoPageView.PageViewPropertiesChange -= OnPageViewPropertiesChanged;
+        Command.EndCommand -= OnCommandEnded;
+        Command.UndoRedo -= OnUndoRedo;
         RhinoDoc.DocumentPropertiesChanged -= OnDocumentChanged;
         RhinoDoc.AddRhinoObject -= OnObjectChanged;
         RhinoDoc.DeleteRhinoObject -= OnObjectChanged;
@@ -58,6 +69,23 @@ internal sealed class RhinoDocumentEventBridge : IDisposable
     private void OnViewChanged(object? sender, ViewEventArgs eventArgs)
     {
         Track(eventArgs.View.Document);
+    }
+
+    private void OnPageViewPropertiesChanged(
+        object? sender,
+        PageViewPropertiesChangeEventArgs eventArgs)
+    {
+        Track(eventArgs.Document);
+    }
+
+    private void OnCommandEnded(object? sender, CommandEventArgs eventArgs)
+    {
+        Track(eventArgs.Document);
+    }
+
+    private void OnUndoRedo(object? sender, UndoRedoEventArgs eventArgs)
+    {
+        Track(RhinoDoc.ActiveDoc);
     }
 
     private void OnDocumentChanged(object? sender, DocumentEventArgs eventArgs)
@@ -90,4 +118,5 @@ internal sealed class RhinoDocumentEventBridge : IDisposable
             _activeDocumentChanged();
         }
     }
+
 }

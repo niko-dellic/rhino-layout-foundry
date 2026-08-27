@@ -70,4 +70,14 @@ internal sealed class RhinoDocumentOverviewProvider : IDocumentOverviewProvider
             folders,
             sheets);
     }
+
+    public DocumentOverviewIdentity CaptureIdentity()
+    {
+        var document = RhinoDoc.ActiveDoc;
+        return document is null
+            ? new DocumentOverviewIdentity(null, 0)
+            : new DocumentOverviewIdentity(
+                document.RuntimeSerialNumber,
+                document.Views.GetPageViews().Length);
+    }
 }

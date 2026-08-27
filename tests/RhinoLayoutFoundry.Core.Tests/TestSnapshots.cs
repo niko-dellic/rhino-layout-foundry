@@ -1,4 +1,5 @@
 using RhinoLayoutFoundry.Core.Domain;
+using RhinoLayoutFoundry.Core.Overview;
 
 namespace RhinoLayoutFoundry.Core.Tests;
 
@@ -50,5 +51,30 @@ internal static class TestSnapshots
             sheets,
             new HashSet<Guid> { ObjectId },
             new HashSet<Guid> { DisplayModeOneId, DisplayModeTwoId });
+    }
+
+    internal static DocumentOverview Overview(int sheetCount, int detailsPerSheet)
+    {
+        var sheets = Enumerable.Range(0, sheetCount)
+            .Select(sheetIndex => new SheetOverview(
+                Guid.Parse($"20000000-0000-0000-0000-{sheetIndex + 1:000000000000}"),
+                RootFolderId,
+                $"A-{sheetIndex + 1:000}",
+                sheetIndex,
+                [],
+                Enumerable.Range(0, detailsPerSheet)
+                    .Select(detailIndex => new DetailOverview(
+                        Guid.Parse($"30000000-0000-{sheetIndex + 1:0000}-0000-{detailIndex + 1:000000000000}"),
+                        $"Detail {detailIndex + 1}",
+                        detailIndex))
+                    .ToArray()))
+            .ToArray();
+
+        return new DocumentOverview(
+            42,
+            "Test model",
+            RootFolderId,
+            [new FolderOverview(RootFolderId, null, "Unorganized", 0)],
+            sheets);
     }
 }

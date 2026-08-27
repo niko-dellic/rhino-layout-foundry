@@ -26,7 +26,8 @@ public sealed class LayoutFoundryPlugin : PlugIn
         LayoutFoundryUiHost.Configure(
             new RhinoDocumentOverviewProvider(_stateStore),
             snapshotProvider,
-            mutationService);
+            mutationService,
+            new RhinoDocumentOverviewNavigationService());
         Panels.RegisterPanel(this, typeof(LayoutFoundryPanel), "Layout Foundry", null);
         _eventBridge = new RhinoDocumentEventBridge(
             _revisionTracker,

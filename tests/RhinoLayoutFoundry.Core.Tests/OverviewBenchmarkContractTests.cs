@@ -14,7 +14,7 @@ public sealed class OverviewBenchmarkContractTests
         var tree = OverviewTreeBuilder.Build(overview);
 
         stopwatch.Stop();
-        Assert.Equal(1_211, Flatten(tree).Count());
+        Assert.Equal(1_210, Flatten(tree).Count());
         Assert.True(
             stopwatch.Elapsed < TimeSpan.FromSeconds(1),
             $"Hierarchy build took {stopwatch.Elapsed.TotalMilliseconds:F1} ms.");
@@ -29,7 +29,7 @@ public sealed class OverviewBenchmarkContractTests
         var tree = OverviewTreeBuilder.Build(overview, "Sheet 0199");
 
         stopwatch.Stop();
-        Assert.Equal(8, Flatten(tree).Count());
+        Assert.Equal(7, Flatten(tree).Count());
         Assert.True(
             stopwatch.Elapsed < TimeSpan.FromMilliseconds(50),
             $"Hierarchy filter took {stopwatch.Elapsed.TotalMilliseconds:F1} ms.");

@@ -5,18 +5,16 @@ namespace RhinoLayoutFoundry.Core.Tests;
 public sealed class OverviewTreeBuilderTests
 {
     [Fact]
-    public void BuildsFolderSheetDetailHierarchyInConfiguredOrder()
+    public void HidesPersistenceRootAndBuildsTopLevelFoldersAndSheets()
     {
-        var overview = CreateOverview();
+        var roots = OverviewTreeBuilder.Build(CreateOverview());
 
-        var roots = OverviewTreeBuilder.Build(overview);
-
-        Assert.Single(roots);
-        Assert.Equal("Unorganized", roots[0].Label);
-        Assert.Equal("Plans", roots[0].Children[0].Label);
-        Assert.Equal("A-001", roots[0].Children[0].Children[0].Label);
-        Assert.Equal("Main Plan", roots[0].Children[0].Children[0].Children[0].Label);
-        Assert.Equal("A-100", roots[0].Children[1].Label);
+        Assert.Equal(2, roots.Count);
+        Assert.Equal("Plans", roots[0].Label);
+        Assert.Equal("A-001", roots[0].Children[0].Label);
+        Assert.Equal("Main Plan", roots[0].Children[0].Children[0].Label);
+        Assert.Equal("A-100", roots[1].Label);
+        Assert.False(Flatten(roots).Any(node => node.Label == "Unorganized"));
     }
 
     [Fact]
@@ -25,10 +23,17 @@ public sealed class OverviewTreeBuilderTests
         var roots = OverviewTreeBuilder.Build(CreateOverview(), "plans");
 
         Assert.Single(roots);
+        Assert.Equal("Plans", roots[0].Label);
         Assert.Single(roots[0].Children);
-        Assert.Equal("Plans", roots[0].Children[0].Label);
-        Assert.Single(roots[0].Children[0].Children);
-        Assert.Equal(2, roots[0].Children[0].Children[0].Children.Count);
+        Assert.Equal(2, roots[0].Children[0].Children.Count);
+    }
+
+    [Fact]
+    public void HiddenRootNameNeverMatchesSearch()
+    {
+        var roots = OverviewTreeBuilder.Build(CreateOverview(), "unorganized");
+
+        Assert.Empty(roots);
     }
 
     [Fact]
@@ -37,8 +42,7 @@ public sealed class OverviewTreeBuilderTests
         var roots = OverviewTreeBuilder.Build(CreateOverview(), "issue-a");
 
         Assert.Single(roots);
-        Assert.Single(roots[0].Children);
-        var sheet = roots[0].Children[0].Children[0];
+        var sheet = roots[0].Children[0];
         Assert.Equal("A-001", sheet.Label);
         Assert.Equal(2, sheet.Children.Count);
     }
@@ -48,21 +52,70 @@ public sealed class OverviewTreeBuilderTests
     {
         var roots = OverviewTreeBuilder.Build(CreateOverview(), "ceiling");
 
-        var sheet = roots[0].Children[0].Children[0];
+        var sheet = roots[0].Children[0];
         Assert.Single(sheet.Children);
         Assert.Equal("Ceiling Plan", sheet.Children[0].Label);
     }
 
     [Fact]
-    public void SheetWithMissingFolderFallsBackToRoot()
+    public void SheetsFilterHidesDetailRows()
+    {
+        var roots = OverviewTreeBuilder.Build(
+            CreateOverview(),
+            new OverviewTreeFilter(null, OverviewFilterKind.Sheets));
+
+        Assert.Equal(2, Flatten(roots).Count(node => node.Key.Kind == OverviewNodeKind.Sheet));
+        Assert.False(Flatten(roots).Any(node => node.Key.Kind == OverviewNodeKind.Detail));
+    }
+
+    [Fact]
+    public void DetailsFilterExcludesSheetsWithoutDetails()
+    {
+        var roots = OverviewTreeBuilder.Build(
+            CreateOverview(),
+            new OverviewTreeFilter(null, OverviewFilterKind.Details));
+
+        Assert.Single(Flatten(roots).Where(node => node.Key.Kind == OverviewNodeKind.Sheet));
+        Assert.Equal(2, Flatten(roots).Count(node => node.Key.Kind == OverviewNodeKind.Detail));
+    }
+
+    [Fact]
+    public void TagFiltersSeparateTaggedAndUntaggedSheets()
+    {
+        var tagged = OverviewTreeBuilder.Build(
+            CreateOverview(),
+            new OverviewTreeFilter(null, OverviewFilterKind.Tagged));
+        var untagged = OverviewTreeBuilder.Build(
+            CreateOverview(),
+            new OverviewTreeFilter(null, OverviewFilterKind.Untagged));
+
+        Assert.Equal("A-001", Flatten(tagged).Single(node => node.Key.Kind == OverviewNodeKind.Sheet).Label);
+        Assert.Equal("A-100", Flatten(untagged).Single(node => node.Key.Kind == OverviewNodeKind.Sheet).Label);
+    }
+
+    [Fact]
+    public void SheetAndDetailRowsCarryStableNavigationTargets()
+    {
+        var nodes = Flatten(OverviewTreeBuilder.Build(CreateOverview())).ToArray();
+        var sheet = nodes.Single(node => node.Key.Id == TestSnapshots.SheetOneId);
+        var detail = nodes.Single(node => node.Key.Id == TestSnapshots.DetailOneId);
+
+        Assert.Equal(new OverviewNavigationTarget(TestSnapshots.SheetOneId), sheet.NavigationTarget);
+        Assert.Equal(
+            new OverviewNavigationTarget(TestSnapshots.SheetOneId, TestSnapshots.DetailOneId),
+            detail.NavigationTarget);
+    }
+
+    [Fact]
+    public void SheetWithMissingFolderFallsBackToTopLevel()
     {
         var overview = CreateOverview();
         var missingFolderSheet = overview.Sheets[1] with { FolderId = Guid.NewGuid() };
         overview = overview with { Sheets = [overview.Sheets[0], missingFolderSheet] };
 
-        var root = OverviewTreeBuilder.Build(overview)[0];
+        var roots = OverviewTreeBuilder.Build(overview);
 
-        Assert.Contains(root.Children, child => child.Label == "A-100");
+        Assert.Contains(roots, child => child.Label == "A-100");
     }
 
     private static DocumentOverview CreateOverview()
@@ -96,5 +149,17 @@ public sealed class OverviewTreeBuilderTests
                 new FolderOverview(plansId, rootId, "Plans", 0),
             ],
             [firstSheet, secondSheet]);
+    }
+
+    private static IEnumerable<OverviewTreeNode> Flatten(IEnumerable<OverviewTreeNode> nodes)
+    {
+        foreach (var node in nodes)
+        {
+            yield return node;
+            foreach (var child in Flatten(node.Children))
+            {
+                yield return child;
+            }
+        }
     }
 }

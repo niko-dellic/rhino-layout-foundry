@@ -175,6 +175,8 @@ Modeless UI changes use Rhino's [`BeginUndoRecord`](https://developer.rhino3d.co
 
 Inline edits create one plan and one undo record. Modal edits may contain many field changes but still produce one plan and one undo record. Cancellation is honored before mutation and at documented safe boundaries; it never intentionally stops halfway through an atomic operation.
 
+The mutation gate must prove that the specific Rhino subsystem contributes restorable state to that record. A successful `BeginUndoRecord`/`EndUndoRecord` pair is not sufficient by itself. The 2026-08-27 macOS smoke test showed that assigning `RhinoPageView.PageName` applies the rename but does not create a restorable Rhino undo step; the next Undo affected the preceding native layout operation instead. Foundry must not claim undo support for page naming until a supported Rhino mechanism is identified and verified with Undo and Redo on both platforms. Custom undo events are not a workaround for document mutation: McNeel documents them for private plug-in data and warns handlers not to change Rhino document/application settings.
+
 ### 4.4 View-specific presentation
 
 - Per-detail layer visibility uses RhinoCommon's [`Layer.SetPerViewportVisible`](https://developer.rhino3d.com/api/rhinocommon/rhino.docobjects.layer/setperviewportvisible) with the detail viewport ID.
@@ -264,6 +266,10 @@ The cache is size-bounded and uses least-recently-used eviction. It never enters
 ### 8.3 Event invalidation
 
 The event bridge subscribes once per plug-in and routes by document runtime identity. Relevant document, page, layer, object-attribute, instance-definition, undo/redo, save/open/close, and active-document events invalidate only affected indexes and thumbnails. Bursts are coalesced before the UI refreshes.
+
+Tree-row navigation crosses a small read-only adapter boundary. Core rows carry stable page/detail IDs, the Eto shell requests navigation, and the Rhino adapter resolves the target again against the active document before setting `ViewTable.ActiveView` and the active page/detail. Missing or stale targets return visible diagnostics and never mutate Foundry state.
+
+The persisted root folder is intentionally absent from presentation models. It remains the canonical parent for metadata and orphan recovery, while its immediate folders and sheets are returned as top-level sibling rows. The root's stored name is neither displayed nor included in search matching.
 
 ## 9. PDF export
 

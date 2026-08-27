@@ -54,7 +54,7 @@ Document
 - Each sheet has exactly one parent folder.
 - Folders may nest without an application-defined depth limit.
 - Sheets may also have zero or more tags for cross-cutting filters.
-- A default root contains every unorganized sheet.
+- Foundry persists one internal root container, but never renders it as an "Unorganized" folder. Root-level sheets and folders appear together as top-level siblings, like files and folders in one directory.
 - A detail always belongs to its Rhino sheet and cannot be moved independently to another folder.
 - Folder organization is Foundry metadata. Rhino continues to show a flat ordered list of layout tabs.
 

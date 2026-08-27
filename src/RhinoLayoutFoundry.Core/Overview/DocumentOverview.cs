@@ -39,7 +39,13 @@ public sealed record DetailOverview(
     string Name,
     int Order);
 
+public readonly record struct DocumentOverviewIdentity(
+    uint? DocumentRuntimeSerialNumber,
+    int SheetCount);
+
 public interface IDocumentOverviewProvider
 {
     DocumentOverview Capture();
+
+    DocumentOverviewIdentity CaptureIdentity();
 }

@@ -57,7 +57,10 @@ Alternatively, launch the `Rhino 8 (Windows)` configuration from VS Code.
 2. Confirm Rhino prints `Layout Foundry panel opened; Eto instance created.` and that exactly one docked panel opens. An empty document should report no layout sheets.
 3. Create three layouts. Put two detail viewports on one layout and one detail on another.
 4. Run `LayoutFoundry` again if the panel is not already visible.
-5. Confirm the tree reads `Unorganized → Sheet → Detail viewport` and reports the correct totals.
+5. Confirm root-level sheets appear directly in the tree (with no `Unorganized` row), details expand beneath their sheets, and the totals are correct.
+6. Confirm the header does not repeat the Rhino filename and the compact `↻` toolbar action refreshes the hierarchy.
+7. Exercise All rows, Sheets, Details, Tagged, and Untagged filters, then clear them with `×`.
+8. Double-click a sheet and a detail, then repeat with Enter; confirm Rhino activates the corresponding page/detail. Press Escape and confirm selection clears.
 6. Expand and collapse folders and sheets.
 7. Select multiple rows using the platform-standard modifier key.
 8. Filter by a sheet or detail name. Confirm matching rows retain their folder and sheet ancestors.

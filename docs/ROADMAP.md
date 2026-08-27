@@ -46,12 +46,15 @@ Prove that the hierarchy, synchronization, and preview architecture remain respo
 ### Work
 
 - Implement folder, sheet, and detail view models and the flattened virtualized tree-table.
+- Establish a native Eto visual system with semantic spacing, typography, surfaces, actionable empty states, contextual actions, and platform theme adaptation. Use shadcn-style component discipline as a quality reference while keeping controls native to Rhino.
 - Add expansion, multiselection, keyboard navigation, text filtering, tag filtering, and status filters.
+- Keep the persistence root invisible: root-level folders and sheets render as top-level siblings with no synthetic "Unorganized" row.
 - Add document-event routing, targeted snapshot invalidation, refresh coalescing, and active-document cleanup.
 - Implement lazy thumbnail scheduling, cache keys, memory bounds, cancellation, and stale-result rejection.
 - Add diagnostics infrastructure and badges for missing or inconsistent references.
 - Create the 200-sheet/1,000-detail benchmark fixture and performance harness.
 - Add navigation from a tree row to the real Rhino sheet or detail.
+- Keep the panel header document-agnostic because Rhino already displays the active filename; place refresh in the compact search/filter utility bar.
 
 ### Dependencies
 
@@ -64,6 +67,7 @@ Prove that the hierarchy, synchronization, and preview architecture remain respo
 - Scrolling does not wait for thumbnails and thumbnail memory remains bounded.
 - Opening, switching, closing, undoing, and externally editing documents do not leave stale rows or leaked event handlers.
 - Read-only behavior passes on current Rhino 8 Windows and macOS builds.
+- The empty, populated, filtered-empty, single-selection, and multiselection panel states remain usable at narrow, standard, and floating widths in Rhino light and dark themes.
 
 ## 4. Milestone 3 — Existing-sheet management
 

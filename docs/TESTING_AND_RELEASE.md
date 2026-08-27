@@ -24,6 +24,8 @@ No mutation feature is complete until its success, validation failure, unexpecte
 - Resolve folder, sheet, and detail selection scopes with deduplication.
 - Keep tags independent from canonical folder location.
 - Preserve selection by ID when visible rows are filtered or recycled.
+- Verify the internal root is never rendered or searchable, while root-level folders and sheets remain ordered, selectable siblings.
+- Verify all/sheets/details/tagged/untagged filters alone and in combination with text, including visible-result counts and ancestor retention.
 
 ### 2.2 Naming
 
@@ -70,6 +72,7 @@ Integration tests run inside licensed Rhino 8 hosts on Windows and macOS. Tests 
 - Multiple open documents with isolated state, caches, revisions, and event subscriptions.
 - Plugin data read/write with empty, current, old, corrupt, and newer schemas.
 - Undo/redo, externally invoked Rhino commands, and edits while a modal editor is staged.
+- Native Layouts-panel create/delete while Foundry is visible, hidden, moved between containers, unloaded, and reloaded; verify the cheap identity fallback restarts with panel lifecycle and causes exactly one full hierarchy refresh per count change.
 - Plugin unload/update behavior supported by Rhino.
 
 ### 3.2 Sheets and details
@@ -155,6 +158,8 @@ Manual and automated UI coverage includes:
 - observer canvas alternatives to pointer-only drag-and-drop.
 
 Visual regression captures stable panel/dialog states at controlled sizes. Platform-native text rasterization differences use platform-specific baselines. Tests prefer semantic assertions over pixel comparison for dynamic Rhino viewport thumbnails.
+
+The management shell keeps reference captures for no-document, empty-document, populated, no-filter-results, single-sheet selection, and multiselection states. Each state is checked at narrow and standard dock widths in both Rhino themes. Semantic checks cover the filename-free header, compact refresh action, action visibility, type-aware selection summaries, combined search/filter clearing, Enter/double-click navigation, Escape selection clearing, focus order, and keyboard activation; screenshots cover spacing, clipping, contrast, and accidental dead space.
 
 ## 7. Performance and reliability
 
