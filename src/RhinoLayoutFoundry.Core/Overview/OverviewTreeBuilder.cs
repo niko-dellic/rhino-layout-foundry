@@ -37,7 +37,13 @@ public sealed record OverviewTreeNode(
     string SecondaryText,
     IReadOnlyList<OverviewTreeNode> Children,
     SheetOverview? Sheet = null,
-    OverviewNavigationTarget? NavigationTarget = null);
+    OverviewNavigationTarget? NavigationTarget = null,
+    IReadOnlyList<OverviewIssue>? Diagnostics = null)
+{
+    public IReadOnlyList<OverviewIssue> Issues => Diagnostics ?? [];
+
+    public string StatusText => OverviewDiagnostics.Badge(Issues);
+}
 
 public static class OverviewTreeBuilder
 {
@@ -213,7 +219,8 @@ public static class OverviewTreeBuilder
             $"{Pluralize(sheet.DetailCount, "detail")} · {tags}",
             details,
             sheet,
-            new OverviewNavigationTarget(sheet.PageViewId));
+            new OverviewNavigationTarget(sheet.PageViewId),
+            sheet.Issues);
     }
 
     private static bool MatchesKind(SheetOverview sheet, OverviewFilterKind kind)

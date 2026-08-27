@@ -11,7 +11,7 @@ Folder
     └── Detail viewport
 ```
 
-Development is completing Milestone 1 and has begun the first Milestone 2 prototype. The plug-in now includes a planned single-sheet rename with Rhino undo, a folder → sheet → detail tree-table, multiselect, filtering, lifecycle event routing, persistence, CI, and executable domain tests. The first `net8.0` macOS build-and-load check has passed; Windows plus mutation, lifecycle, and persistence verification remain release gates. See the [development status](docs/DEVELOPMENT_STATUS.md) for the current gate and prioritized next work.
+Development is completing Milestone 1 and has a substantial read-only Milestone 2 prototype. The plug-in now includes a folder → sheet → detail tree-table, multiselect, filtering, diagnostics, bounded lazy sheet previews, typed/coalesced invalidation, a staged batch-properties shell, lifecycle event routing, persistence, CI, and executable domain tests. The `net8.0` macOS build, installed plug-in, standard/compact panel states, previews, navigation, and batch dialog have passed live smoke checks. Windows plus mutation, lifecycle, and persistence verification remain release gates. See the [development status](docs/DEVELOPMENT_STATUS.md) for the current gate and prioritized next work.
 
 ## What it will do
 
@@ -47,6 +47,8 @@ Rhino documentation and users often use “page,” “layout,” and “sheet�
 
 RhinoCommon is Rhino's supported [cross-platform .NET plug-in SDK](https://developer.rhino3d.com/guides/rhinocommon/). Rhino 8.20 and later default to .NET 8, which is the project's initial runtime target. Rust is not part of the initial implementation; it would be considered only for an isolated workload after profiling demonstrates a material need.
 
+The current Windows hierarchy uses the full multi-column table with inline previews. The macOS dock uses a resize-safe single text column with detail/tag metadata and diagnostics folded into each row; inline previews remain disabled there until a stable native presentation path replaces the affected Rhino/Eto multi-column image table.
+
 ## Documentation
 
 - [Product specification](docs/PRODUCT_SPEC.md) — user workflows, requirements, scope, performance targets, and acceptance criteria
@@ -54,7 +56,7 @@ RhinoCommon is Rhino's supported [cross-platform .NET plug-in SDK](https://devel
 - [Roadmap](docs/ROADMAP.md) — start-to-finish milestones with dependencies and exit criteria
 - [Testing and release](docs/TESTING_AND_RELEASE.md) — test strategy, compatibility matrix, performance gates, CI, and Yak releases
 - [Development status](docs/DEVELOPMENT_STATUS.md) — completed foundation work, immediate milestones, and prioritized test backlog
-- [Rhino smoke test](docs/RHINO_SMOKE_TEST.md) — build, development-load, rename/undo, hierarchy, and lifecycle verification
+- [Rhino smoke test](docs/RHINO_SMOKE_TEST.md) — build, development-load, hierarchy, previews, batch-shell, and lifecycle verification
 
 ## Planned development prerequisites
 

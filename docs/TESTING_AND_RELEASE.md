@@ -159,7 +159,11 @@ Manual and automated UI coverage includes:
 
 Visual regression captures stable panel/dialog states at controlled sizes. Platform-native text rasterization differences use platform-specific baselines. Tests prefer semantic assertions over pixel comparison for dynamic Rhino viewport thumbnails.
 
-The management shell keeps reference captures for no-document, empty-document, populated, no-filter-results, single-sheet selection, and multiselection states. Each state is checked at narrow and standard dock widths in both Rhino themes. Semantic checks cover the filename-free header, compact refresh action, action visibility, type-aware selection summaries, combined search/filter clearing, Enter/double-click navigation, Escape selection clearing, focus order, and keyboard activation; screenshots cover spacing, clipping, contrast, and accidental dead space.
+The management shell keeps reference captures for no-document, empty-document, populated, no-filter-results, single-sheet selection, and multiselection states. Each state is checked at narrow and standard dock widths in both Rhino themes. Semantic checks cover the filename-free left-aligned header, counts in the Layouts column heading, automatic synchronization, compact tooltip-backed action icons, action states, type-aware selection summaries, combined search/filter clearing, Enter/double-click navigation, Escape selection clearing, focus order, and keyboard activation; screenshots cover spacing, clipping, contrast, and accidental dead space.
+
+The canonical state and viewport matrix is [UI_VISUAL_BASELINES.md](UI_VISUAL_BASELINES.md). Screenshot acceptance follows that contract rather than treating whichever panel size was last captured as the design baseline.
+
+Additional executable contracts cover thumbnail request priority/deduplication, byte/count eviction, targeted invalidation, diagnostic severity badges, responsive thresholds, batch staging/conflicts, and mutation capability gates. Integration coverage must verify 120 ms event-burst merging, active-view changes without hierarchy rebuild, object-change all-preview eviction, cancellation on panel unload/document switch, and unsupported properties never enabling Apply.
 
 ## 7. Performance and reliability
 
@@ -172,6 +176,7 @@ On the documented reference machines and generated benchmark model:
 - Common selection, expansion, and filtering input acknowledged within 50 ms.
 - No unexplained main-thread block over 100 ms.
 - Thumbnail queue and cache memory remain bounded after repeated full-tree scrolling.
+- The macOS text-only hierarchy survives at least ten alternating narrow/wide dock-splitter cycles without sustained CPU, lost selection, or an unresponsive Rhino main thread.
 - Closing a document cancels pending work and returns document-specific cache memory.
 
 ### 7.2 Measurements

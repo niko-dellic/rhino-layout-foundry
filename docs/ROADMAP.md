@@ -54,7 +54,9 @@ Prove that the hierarchy, synchronization, and preview architecture remain respo
 - Add diagnostics infrastructure and badges for missing or inconsistent references.
 - Create the 200-sheet/1,000-detail benchmark fixture and performance harness.
 - Add navigation from a tree row to the real Rhino sheet or detail.
-- Keep the panel header document-agnostic because Rhino already displays the active filename; place refresh in the compact search/filter utility bar.
+- Keep the panel header document-agnostic because Rhino already displays the active filename; rely on event-driven synchronization and the lightweight identity fallback instead of a manual Refresh control.
+
+Implemented prototype status: typed/coalesced invalidations, bounded one-at-a-time page previews, sheet diagnostic badges, responsive compact/standard/wide layouts, direct navigation, and the staged batch-properties shell are now present. Platform visual baselines are specified in [UI_VISUAL_BASELINES.md](UI_VISUAL_BASELINES.md). Targeted layer/block/named-view diagnostics and true visible-row observation remain before Milestone 2 exit.
 
 ### Dependencies
 
@@ -77,7 +79,7 @@ Deliver safe, useful batch mutation for existing drawing sets.
 
 ### Work
 
-- Add folder creation, nesting, ordering, sheet moves, and tags with persistence.
+- Folder creation and nesting now persist with Rhino custom Undo/Redo; add folder rename/removal/reordering, sheet moves, and tags.
 - Add inline and modal staging models, mixed-value controls, operation summaries, and optimistic conflict detection.
 - Implement atomic batch mutations, before-state restoration, progress, cancellation boundaries, and undo/redo synchronization.
 - Add page naming, order, width, height, paper/orientation handling, and token-based rename preview.

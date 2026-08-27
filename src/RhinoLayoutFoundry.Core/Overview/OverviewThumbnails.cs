@@ -1,0 +1,179 @@
+namespace RhinoLayoutFoundry.Core.Overview;
+
+public readonly record struct OverviewThumbnailKey(
+    uint DocumentRuntimeSerialNumber,
+    Guid SheetPageViewId,
+    int Width,
+    int Height,
+    long ContentVersion = 0);
+
+public sealed record OverviewThumbnailRequest(
+    OverviewThumbnailKey Key,
+    int Priority);
+
+public sealed record OverviewThumbnailResult(
+    OverviewThumbnailKey Key,
+    byte[]? PngBytes,
+    string? Error = null)
+{
+    public bool Succeeded => PngBytes is { Length: > 0 } && Error is null;
+}
+
+public interface IDocumentThumbnailProvider
+{
+    Task<OverviewThumbnailResult> CaptureAsync(
+        OverviewThumbnailRequest request,
+        CancellationToken cancellationToken);
+}
+
+public sealed class OverviewThumbnailRequestQueue
+{
+    private readonly Dictionary<OverviewThumbnailKey, OverviewThumbnailRequest> _pending = [];
+    private readonly HashSet<OverviewThumbnailKey> _inFlight = [];
+
+    public int PendingCount => _pending.Count;
+
+    public void Enqueue(OverviewThumbnailRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (_inFlight.Contains(request.Key))
+        {
+            return;
+        }
+
+        if (!_pending.TryGetValue(request.Key, out var existing) ||
+            request.Priority < existing.Priority)
+        {
+            _pending[request.Key] = request;
+        }
+    }
+
+    public OverviewThumbnailRequest? TakeNext()
+    {
+        var next = _pending.Values
+            .OrderBy(request => request.Priority)
+            .ThenBy(request => request.Key.SheetPageViewId)
+            .FirstOrDefault();
+        if (next is null)
+        {
+            return null;
+        }
+
+        _pending.Remove(next.Key);
+        _inFlight.Add(next.Key);
+        return next;
+    }
+
+    public void Complete(OverviewThumbnailKey key)
+    {
+        _inFlight.Remove(key);
+    }
+
+    public void RemoveDocument(uint documentRuntimeSerialNumber)
+    {
+        foreach (var key in _pending.Keys
+                     .Where(key => key.DocumentRuntimeSerialNumber == documentRuntimeSerialNumber)
+                     .ToArray())
+        {
+            _pending.Remove(key);
+        }
+
+        _inFlight.RemoveWhere(key =>
+            key.DocumentRuntimeSerialNumber == documentRuntimeSerialNumber);
+    }
+
+    public void Clear()
+    {
+        _pending.Clear();
+        _inFlight.Clear();
+    }
+}
+
+public sealed class OverviewThumbnailCache
+{
+    private readonly Dictionary<OverviewThumbnailKey, CacheEntry> _entries = [];
+    private readonly int _maximumEntryCount;
+    private readonly long _maximumByteCount;
+    private long _accessSequence;
+
+    public OverviewThumbnailCache(
+        int maximumEntryCount = 96,
+        long maximumByteCount = 24 * 1024 * 1024)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumEntryCount);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumByteCount);
+        _maximumEntryCount = maximumEntryCount;
+        _maximumByteCount = maximumByteCount;
+    }
+
+    public int Count => _entries.Count;
+
+    public long ByteCount { get; private set; }
+
+    public bool TryGet(OverviewThumbnailKey key, out byte[] bytes)
+    {
+        if (_entries.TryGetValue(key, out var entry))
+        {
+            entry.LastAccess = ++_accessSequence;
+            bytes = entry.Bytes;
+            return true;
+        }
+
+        bytes = [];
+        return false;
+    }
+
+    public void Store(OverviewThumbnailKey key, byte[] bytes)
+    {
+        ArgumentNullException.ThrowIfNull(bytes);
+        if (bytes.Length == 0 || bytes.LongLength > _maximumByteCount)
+        {
+            return;
+        }
+
+        if (_entries.Remove(key, out var previous))
+        {
+            ByteCount -= previous.Bytes.LongLength;
+        }
+
+        _entries[key] = new CacheEntry(bytes, ++_accessSequence);
+        ByteCount += bytes.LongLength;
+        Trim();
+    }
+
+    public void Invalidate(uint documentRuntimeSerialNumber, IReadOnlySet<Guid>? sheetIds = null)
+    {
+        foreach (var pair in _entries
+                     .Where(pair =>
+                         pair.Key.DocumentRuntimeSerialNumber == documentRuntimeSerialNumber &&
+                         (sheetIds is null || sheetIds.Count == 0 || sheetIds.Contains(pair.Key.SheetPageViewId)))
+                     .ToArray())
+        {
+            _entries.Remove(pair.Key);
+            ByteCount -= pair.Value.Bytes.LongLength;
+        }
+    }
+
+    public void Clear()
+    {
+        _entries.Clear();
+        ByteCount = 0;
+    }
+
+    private void Trim()
+    {
+        while (_entries.Count > _maximumEntryCount || ByteCount > _maximumByteCount)
+        {
+            var oldest = _entries.MinBy(pair => pair.Value.LastAccess);
+            _entries.Remove(oldest.Key);
+            ByteCount -= oldest.Value.Bytes.LongLength;
+        }
+    }
+
+    private sealed class CacheEntry(byte[] bytes, long lastAccess)
+    {
+        public byte[] Bytes { get; } = bytes;
+
+        public long LastAccess { get; set; } = lastAccess;
+    }
+}

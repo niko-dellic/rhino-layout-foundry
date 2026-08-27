@@ -177,6 +177,8 @@ Inline edits create one plan and one undo record. Modal edits may contain many f
 
 The mutation gate must prove that the specific Rhino subsystem contributes restorable state to that record. A successful `BeginUndoRecord`/`EndUndoRecord` pair is not sufficient by itself. The 2026-08-27 macOS smoke test showed that assigning `RhinoPageView.PageName` applies the rename but does not create a restorable Rhino undo step; the next Undo affected the preceding native layout operation instead. Foundry must not claim undo support for page naming until a supported Rhino mechanism is identified and verified with Undo and Redo on both platforms. Custom undo events are not a workaround for document mutation: McNeel documents them for private plug-in data and warns handlers not to change Rhino document/application settings.
 
+The same gate applies to native page creation. Rhino's Layouts documentation states that most panel changes cannot be undone, and a live `ViewTable.AddPageView` test confirmed that a modeless undo record does not remove the native page. Page creation therefore performs preflight plus immediate rollback on failure, persists the matching Foundry folder record only after Rhino returns a page ID, and exposes an explicit non-undoable warning. It must not register a custom metadata Undo event, because that would detach the still-existing Rhino page from its Foundry folder and present a partial undo as success.
+
 ### 4.4 View-specific presentation
 
 - Per-detail layer visibility uses RhinoCommon's [`Layer.SetPerViewportVisible`](https://developer.rhino3d.com/api/rhinocommon/rhino.docobjects.layer/setperviewportvisible) with the detail viewport ID.
@@ -267,9 +269,21 @@ The cache is size-bounded and uses least-recently-used eviction. It never enters
 
 The event bridge subscribes once per plug-in and routes by document runtime identity. Relevant document, page, layer, object-attribute, instance-definition, undo/redo, save/open/close, and active-document events invalidate only affected indexes and thumbnails. Bursts are coalesced before the UI refreshes.
 
+Invalidations are typed as document identity, hierarchy, metadata, diagnostics, thumbnails, and active-view changes. The Eto panel merges bursts for 120 ms. Active-view-only events do not rebuild the hierarchy; object changes invalidate previews; view/page structure and metadata changes rebuild the affected presentation state. Entity IDs are retained when Rhino exposes a stable target, allowing sheet-specific preview eviction.
+
+Sheet previews use a cooperative UI-idle scheduler. Requests are deduplicated and prioritized, with selected and early/visible rows first. Rhino captures at most one page at a time on its UI thread; encoded PNG results enter an LRU cache limited by both entry count and bytes. Eto bitmaps are disposed on eviction, invalidation, document switch, and panel unload. Text rows remain usable before or during capture.
+
 Tree-row navigation crosses a small read-only adapter boundary. Core rows carry stable page/detail IDs, the Eto shell requests navigation, and the Rhino adapter resolves the target again against the active document before setting `ViewTable.ActiveView` and the active page/detail. Missing or stale targets return visible diagnostics and never mutate Foundry state.
 
 The persisted root folder is intentionally absent from presentation models. It remains the canonical parent for metadata and orphan recovery, while its immediate folders and sheets are returned as top-level sibling rows. The root's stored name is neither displayed nor included in search matching.
+
+## Mutation capability gates
+
+The UI never infers that a setter is undo-safe merely because `RhinoDoc.BeginUndoRecord` returned a serial number. Capabilities are explicit runtime inputs to inline and batch editors. Unsupported or unverified properties keep Apply disabled and expose the reason.
+
+The Rhino 8 page-name spike established that assigning `RhinoPageView.PageName` changes the sheet but does not create restorable page-name state in the document undo record. Rhino's [`BeginUndoRecord`](https://developer.rhino3d.com/api/rhinocommon/rhino.rhinodoc/beginundorecord) only records document changes for which Rhino supplies undo state. McNeel's [Custom Undo sample](https://developer.rhino3d.com/samples/rhinocommon/custom-undo/) explicitly says custom undo handlers must never change Rhino document or application settings, so a callback that reassigns `PageName` is not a supported fallback. Consequently page rename and batch Apply remain capability-gated until McNeel exposes or confirms a supported cross-platform mechanism.
+
+Foundry-only hierarchy metadata uses the supported private-data case for `RhinoDoc.AddCustomUndoEvent`. Folder mutations register the prior immutable `DocumentState`, change only the plug-in state store, and register the inverse state from the callback for Redo. The callback never changes Rhino document or application settings. The initial modeless operation marks the document modified so the plug-in payload is included on save.
 
 ## 9. PDF export
 

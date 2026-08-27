@@ -5,14 +5,18 @@ public sealed record DocumentOverview(
     string DocumentName,
     Guid? RootFolderId,
     IReadOnlyList<FolderOverview> Folders,
-    IReadOnlyList<SheetOverview> Sheets)
+    IReadOnlyList<SheetOverview> Sheets,
+    IReadOnlyList<OverviewIssue>? Diagnostics = null)
 {
     public static DocumentOverview NoDocument { get; } = new(
         null,
         "No active document",
         null,
         [],
+        [],
         []);
+
+    public IReadOnlyList<OverviewIssue> Issues => Diagnostics ?? [];
 }
 
 public sealed record FolderOverview(
@@ -27,9 +31,12 @@ public sealed record SheetOverview(
     string Name,
     int Order,
     IReadOnlyList<string> Tags,
-    IReadOnlyList<DetailOverview> Details)
+    IReadOnlyList<DetailOverview> Details,
+    IReadOnlyList<OverviewIssue>? Diagnostics = null)
 {
     public int DetailCount => Details.Count;
+
+    public IReadOnlyList<OverviewIssue> Issues => Diagnostics ?? [];
 
     public string DisplayLabel => $"{Name}  ·  {DetailCount} detail{(DetailCount == 1 ? string.Empty : "s")}";
 }

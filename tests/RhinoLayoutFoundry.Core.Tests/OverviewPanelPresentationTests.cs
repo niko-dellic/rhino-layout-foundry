@@ -5,6 +5,29 @@ namespace RhinoLayoutFoundry.Core.Tests;
 public sealed class OverviewPanelPresentationTests
 {
     [Fact]
+    public void EmptyUserFolderMakesHierarchyVisibleWithoutSheets()
+    {
+        var rootId = Guid.NewGuid();
+        var folderId = Guid.NewGuid();
+        var overview = new DocumentOverview(
+            42,
+            "Test",
+            rootId,
+            [
+                new FolderOverview(rootId, null, "Root", 0),
+                new FolderOverview(folderId, rootId, "Plans", 0),
+            ],
+            []);
+
+        var presentation = OverviewPanelPresentation.Create(
+            overview,
+            new OverviewTreeFilter(),
+            []);
+
+        Assert.Equal(OverviewContentState.Hierarchy, presentation.ContentState);
+    }
+
+    [Fact]
     public void NoDocumentProvidesActionableEmptyStateWithoutFilenameIdentity()
     {
         var presentation = OverviewPanelPresentation.Create(

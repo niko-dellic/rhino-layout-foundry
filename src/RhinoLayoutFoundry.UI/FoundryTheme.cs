@@ -13,7 +13,7 @@ internal static class FoundryTheme
 
     internal static Color PanelBackground => SystemColors.ControlBackground;
 
-    internal static Color ContentBackground => SystemColors.WindowBackground;
+    internal static Color ContentBackground => PanelBackground;
 
     internal static Color PrimaryText => SystemColors.ControlText;
 
@@ -33,6 +33,13 @@ internal static class FoundryTheme
     {
         button.MinimumSize = new Size(28, 28);
         button.Width = 28;
+        return button;
+    }
+
+    internal static Button ConfigureToolbarButton(Button button)
+    {
+        button.MinimumSize = new Size(24, 24);
+        button.Width = 24;
         return button;
     }
 

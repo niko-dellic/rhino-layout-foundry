@@ -4,7 +4,7 @@ Last updated: 2026-08-27
 
 ## Current gate
 
-Milestone 1 — Foundation has passed its first real macOS load check, while the first read-only Milestone 2 increment is underway. The remaining foundation gates are Windows loading plus in-Rhino rename/Undo, lifecycle, persistence, and package-install verification.
+Milestone 1 — Foundation has passed its macOS build/load checks, while the first read-only Milestone 2 increment is underway. The remaining foundation gates are Windows loading plus lifecycle, persistence, and package-install verification. Mutations remain capability-gated until Rhino exposes or confirms a supported page-property Undo path.
 
 ## Implemented
 
@@ -18,30 +18,30 @@ Milestone 1 — Foundation has passed its first real macOS load check, while the
 - `LayoutFoundry` Rhino command, Eto docked-panel registration, active-document overview, and sheet/detail counts.
 - Pure `RenameSheetPlanner` with document/revision/before-value checks, empty and duplicate validation, frozen changes, and no-op rejection.
 - Rhino UI-thread mutation service with active-document revalidation, one explicit modeless undo record, postcondition verification, and before-name restoration on failure.
-- Folder → sheet → detail `TreeGridView` with a hidden persistence root, filesystem-style top-level folders/sheets, multiselect, text plus all/sheets/details/tagged/untagged filters, stable selection keys across filtering/refresh, refresh coalescing, and single-sheet rename controls.
-- Native Eto management-shell visual system with semantic spacing and typography, a filename-free product header, compact refresh/clear utility actions, actionable no-document/empty/no-results states, visible-result counts, type-aware contextual selection actions, and single-sheet rename disclosure.
+- Folder → sheet → detail `TreeGridView` with a hidden persistence root, filesystem-style top-level folders/sheets, multiselect, text plus all/sheets/details/tagged/untagged filters, stable selection keys across filtering/refresh, refresh coalescing, and capability-aware contextual actions.
+- Native Eto management-shell visual system with semantic spacing and typography, a filename-free left-aligned product header, sheet/detail totals in the hierarchy heading, automatic synchronization with no manual Refresh control, a thin tooltip-backed icon toolbar above the hierarchy, actionable no-document/empty/no-results states, visible-result counts, and type-aware contextual selection actions. Windows retains compact/standard/wide multi-column thumbnail states; macOS uses a resize-safe single text column with inline metadata/diagnostics.
 - Direct sheet/detail navigation through a shared adapter from double-click, Enter, or the contextual Open action; Escape clears selection.
 - Document/view/object/command event routing with per-document revision tracking and cleanup on document close. A panel-lifecycle 500 ms identity check covers native Layouts-panel create/delete operations that do not raise RhinoCommon page events; it reads only active-document serial and sheet count until a change occurs.
+- Typed event invalidations with 120 ms burst coalescing distinguish document identity, hierarchy, metadata, diagnostics, thumbnails, and active-view changes.
+- Cooperative Windows page-preview pipeline with selected/early-row priority, one Rhino UI-thread capture at a time, PNG transport, cancellation, targeted invalidation, and a 96-entry/24 MiB LRU cache. Mac dock preview capture is disabled while using the resize-safe hierarchy path.
+- Sheet diagnostics for missing folder references, duplicate names, and sheets without details, exposed through status badges without hiding unresolved rows.
+- Component-oriented batch-properties dialog with Targets, Properties, and Review tabs, non-destructive inclusion toggles, staged values, conflict-aware pure state, and capability-gated Apply.
+- Undo-safe batch page rename remains capability-gated off: live Rhino testing and current SDK guidance show `PageName` is not restored by a modeless undo record, while custom undo callbacks cannot safely mutate Rhino document state. The page context menu still provides Rhino parity through an explicitly non-undoable in-place rename.
+- Finder-style hierarchy editing: root/nested folder creation and page creation through in-place draft rows, target-aware folder and layout context menus, empty-folder deletion safeguards, folder/sheet/detail-row movement into folders, and root-area drops. Layout menus provide Set Current, New Layout, Duplicate, Delete, Rename, New Detail, Print, and Properties actions. Dragging a detail moves its containing sheet because folders organize sheets while details remain sheet children.
+- Hierarchy moves use Eto's real native drag session with an internal data type, move-only effects, folder-only drop targets, and synchronous extraction of the target before asynchronous mutation. Folder-cycle and stale-document conflicts are still validated by the immutable planners.
+- Folder creation/rename/delete and folder/sheet moves use trimmed/unique names, revision and before-value checks, immutable document-state updates, one Rhino custom Undo/Redo record per action, modified-document signaling, and 3DM persistence. Page creation uses the same validation and atomic rollback but is explicitly non-undoable because Rhino documents that most Layouts-panel changes cannot be undone and native page creation is outside the object Undo system.
 - Initial Yak manifest, VS Code launch/tasks, and Windows/macOS GitHub Actions workflow.
-- Fifty-two passing core contract tests, including hidden-root/filter/navigation presentation coverage and the deterministic 200-sheet/1,000-detail hierarchy and filter budgets. Normal CI uses xUnit; a build-flagged zero-dependency runner supports constrained local environments.
+- One hundred eleven passing core contract tests, including visible-row indexing for collapsed trees, distinct folder/sheet/detail row glyphs, folder/page creation, folder-cycle prevention, folder/sheet move planning, destination resolution, hidden-root/filter/navigation presentation, contextual hierarchy headings, Mac-safe row composition, diagnostics, invalidation, bounded thumbnail caching, responsive breakpoint hysteresis, batch staging, mutation capability gates, and the deterministic 200-sheet/1,000-detail hierarchy/filter budgets. Normal CI uses xUnit; a build-flagged zero-dependency runner supports constrained local environments.
 
-On 2026-08-27, the `net8.0` Core, UI, and Rhino plug-in projects built against stable RhinoCommon 8.34.26223.11001 with .NET SDK 8.0.424 on macOS with zero warnings and zero errors, and all 52 core tests passed through the constrained local harness. The development bundle loaded in Rhino 8.34 (8.34.26223.11002) with the filename-free header, compact utility actions, root-level sheets, filter modes, visible-result counts, and type-aware selection states. The live smoke model verified sheet and detail activation through the navigation adapter, Enter activation, Escape clearing, and selection/ancestor-expansion preservation across the resulting Rhino event refresh. Earlier checks also verified native container unload/reload and automatic update from 8 to 9 sheets after creating a page in Rhino's Layouts panel without pressing Refresh. Windows and the mutation/persistence checks remain open gates.
+On 2026-08-27, the `net8.0` Core, UI, and Rhino plug-in projects built against stable RhinoCommon 8.34.26223.11001 with .NET SDK 8.0.424 on macOS with zero warnings and zero errors, and all 111 core tests passed through the constrained local harness. A stack-sampled native recursion reproduced the Rhino/Eto dock freeze in `NSView` geometry validation when resizing the multi-column image TreeGridView. The installed Mac build now uses one safe hierarchy column, folds detail/tag metadata and diagnostics into row labels, skips preview capture, and prefixes folders and sheets with familiar folder/layout icons while keeping a distinct detail marker. The refined shell has one dark system-background token, a compact action row, and a native styled search/filter row beneath it; the live selection summary sits in the hierarchy header so toolbar geometry remains fixed. A later creation crash was traced from the macOS diagnostic report to Foundry passing `BeginEdit` row 27 to a tree with only 19 visible rows; collapsed detail descendants had incorrectly been counted. The corrected visible-row traversal is regression-tested. Live Rhino checks then created and named a folder in place, created a layout inside it without crashing, moved a page and a folder through real native drag sessions, and duplicated a layout from the page-specific parity menu. The same check confirmed Rhino does not undo native layout creation, so Foundry reports that limitation and avoids a misleading metadata-only Undo record. Windows retains the richer multi-column thumbnail table. Windows and broader lifecycle checks remain live verification gates.
 
 ## Recommended milestones to hit next
 
-### Gate 1A — Verify the first vertical mutation in Rhino
+### Gate 1A — Obtain a supported page-property Undo path
 
-The intended sheet-rename pipeline is implemented. Verify it in licensed Rhino 8 hosts:
+The undo-safe rename experiment is resolved as unsupported with the current public cross-platform RhinoCommon surface. `RhinoPageView.PageName` does not contribute restorable state to a modeless undo record, and McNeel's custom-undo guidance forbids changing Rhino document/application state from custom undo callbacks. Foundry exposes this as an explicit mutation capability for batch workflows; the context-menu parity action is permitted only as a clearly labeled non-undoable inline change.
 
-1. Load the `net8.0` development output on macOS and Windows.
-2. Rename a selected sheet from the Foundry panel.
-3. Confirm the tab and tree update and that one Undo/Redo step round-trips the name.
-4. Exercise empty, duplicate, no-op, closed/switched-document, and external-rename conflicts.
-5. Confirm failure never leaves a changed name or open undo record.
-
-This gate is first because it validates the most consequential architectural boundary: UI → plan → Rhino mutation → undo → event refresh.
-
-The 2026-08-27 macOS smoke test passed rename planning, application, and tree refresh, but failed the undo criterion: the next Rhino Undo affected the preceding native layout operation rather than restoring the page name. `RhinoPageView.PageName` did not contribute restorable state despite a nonzero modeless undo record. Treat this as an architecture/API spike, not a cosmetic bug: verify whether Rhino 8 exposes a supported undo-aware page rename, raise a minimal McNeel reproduction if necessary, and keep all additional mutation editors behind this gate.
+Next, preserve the minimal reproduction on Windows, ask McNeel whether an undo-aware page-property API exists or is planned, and only unlock rename/batch Apply after one Undo/Redo step demonstrably round-trips the entire mutation. The planner, conflict checks, rollback behavior, and dialog shell remain ready behind this gate.
 
 ### Gate 1B — Prove lifecycle and persistence in Rhino 8
 
@@ -54,15 +54,15 @@ The 2026-08-27 macOS smoke test passed rename planning, application, and tree re
 
 ### Gate 2A — Complete the read-only tree at production scale
 
-The folder → sheet → detail tree, filesystem-style root flattening, stable selection model, combined row/text filters, direct Rhino navigation adapter, same-turn refresh coalescing, and deterministic target-scale contract are implemented in source. Next add timed event-burst coalescing, diagnostics badges, narrow-width refinements, and lazy previews before any additional property editors.
+The folder → sheet → detail tree, filesystem-style root flattening, stable selection model, combined row/text filters, direct Rhino navigation adapter, typed/coalesced invalidations, diagnostic badges, responsive widths, bounded lazy previews, live preview/dialog smoke checks, and deterministic target-scale contract are implemented. Next add true viewport-aware row prioritization, expand diagnostic sources, finish Windows screenshot baselines, and run the licensed 200-sheet/1,000-detail fixture in Rhino.
 
 Create the deterministic 200-sheet/1,000-detail fixture at the start of this gate. Do not postpone scale testing until the UI is feature-complete.
 
 Treat the panel's visual and interaction system as part of this gate. Add narrow/standard/floating width behavior, keyboard focus order, theme-aware contrast, consistent component states, and visual baselines for the empty, populated, filtered-empty, and selection states before multiplying the number of editors.
 
-### Gate 2B — Lazy previews and targeted invalidation
+### Gate 2B — Harden lazy previews and targeted invalidation
 
-Add the thumbnail scheduler after the tree is responsive without images. Capture one Rhino preview at a time in idle slices, process images off-thread, prioritize visible rows, reject stale results, and enforce explicit cache limits.
+The bounded one-at-a-time scheduler, cancellation, early/selected-row priority, stale-document rejection, and targeted cache invalidation are implemented. Next add true scroll-viewport awareness, failure placeholders and retry policy, off-thread decode/scale measurements, and document-close leak checks on the production fixture.
 
 ### Gate 3A — First useful batch editor
 

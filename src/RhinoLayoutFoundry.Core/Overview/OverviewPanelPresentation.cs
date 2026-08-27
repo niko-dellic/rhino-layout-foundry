@@ -38,7 +38,7 @@ public sealed record OverviewPanelPresentation(
 
         var contentState = overview.DocumentRuntimeSerialNumber is null
             ? OverviewContentState.NoDocument
-            : sheetCount == 0
+            : sheetCount == 0 && visibleTree.Count == 0
                 ? OverviewContentState.EmptyDocument
                 : filter.IsActive && visibleTree.Count == 0
                     ? OverviewContentState.NoMatches

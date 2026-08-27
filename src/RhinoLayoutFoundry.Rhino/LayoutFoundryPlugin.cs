@@ -2,6 +2,7 @@ using Rhino;
 using Rhino.FileIO;
 using Rhino.PlugIns;
 using Rhino.UI;
+using RhinoLayoutFoundry.Core.Overview;
 using RhinoLayoutFoundry.UI;
 
 namespace RhinoLayoutFoundry.Rhino;
@@ -22,12 +23,17 @@ public sealed class LayoutFoundryPlugin : PlugIn
     protected override LoadReturnCode OnLoad(ref string errorMessage)
     {
         var snapshotProvider = new RhinoDocumentSnapshotProvider(_stateStore, _revisionTracker);
-        var mutationService = new RhinoDocumentMutationService(_revisionTracker);
+        var mutationService = new RhinoDocumentMutationService(
+            _revisionTracker,
+            _stateStore,
+            LayoutFoundryUiHost.NotifyOverviewChanged);
         LayoutFoundryUiHost.Configure(
             new RhinoDocumentOverviewProvider(_stateStore),
             snapshotProvider,
             mutationService,
-            new RhinoDocumentOverviewNavigationService());
+            new RhinoDocumentOverviewNavigationService(_stateStore, _revisionTracker),
+            new RhinoDocumentThumbnailProvider(),
+            new RhinoMutationCapabilityProvider());
         Panels.RegisterPanel(this, typeof(LayoutFoundryPanel), "Layout Foundry", null);
         _eventBridge = new RhinoDocumentEventBridge(
             _revisionTracker,
@@ -71,13 +77,17 @@ public sealed class LayoutFoundryPlugin : PlugIn
 
     private static void OnActiveDocumentChanged(object? sender, DocumentEventArgs eventArgs)
     {
-        LayoutFoundryUiHost.NotifyOverviewChanged();
+        LayoutFoundryUiHost.NotifyOverviewChanged(new OverviewInvalidation(
+            eventArgs.Document?.RuntimeSerialNumber,
+            OverviewInvalidationKind.DocumentIdentity | OverviewInvalidationKind.All));
     }
 
     private void OnCloseDocument(object? sender, DocumentEventArgs eventArgs)
     {
         _stateStore.Remove(eventArgs.Document);
         _revisionTracker.Remove(eventArgs.Document);
-        LayoutFoundryUiHost.NotifyOverviewChanged();
+        LayoutFoundryUiHost.NotifyOverviewChanged(new OverviewInvalidation(
+            eventArgs.Document?.RuntimeSerialNumber,
+            OverviewInvalidationKind.DocumentIdentity | OverviewInvalidationKind.All));
     }
 }

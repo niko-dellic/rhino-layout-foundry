@@ -31,13 +31,21 @@ internal sealed class RhinoDocumentOverviewProvider : IDocumentOverviewProvider
         var folders = state.Folders
             .Select(folder => new FolderOverview(folder.Id, folder.ParentId, folder.Name, folder.Order))
             .ToArray();
-        var sheets = document.Views.GetPageViews()
+        var pageViews = document.Views.GetPageViews()
             .OrderBy(page => page.PageNumber)
+            .ToArray();
+        var duplicateNames = pageViews
+            .GroupBy(page => page.PageName, StringComparer.OrdinalIgnoreCase)
+            .Where(group => group.Count() > 1)
+            .Select(group => group.Key)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var sheets = pageViews
             .Select(page =>
             {
                 var pageId = page.MainViewport.Id;
                 var record = state.Sheets.GetValueOrDefault(pageId);
-                var folderId = record is not null && folderIds.Contains(record.FolderId)
+                var assignedFolderExists = record is null || folderIds.Contains(record.FolderId);
+                var folderId = record is not null && assignedFolderExists
                     ? record.FolderId
                     : state.RootFolderId;
                 var details = page.GetDetailViews()
@@ -49,13 +57,20 @@ internal sealed class RhinoDocumentOverviewProvider : IDocumentOverviewProvider
                         index))
                     .ToArray();
 
-                return new SheetOverview(
+                var sheet = new SheetOverview(
                     pageId,
                     folderId,
                     page.PageName,
                     record?.Order ?? page.PageNumber,
                     record?.Tags ?? [],
                     details);
+                return sheet with
+                {
+                    Diagnostics = OverviewDiagnostics.ForSheet(
+                        sheet,
+                        assignedFolderExists,
+                        duplicateNames.Contains(page.PageName)),
+                };
             })
             .ToArray();
 
