@@ -107,11 +107,21 @@ public static class OverviewTreeBuilder
         [
             new OverviewTreeNode(
                 new OverviewNodeKey(OverviewNodeKind.Folder, rootId),
-                overview.DocumentName,
+                DocumentRootLabel(overview.DocumentName),
                 Pluralize(CountSheets(rootChildren), "sheet"),
                 rootChildren,
                 IsDocumentRoot: true),
         ];
+    }
+
+    private static string DocumentRootLabel(string documentName)
+    {
+        var name = string.IsNullOrWhiteSpace(documentName)
+            ? "Untitled"
+            : documentName.Trim();
+        return name.EndsWith(".3dm", StringComparison.OrdinalIgnoreCase)
+            ? name
+            : $"{name}.3dm";
     }
 
     private static IReadOnlyList<OverviewTreeNode> BuildFolderChildren(

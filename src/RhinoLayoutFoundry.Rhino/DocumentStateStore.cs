@@ -11,6 +11,7 @@ internal sealed class DocumentStateStore
     private const string PayloadKey = "Payload";
     private const string SchemaVersionKey = "SchemaVersion";
     private readonly Dictionary<uint, DocumentState> _states = new();
+    private readonly Dictionary<uint, int> _writeSchemaVersions = new();
 
     public DocumentState Get(RhinoDoc document)
     {
@@ -21,6 +22,7 @@ internal sealed class DocumentStateStore
 
         state = DocumentState.Empty();
         _states[document.RuntimeSerialNumber] = state;
+        _writeSchemaVersions[document.RuntimeSerialNumber] = DocumentState.CurrentSchemaVersion;
         return state;
     }
 
@@ -28,20 +30,34 @@ internal sealed class DocumentStateStore
     {
         ArgumentNullException.ThrowIfNull(document);
         ArgumentNullException.ThrowIfNull(state);
-        _states[document.RuntimeSerialNumber] = state;
+        var serial = document.RuntimeSerialNumber;
+        if (_states.TryGetValue(serial, out var before) &&
+            !ObserverCanvasStateComparer.ContentEquals(before.Canvas, state.Canvas))
+        {
+            _writeSchemaVersions[serial] = DocumentState.CurrentSchemaVersion;
+        }
+
+        _states[serial] = state;
     }
 
     public void Remove(RhinoDoc document)
     {
         _states.Remove(document.RuntimeSerialNumber);
+        _writeSchemaVersions.Remove(document.RuntimeSerialNumber);
     }
 
     public void Write(RhinoDoc document, BinaryArchiveWriter archive)
     {
         var state = Get(document);
+        var writeVersion = _writeSchemaVersions.GetValueOrDefault(
+            document.RuntimeSerialNumber,
+            DocumentState.CurrentSchemaVersion);
+        var persistedState = writeVersion >= 4
+            ? state with { SchemaVersion = DocumentState.CurrentSchemaVersion, ObserverCanvas = state.Canvas }
+            : state with { SchemaVersion = writeVersion, ObserverCanvas = null };
         var envelope = new ArchivableDictionary(1, "RhinoLayoutFoundry.DocumentState");
-        envelope.Set(SchemaVersionKey, state.SchemaVersion);
-        envelope.Set(PayloadKey, DocumentStateSerializer.Serialize(state));
+        envelope.Set(SchemaVersionKey, writeVersion);
+        envelope.Set(PayloadKey, DocumentStateSerializer.Serialize(persistedState));
         archive.WriteDictionary(envelope);
     }
 
@@ -53,6 +69,7 @@ internal sealed class DocumentStateStore
             if (!envelope.ContainsKey(SchemaVersionKey) || !envelope.ContainsKey(PayloadKey))
             {
                 _states[document.RuntimeSerialNumber] = DocumentState.Empty();
+                _writeSchemaVersions[document.RuntimeSerialNumber] = DocumentState.CurrentSchemaVersion;
                 return;
             }
 
@@ -62,15 +79,18 @@ internal sealed class DocumentStateStore
                 string.IsNullOrWhiteSpace(payload))
             {
                 _states[document.RuntimeSerialNumber] = DocumentState.Empty();
+                _writeSchemaVersions[document.RuntimeSerialNumber] = DocumentState.CurrentSchemaVersion;
                 return;
             }
 
             _states[document.RuntimeSerialNumber] = DocumentStateSerializer.Deserialize(payload);
+            _writeSchemaVersions[document.RuntimeSerialNumber] = schemaVersion;
         }
         catch (Exception exception) when (
             exception is InvalidCastException or NotSupportedException or System.Text.Json.JsonException)
         {
             _states[document.RuntimeSerialNumber] = DocumentState.Empty();
+            _writeSchemaVersions[document.RuntimeSerialNumber] = DocumentState.CurrentSchemaVersion;
             RhinoApp.WriteLine(
                 "Rhino Layout Foundry could not read its document metadata and opened with empty metadata: {0}",
                 exception.Message);

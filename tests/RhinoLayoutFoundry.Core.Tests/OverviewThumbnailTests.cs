@@ -5,6 +5,25 @@ namespace RhinoLayoutFoundry.Core.Tests;
 public sealed class OverviewThumbnailTests
 {
     [Fact]
+    public void ObserverResolutionUsesDiscreteBuckets()
+    {
+        Assert.Equal(256, ObserverThumbnailResolution.Select(120));
+        Assert.Equal(512, ObserverThumbnailResolution.Select(300));
+        Assert.Equal(1024, ObserverThumbnailResolution.Select(700));
+        Assert.Equal(2048, ObserverThumbnailResolution.Select(1200));
+    }
+
+    [Fact]
+    public void ObserverResolutionHysteresisAvoidsBoundaryThrashing()
+    {
+        Assert.Equal(512, ObserverThumbnailResolution.Select(380, 512));
+        Assert.Equal(512, ObserverThumbnailResolution.Select(400, 512));
+        Assert.Equal(1024, ObserverThumbnailResolution.Select(430, 512));
+        Assert.Equal(512, ObserverThumbnailResolution.Select(170, 512));
+        Assert.Equal(256, ObserverThumbnailResolution.Select(150, 512));
+    }
+
+    [Fact]
     public void QueueDeduplicatesAndPromotesPriority()
     {
         var queue = new OverviewThumbnailRequestQueue();

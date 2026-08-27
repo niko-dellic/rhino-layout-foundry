@@ -1,6 +1,8 @@
+using Eto.Drawing;
 using RhinoLayoutFoundry.Core.Diagnostics;
 using RhinoLayoutFoundry.Core.Domain;
 using RhinoLayoutFoundry.Core.Operations;
+using RhinoLayoutFoundry.Core.Observer;
 using RhinoLayoutFoundry.Core.Overview;
 
 namespace RhinoLayoutFoundry.UI;
@@ -15,7 +17,10 @@ public static class LayoutFoundryUiHost
     private static IDocumentThumbnailProvider? _thumbnailProvider;
     private static IMutationCapabilityProvider? _capabilityProvider;
     private static ITemplateCaptureContextProvider? _templateCaptureContextProvider;
+    private static IDocumentObserverSnapshotProvider? _observerSnapshotProvider;
+    private static Image? _projectIcon;
     private static EventHandler<OverviewInvalidationEventArgs>? _overviewChanged;
+    private static readonly DocumentSelectionState SharedSelection = new();
 
     public static event EventHandler<OverviewInvalidationEventArgs> OverviewChanged
     {
@@ -31,7 +36,9 @@ public static class LayoutFoundryUiHost
         ILayoutPdfExportService pdfExportService,
         IDocumentThumbnailProvider thumbnailProvider,
         IMutationCapabilityProvider capabilityProvider,
-        ITemplateCaptureContextProvider templateCaptureContextProvider)
+        ITemplateCaptureContextProvider templateCaptureContextProvider,
+        IDocumentObserverSnapshotProvider observerSnapshotProvider,
+        Image? projectIcon = null)
     {
         _overviewProvider = overviewProvider ?? throw new ArgumentNullException(nameof(overviewProvider));
         _snapshotProvider = snapshotProvider ?? throw new ArgumentNullException(nameof(snapshotProvider));
@@ -42,7 +49,27 @@ public static class LayoutFoundryUiHost
         _capabilityProvider = capabilityProvider ?? throw new ArgumentNullException(nameof(capabilityProvider));
         _templateCaptureContextProvider = templateCaptureContextProvider ??
             throw new ArgumentNullException(nameof(templateCaptureContextProvider));
+        _observerSnapshotProvider = observerSnapshotProvider ??
+            throw new ArgumentNullException(nameof(observerSnapshotProvider));
+        _projectIcon?.Dispose();
+        _projectIcon = projectIcon;
         NotifyOverviewChanged(OverviewInvalidation.All);
+    }
+
+    public static Image? ProjectIcon => _projectIcon;
+
+    public static DocumentSelectionState Selection => SharedSelection;
+
+    public static ObserverSnapshot CaptureObserverSnapshot()
+    {
+        try
+        {
+            return _observerSnapshotProvider?.Capture() ?? ObserverSnapshot.NoDocument;
+        }
+        catch (InvalidOperationException)
+        {
+            return ObserverSnapshot.NoDocument;
+        }
     }
 
     public static DocumentOverview CaptureOverview()
@@ -484,6 +511,37 @@ public static class LayoutFoundryUiHost
         }
     }
 
+    public static async Task<OperationResult> MoveHierarchySelectionAsync(
+        Guid destinationFolderId,
+        IReadOnlyList<Guid> folderIds,
+        IReadOnlyList<Guid> sheetIds,
+        CancellationToken cancellationToken = default)
+    {
+        if (_snapshotProvider is null || _mutationService is null)
+            return UnavailableResult("Foundry is not connected to an active Rhino plug-in.");
+        try
+        {
+            var snapshot = _snapshotProvider.Capture();
+            var plan = new MoveHierarchySelectionPlanner().Plan(
+                new MoveHierarchySelectionRequest(
+                    snapshot.DocumentRuntimeSerialNumber,
+                    snapshot.Revision,
+                    destinationFolderId,
+                    folderIds,
+                    sheetIds),
+                snapshot);
+            return await ApplyHierarchyPlanAsync(
+                plan,
+                snapshot.DocumentRuntimeSerialNumber,
+                folderIds.Concat(sheetIds).Append(destinationFolderId).ToHashSet(),
+                cancellationToken);
+        }
+        catch (InvalidOperationException exception)
+        {
+            return UnavailableResult(exception.Message);
+        }
+    }
+
     public static async Task<OperationResult> CreateSheetAsync(
         Guid destinationFolderId,
         string name,
@@ -547,6 +605,81 @@ public static class LayoutFoundryUiHost
         catch (InvalidOperationException exception)
         {
             return UnavailableResult(exception.Message);
+        }
+    }
+
+    public static async Task<OperationResult> SetSheetTemplateRegistrationAsync(
+        Guid sourcePageViewId,
+        bool registered,
+        CancellationToken cancellationToken = default)
+    {
+        if (_snapshotProvider is null || _mutationService is null)
+            return UnavailableResult("Foundry is not connected to an active Rhino plug-in.");
+        try
+        {
+            var snapshot = _snapshotProvider.Capture();
+            var existing = snapshot.Templates
+                .Where(template => template.SourcePageViewId == sourcePageViewId)
+                .ToArray();
+            if (registered == (existing.Length > 0))
+                return new OperationResult(true, []);
+
+            OperationPlan plan;
+            if (registered)
+            {
+                if (!snapshot.Sheets.TryGetValue(sourcePageViewId, out var sheet))
+                    return UnavailableResult("The layout is no longer available.");
+
+                var usedNames = snapshot.Templates.Select(template => template.Name)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var name = UniqueTemplateName(sheet.Name, usedNames);
+                var titleBlocks = snapshot.TitleBlockInstances.Values
+                    .Where(block => block.SourcePageViewId == sourcePageViewId)
+                    .Take(2)
+                    .ToArray();
+                plan = new CaptureSheetTemplatePlanner().Plan(new CaptureSheetTemplateRequest(
+                    snapshot.DocumentRuntimeSerialNumber,
+                    snapshot.Revision,
+                    Guid.NewGuid(),
+                    sourcePageViewId,
+                    name,
+                    "{folder}-{index:00}",
+                    titleBlocks.Length == 1 ? titleBlocks[0].InstanceObjectId : null), snapshot);
+            }
+            else
+            {
+                plan = new OperationPlan(
+                    snapshot.DocumentRuntimeSerialNumber,
+                    snapshot.Revision,
+                    "Unregister layout template",
+                    existing.Select(template => (OperationChange)new DeleteSheetTemplateChange(
+                        template.Id,
+                        template.Name)).ToArray(),
+                    []);
+            }
+
+            var result = plan.CanApply
+                ? await _mutationService.ApplyAsync(plan, cancellationToken)
+                : new OperationResult(false, plan.Diagnostics);
+            if (result.Succeeded)
+                NotifyOverviewChanged(new OverviewInvalidation(snapshot.DocumentRuntimeSerialNumber,
+                    OverviewInvalidationKind.Metadata | OverviewInvalidationKind.Diagnostics));
+            return result;
+        }
+        catch (InvalidOperationException exception)
+        {
+            return UnavailableResult(exception.Message);
+        }
+    }
+
+    private static string UniqueTemplateName(string sheetName, IReadOnlySet<string> usedNames)
+    {
+        var baseName = string.IsNullOrWhiteSpace(sheetName) ? "Layout template" : sheetName.Trim();
+        if (!usedNames.Contains(baseName)) return baseName;
+        for (var suffix = 2; ; suffix++)
+        {
+            var candidate = $"{baseName} {suffix}";
+            if (!usedNames.Contains(candidate)) return candidate;
         }
     }
 
@@ -704,6 +837,110 @@ public static class LayoutFoundryUiHost
         }
     }
 
+    public static async Task<OperationResult> SetObserverCanvasStateAsync(
+        ObserverCanvasState newState,
+        string undoDescription = "Organize observer canvas",
+        CancellationToken cancellationToken = default)
+    {
+        if (_snapshotProvider is null || _mutationService is null)
+            return UnavailableResult("Foundry is not connected to an active Rhino plug-in.");
+        try
+        {
+            var snapshot = _snapshotProvider.Capture();
+            var plan = new SetObserverCanvasStatePlanner().Plan(
+                new SetObserverCanvasStateRequest(
+                    snapshot.DocumentRuntimeSerialNumber,
+                    snapshot.Revision,
+                    newState,
+                    undoDescription),
+                snapshot);
+            var result = plan.CanApply
+                ? await _mutationService.ApplyAsync(plan, cancellationToken)
+                : new OperationResult(false, plan.Diagnostics);
+            if (result.Succeeded)
+            {
+                NotifyOverviewChanged(new OverviewInvalidation(
+                    snapshot.DocumentRuntimeSerialNumber,
+                    OverviewInvalidationKind.Metadata | OverviewInvalidationKind.Diagnostics));
+            }
+
+            return result;
+        }
+        catch (InvalidOperationException exception)
+        {
+            return UnavailableResult(exception.Message);
+        }
+    }
+
+    public static async Task<OperationResult> AssignNamedViewAsync(
+        IReadOnlyList<Guid> detailViewportIds,
+        string namedViewName,
+        CancellationToken cancellationToken = default)
+    {
+        if (_snapshotProvider is null || _mutationService is null)
+            return UnavailableResult("Foundry is not connected to an active Rhino plug-in.");
+        try
+        {
+            var snapshot = _snapshotProvider.Capture();
+            var plan = new AssignNamedViewPlanner().Plan(
+                new AssignNamedViewRequest(
+                    snapshot.DocumentRuntimeSerialNumber,
+                    snapshot.Revision,
+                    detailViewportIds,
+                    namedViewName),
+                snapshot);
+            var result = plan.CanApply
+                ? await _mutationService.ApplyAsync(plan, cancellationToken)
+                : new OperationResult(false, plan.Diagnostics);
+            if (result.Succeeded)
+            {
+                NotifyOverviewChanged(new OverviewInvalidation(
+                    snapshot.DocumentRuntimeSerialNumber,
+                    OverviewInvalidationKind.Metadata |
+                    OverviewInvalidationKind.Diagnostics |
+                    OverviewInvalidationKind.Thumbnails,
+                    detailViewportIds.ToHashSet()));
+            }
+
+            return result;
+        }
+        catch (InvalidOperationException exception)
+        {
+            return UnavailableResult(exception.Message);
+        }
+    }
+
+    public static async Task<OperationResult> ReorderSheetAsync(
+        Guid movingSheetId,
+        Guid? beforeSheetId,
+        CancellationToken cancellationToken = default)
+    {
+        if (_snapshotProvider is null || _mutationService is null)
+            return UnavailableResult("Foundry is not connected to an active Rhino plug-in.");
+        try
+        {
+            var snapshot = _snapshotProvider.Capture();
+            var plan = new ReorderSheetsPlanner().Plan(
+                new ReorderSheetsRequest(
+                    snapshot.DocumentRuntimeSerialNumber,
+                    snapshot.Revision,
+                    movingSheetId,
+                    beforeSheetId),
+                snapshot);
+            return await ApplyHierarchyPlanAsync(
+                plan,
+                snapshot.DocumentRuntimeSerialNumber,
+                beforeSheetId is { } targetId
+                    ? new HashSet<Guid> { movingSheetId, targetId }
+                    : new HashSet<Guid> { movingSheetId },
+                cancellationToken);
+        }
+        catch (InvalidOperationException exception)
+        {
+            return UnavailableResult(exception.Message);
+        }
+    }
+
     public static void Reset()
     {
         _overviewProvider = null;
@@ -714,7 +951,11 @@ public static class LayoutFoundryUiHost
         _thumbnailProvider = null;
         _capabilityProvider = null;
         _templateCaptureContextProvider = null;
+        _observerSnapshotProvider = null;
+        _projectIcon?.Dispose();
+        _projectIcon = null;
         _overviewChanged = null;
+        SharedSelection.Clear(null);
     }
 
     private static OperationResult UnavailableResult(string message)

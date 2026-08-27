@@ -88,8 +88,10 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
             [CreateSheetChange create] => ApplyCreateSheet(document, plan, create),
             [BatchUpdateSheetsChange update] => ApplyBatchUpdate(document, plan, update),
             [UpdateDetailDisplayModesChange updateDetails] => ApplyDetailDisplayModes(document, plan, updateDetails),
+            [AssignNamedViewToDetailsChange assignNamedView] => ApplyNamedView(document, plan, assignNamedView),
             [CaptureSheetTemplateChange capture] => ApplyCaptureTemplate(document, plan, capture),
-            [DeleteSheetTemplateChange delete] => ApplyDeleteTemplate(document, plan, delete),
+            _ when plan.Changes.Count > 0 && plan.Changes.All(change => change is DeleteSheetTemplateChange) =>
+                ApplyDeleteTemplates(document, plan, plan.Changes.Cast<DeleteSheetTemplateChange>().ToArray()),
             _ when plan.Changes.All(change => change is DeleteFolderChange or DeleteSheetChange) =>
                 ApplyDeleteHierarchySelection(document, plan),
             _ when plan.Changes.All(change => change is DuplicateFolderChange or DuplicateSheetChange) =>
@@ -101,10 +103,66 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
         };
     }
 
+    private OperationResult ApplyNamedView(
+        RhinoDoc document,
+        OperationPlan plan,
+        AssignNamedViewToDetailsChange change)
+    {
+        var namedViewIndex = document.NamedViews.FindByName(change.NamedViewName);
+        if (namedViewIndex < 0)
+            return Failure("named_view.missing", "The selected Rhino named view no longer exists.");
+        var details = document.Views.GetPageViews()
+            .SelectMany(page => page.GetDetailViews())
+            .Where(detail => change.DetailViewportIds.Contains(detail.Viewport.Id))
+            .ToArray();
+        if (details.Length != change.DetailViewportIds.Distinct().Count())
+            return Failure("named_view.detail_missing", "A targeted detail viewport no longer exists.");
+
+        var before = details.ToDictionary(
+            detail => detail.Viewport.Id,
+            detail => new ViewportInfo(detail.Viewport));
+        var undoRecord = document.BeginUndoRecord(plan.UndoDescription);
+        if (undoRecord == 0)
+            return Failure("operation.undo_unavailable", "Rhino could not start a dedicated undo record.");
+        try
+        {
+            foreach (var detail in details)
+            {
+                document.NamedViews.Restore(namedViewIndex, detail.Viewport);
+                detail.CommitViewportChanges();
+            }
+
+            _revisionTracker.Bump(document);
+            document.Views.Redraw();
+            return new OperationResult(true, plan.Diagnostics);
+        }
+        catch (Exception exception)
+        {
+            foreach (var detail in details)
+            {
+                if (before.TryGetValue(detail.Viewport.Id, out var viewport))
+                {
+                    detail.Viewport.SetViewProjection(viewport, true);
+                    detail.CommitViewportChanges();
+                }
+            }
+
+            return Failure(
+                "named_view.apply_failed",
+                $"Named-view assignment failed and the original cameras were restored: {exception.Message}");
+        }
+        finally
+        {
+            foreach (var viewport in before.Values) viewport.Dispose();
+            document.EndUndoRecord(undoRecord);
+        }
+    }
+
     private static bool IsDocumentStateChange(OperationChange change)
     {
         return change is AddFolderChange or RenameFolderChange or
-            MoveSheetChange or MoveFolderChange or SetPrintInclusionChange;
+            MoveSheetChange or MoveFolderChange or SetPrintInclusionChange or
+            SetObserverCanvasStateChange or ReorderSheetsChange;
     }
 
     private OperationResult ApplyRename(
@@ -178,7 +236,7 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
         OperationPlan plan)
     {
         var storedBeforeState = _stateStore.Get(document);
-        var beforeState = plan.Changes.Any(change => change is SetPrintInclusionChange)
+        var beforeState = plan.Changes.Any(change => change is SetPrintInclusionChange or ReorderSheetsChange)
             ? WithCurrentPageRecords(document, storedBeforeState)
             : storedBeforeState;
         var folders = beforeState.Folders.ToList();
@@ -205,6 +263,8 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
                     folders,
                     moveFolder),
                 SetPrintInclusionChange print => ApplyPrintInclusion(sheets, print),
+                SetObserverCanvasStateChange canvas => ApplyObserverCanvasState(beforeState, canvas),
+                ReorderSheetsChange reorder => ApplyReorderSheets(sheets, reorder),
                 _ => Failure("operation.unsupported_plan", "The hierarchy operation is not supported."),
             };
             if (failure is not null)
@@ -217,6 +277,10 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
         {
             Folders = folders.ToArray(),
             Sheets = sheets,
+            ObserverCanvas = plan.Changes
+                .OfType<SetObserverCanvasStateChange>()
+                .Select(change => change.NewState)
+                .LastOrDefault() ?? beforeState.Canvas,
         };
         var undoRecord = document.BeginUndoRecord(plan.UndoDescription);
         if (undoRecord == 0)
@@ -255,6 +319,40 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
         {
             document.EndUndoRecord(undoRecord);
         }
+    }
+
+    private static OperationResult? ApplyObserverCanvasState(
+        DocumentState currentState,
+        SetObserverCanvasStateChange change)
+    {
+        return ObserverCanvasStateComparer.ContentEquals(currentState.Canvas, change.ExpectedState)
+            ? null
+            : Failure(
+                "observer.before_value_changed",
+                "The observer board changed before this edit was applied. Refresh and try again.");
+    }
+
+    private static OperationResult? ApplyReorderSheets(
+        IDictionary<Guid, SheetRecord> sheets,
+        ReorderSheetsChange change)
+    {
+        foreach (var expected in change.ExpectedOrders)
+        {
+            if (!sheets.TryGetValue(expected.Key, out var sheet) ||
+                sheet.FolderId != change.FolderId ||
+                sheet.Order != expected.Value)
+            {
+                return Failure("reorder.before_value_changed",
+                    "Layout order changed before this edit was applied.");
+            }
+        }
+
+        foreach (var next in change.NewOrders)
+        {
+            sheets[next.Key] = sheets[next.Key] with { Order = next.Value };
+        }
+
+        return null;
     }
 
     private static OperationResult? ApplyPrintInclusion(
@@ -1153,7 +1251,10 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
                 sourceRecord?.Tags.ToArray() ?? [],
                 sourceRecord?.Metadata.ToDictionary(pair => pair.Key, pair => pair.Value) ??
                     new Dictionary<string, string>(StringComparer.Ordinal),
-                capture.DefaultNamingPattern);
+                capture.DefaultNamingPattern)
+            {
+                SourcePageViewId = capture.SourcePageViewId,
+            };
             var afterState = beforeState with
             {
                 SchemaVersion = DocumentState.CurrentSchemaVersion,
@@ -1167,18 +1268,23 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
         }
     }
 
-    private OperationResult ApplyDeleteTemplate(
+    private OperationResult ApplyDeleteTemplates(
         RhinoDoc document,
         OperationPlan plan,
-        DeleteSheetTemplateChange delete)
+        IReadOnlyList<DeleteSheetTemplateChange> deletes)
     {
         var beforeState = _stateStore.Get(document);
-        var template = beforeState.Templates.FirstOrDefault(item => item.Id == delete.TemplateId);
-        if (template is null || !string.Equals(template.Name, delete.ExpectedName, StringComparison.Ordinal))
-            return Failure("template.before_value_changed", "The template changed before deletion.");
+        foreach (var delete in deletes)
+        {
+            var template = beforeState.Templates.FirstOrDefault(item => item.Id == delete.TemplateId);
+            if (template is null || !string.Equals(template.Name, delete.ExpectedName, StringComparison.Ordinal))
+                return Failure("template.before_value_changed", "A template changed before it could be unregistered.");
+        }
+
+        var deletedIds = deletes.Select(delete => delete.TemplateId).ToHashSet();
         var afterState = beforeState with
         {
-            SheetTemplates = beforeState.Templates.Where(item => item.Id != delete.TemplateId).ToArray(),
+            SheetTemplates = beforeState.Templates.Where(item => !deletedIds.Contains(item.Id)).ToArray(),
         };
         return ApplyStateOnlyChange(document, plan, beforeState, afterState);
     }

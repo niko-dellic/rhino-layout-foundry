@@ -48,7 +48,20 @@ public sealed class DocumentStateSerializerTests
                 null,
                 ["Permit"],
                 new Dictionary<string, string> { ["discipline"] = "A" },
-                "A-{index:000}")]);
+                "A-{index:000}")
+            {
+                SourcePageViewId = sheetId,
+            }],
+            new ObserverCanvasState(
+                1,
+                new Dictionary<Guid, ObserverPointRecord>
+                {
+                    [folder.Id] = new(12.5, -4),
+                },
+                new Dictionary<Guid, ObserverPointRecord>
+                {
+                    [sheetId] = new(240, 80),
+                }));
 
         var restored = DocumentStateSerializer.Deserialize(DocumentStateSerializer.Serialize(state));
 
@@ -63,14 +76,18 @@ public sealed class DocumentStateSerializerTests
         Assert.Equal(rule.DisplayModeId, restored.DisplayRules.Single().DisplayModeId);
         Assert.Equal("Foundry", restored.Metadata["project"]);
         Assert.Equal("A3 plan", restored.Templates.Single().Name);
+        Assert.Equal(sheetId, restored.Templates.Single().SourcePageViewId);
+        Assert.Equal(new ObserverPointRecord(12.5, -4), restored.Canvas.FolderOrigins[folder.Id]);
+        Assert.Equal(new ObserverPointRecord(240, 80), restored.Canvas.SheetPlacements[sheetId]);
     }
 
     [Fact]
     public void VersionOneStateMigratesWithAnEmptyTemplateLibrary()
     {
         var payload = DocumentStateSerializer.Serialize(DocumentState.Empty())
-            .Replace("\"SchemaVersion\":3", "\"SchemaVersion\":1", StringComparison.Ordinal)
-            .Replace(",\"SheetTemplates\":[]", string.Empty, StringComparison.Ordinal);
+            .Replace("\"SchemaVersion\":4", "\"SchemaVersion\":1", StringComparison.Ordinal)
+            .Replace(",\"SheetTemplates\":[]", string.Empty, StringComparison.Ordinal)
+            .Replace(",\"ObserverCanvas\":{\"LayoutAlgorithmVersion\":1,\"FolderOrigins\":{},\"SheetPlacements\":{}}", string.Empty, StringComparison.Ordinal);
 
         var restored = DocumentStateSerializer.Deserialize(payload);
 
@@ -91,7 +108,7 @@ public sealed class DocumentStateSerializerTests
             },
         };
         var payload = DocumentStateSerializer.Serialize(state)
-            .Replace("\"SchemaVersion\":3", "\"SchemaVersion\":2", StringComparison.Ordinal)
+            .Replace("\"SchemaVersion\":4", "\"SchemaVersion\":2", StringComparison.Ordinal)
             .Replace(",\"IncludeInPrintAll\":true", string.Empty, StringComparison.Ordinal);
 
         var restored = DocumentStateSerializer.Deserialize(payload);
@@ -101,10 +118,47 @@ public sealed class DocumentStateSerializerTests
     }
 
     [Fact]
+    public void VersionThreeStateMigratesWithEmptyObserverBoard()
+    {
+        var payload = DocumentStateSerializer.Serialize(DocumentState.Empty() with
+            {
+                ObserverCanvas = new ObserverCanvasState(
+                    1,
+                    new Dictionary<Guid, ObserverPointRecord> { [Guid.NewGuid()] = new(1, 2) },
+                    new Dictionary<Guid, ObserverPointRecord>()),
+            })
+            .Replace("\"SchemaVersion\":4", "\"SchemaVersion\":3", StringComparison.Ordinal)
+            .Replace(",\"ObserverCanvas\":{\"LayoutAlgorithmVersion\":1,\"FolderOrigins\":{", ",\"ObserverCanvas\":{\"LayoutAlgorithmVersion\":1,\"FolderOrigins\":{", StringComparison.Ordinal);
+
+        var restored = DocumentStateSerializer.Deserialize(payload);
+
+        Assert.Equal(DocumentState.CurrentSchemaVersion, restored.SchemaVersion);
+        Assert.Empty(restored.Canvas.FolderOrigins);
+        Assert.Empty(restored.Canvas.SheetPlacements);
+    }
+
+    [Fact]
+    public void ObserverPayloadNeverContainsCameraOrTransientInteractionState()
+    {
+        var payload = DocumentStateSerializer.Serialize(DocumentState.Empty() with
+        {
+            ObserverCanvas = new ObserverCanvasState(
+                1,
+                new Dictionary<Guid, ObserverPointRecord> { [Guid.NewGuid()] = new(4, 8) },
+                new Dictionary<Guid, ObserverPointRecord>()),
+        });
+
+        Assert.False(payload.Contains("Camera", StringComparison.OrdinalIgnoreCase));
+        Assert.False(payload.Contains("Selection", StringComparison.OrdinalIgnoreCase));
+        Assert.False(payload.Contains("Bitmap", StringComparison.OrdinalIgnoreCase));
+        Assert.False(payload.Contains("Hover", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void UnsupportedSchemaIsRejected()
     {
         var payload = DocumentStateSerializer.Serialize(DocumentState.Empty())
-            .Replace("\"SchemaVersion\":3", "\"SchemaVersion\":99", StringComparison.Ordinal);
+            .Replace("\"SchemaVersion\":4", "\"SchemaVersion\":99", StringComparison.Ordinal);
 
         Assert.Throws<NotSupportedException>(() => DocumentStateSerializer.Deserialize(payload));
     }

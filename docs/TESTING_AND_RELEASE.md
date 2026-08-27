@@ -175,6 +175,8 @@ The canonical state and viewport matrix is [UI_VISUAL_BASELINES.md](UI_VISUAL_BA
 
 Additional executable contracts cover thumbnail request priority/deduplication, byte/count eviction, targeted invalidation, diagnostic severity badges, responsive thresholds, batch staging/conflicts, and mutation capability gates. Integration coverage must verify 120 ms event-burst merging, active-view changes without hierarchy rebuild, object-change all-preview eviction, cancellation on panel unload/document switch, and unsupported properties never enabling Apply.
 
+Observer contracts additionally cover schema-3 → schema-4 migration, exclusion of camera/transient selection from persistence, deterministic non-overlapping mixed-paper placement, nested folder group movement, descendant Tidy, camera transform round trips at extreme zoom, normalized hit and paint bounds for selection windows dragged in all four directions, spatial visibility queries, stable shared selection, resolution-bucket hysteresis, named-view validation, and hierarchy-preserving reorder plans. Leftward crossing selection must use Rhino's configured crossing colors and must never change the camera or persisted board placement. Licensed Rhino fixtures must verify that captures visibly contain page-space text, dimensions, leaders, hatches, linework, and title blocks, as well as model-space annotations through details with matching display modes and per-viewport layers.
+
 ## 7. Performance and reliability
 
 ### 7.1 Budgets
@@ -188,6 +190,8 @@ On the documented reference machines and generated benchmark model:
 - Thumbnail queue and cache memory remain bounded after repeated full-tree scrolling.
 - The macOS text-only hierarchy survives at least ten alternating narrow/wide dock-splitter cycles without sustained CPU, lost selection, or an unresponsive Rhino main thread.
 - Closing a document cancels pending work and returns document-specific cache memory.
+- The observer produces an interactive placeholder board within 1 second at 200 sheets/1,000 details; offscreen sheets receive neither decoded bitmaps nor draw calls.
+- Observer pan, zoom, lasso, and selection feedback target 50 ms or less, and only one Rhino page capture runs at a time across all panels.
 
 ### 7.2 Measurements
 
@@ -204,6 +208,7 @@ Performance regressions above the agreed tolerance block release unless the budg
 
 - Repeatedly open/switch/close fixture documents.
 - Scroll and filter the full benchmark while thumbnails render.
+- Traverse, zoom, lasso, resize, tidy, and reopen the complete observer board while recording frame latency, decoded/encoded preview memory, capture concurrency, and memory after close.
 - Reapply, reorder, enable, and disable display rules.
 - Simulate missing shared folders and read-only output paths.
 - Cancel PDF and long mutations at each safe boundary.

@@ -119,7 +119,8 @@ internal sealed class RhinoDocumentSnapshotProvider : IDocumentSnapshotProvider
             document.NamedViews.Select(view => view.Name).ToHashSet(StringComparer.OrdinalIgnoreCase),
             document.InstanceDefinitions.Select(definition => definition.Id).ToHashSet(),
             displayModeNames,
-            titleBlockInstances);
+            titleBlockInstances,
+            state.Canvas);
     }
 
     private static IReadOnlyList<double> TransformValues(global::Rhino.Geometry.Transform transform) =>

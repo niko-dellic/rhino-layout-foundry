@@ -4,7 +4,7 @@
 
 Rhino Layout Foundry is a native Rhino 8 plug-in for organizing, inspecting, and mutating many page layouts at once. Its purpose is to turn repetitive sheet-by-sheet work into previewable, undoable batch operations while preserving normal Rhino documents and workflows.
 
-The primary UI is a dockable, virtualized tree-table containing folders, sheets, and their detail viewports. A later observer canvas presents the same model spatially. Both interfaces use the same commands and mutation services.
+The primary UI is a dockable, virtualized tree-table containing folders, sheets, and their detail viewports. A complementary observer canvas presents the same model spatially. Both interfaces use the same commands and mutation services.
 
 ### 1.1 Goals
 
@@ -89,7 +89,7 @@ Document
 
 Supported properties grow by milestone and include page name, order, paper dimensions, active title block, detail projection, scale, display mode, layer visibility, and named-view assignment. Searchable selectors filter their visible choices as the user types; they do not merely jump to the nearest match.
 
-The hierarchy table is also an immediate property editor. A folder-row paper or display-mode edit applies to all descendant layouts/details, a sheet-row edit applies to that layout, and a detail-row display-mode edit applies only to that viewport. Each sheet stores a Print All inclusion flag; folder rows summarize and toggle all descendant flags, and mixed folder values remain visible. Folder PDF and Print All scopes omit excluded layouts while an explicit single-layout Print command remains available.
+The hierarchy table is also an immediate property editor. A folder-row paper or display-mode edit applies to all descendant layouts/details, a sheet-row edit applies to that layout, and a detail-row display-mode edit applies only to that viewport. Each sheet stores a print-enabled flag; folder rows summarize and toggle all descendant flags, and mixed folder values remain visible. Folder PDF and Print Enabled scopes omit disabled layouts while an explicit single-layout Print command remains available.
 
 Each open 3DM is represented by an explicit, collapsible project-root row above its Foundry folders and Rhino layouts. The root is an aggregate property target but cannot be renamed, dragged, duplicated, or deleted from the hierarchy. Column headers toggle ascending/descending sort within every parent without flattening the tree; name sorting uses natural numeric order. This root boundary is intentionally compatible with a later multi-document overview.
 
@@ -173,22 +173,35 @@ A sheet template is a versioned recipe, not a block instance. It records:
 - default metadata, folder, and naming pattern;
 - optional named-view assignment profiles.
 
-Users create a template by capturing an existing sheet. Templates may be document-local or stored in an optional shared folder. Batch creation accepts a quantity per template, supports mixed sizes, previews names and dependencies, imports required block definitions safely, creates all sheets in one undoable operation, and reports partial incompatibilities before mutation.
+Users register an existing sheet as a template from the hierarchy table's Template column. An empty circle registers and captures the sheet recipe; a filled circle unregisters it. The captured recipe retains its source-sheet identity, paper, details, display settings, and unambiguous title block. Templates may be document-local or stored in an optional shared folder. Batch creation accepts a quantity per template, supports mixed sizes, previews names and dependencies, imports required block definitions safely, creates all sheets in one undoable operation, and reports partial incompatibilities before mutation.
 
 Current implementation note: the first slice supports document-local capture and same-document definition reuse, with atomic rollback of all newly created pages on failure. Shared recipe folders, block-definition import/fingerprint conflict handling, per-slot named-view assignment, and a supported native page-creation Undo path remain follow-up gates.
 
 Creation modes include one sheet per named view and multiple template-based sheets whose detail slots are filled by selected or dragged named views.
 
+### 4.10.1 Thumbnail view
+
+Thumbnail view presents all pages as an ordered image grid without activating them. One custom-drawn, vertically scrollable surface virtualizes cards by visible row and retains decoded images only for visible and overscan pages. A continuous size control changes the target card width and recomputes how many pages fit per row. Cards preserve paper proportions, expose name, detail count, and print state, share stable-ID multiselection with List and Canvas, and navigate to the real Rhino layout on double-click.
+
 ### 4.11 Observer canvas
 
-The observer canvas provides:
+The observer canvas is a view mode inside the main per-document Layout Foundry panel and provides:
 
-- cached sheet cards with progressive thumbnail loading;
+- a single custom-drawn, viewport-virtualized workspace that issues no draw or bitmap-decode work for offscreen sheets;
+- cached sheet cards with 256/512/1024/2048 progressive thumbnail loading;
 - zoom, pan, fit-all, and focus-selection;
+- an expand control that moves the live canvas into a maximized workspace, hides the auxiliary sidebars, and restores it to the main panel without resetting the camera or selection;
+- neutral zinc/gray canvas surfaces in light and dark Rhino themes, with selection borders and directional selection windows sourced from the user's Rhino appearance settings;
+- opt-in Navigator and Named Views drawers that remain closed by default in the embedded Canvas view, preserve their visibility when expanding the Canvas, and provide local collapse controls;
+- Navigator selection synchronized with the board, with double-click, `F`, and the Canvas Focus action framing selected folders, sheets, or details without activating a Rhino layout;
 - hierarchy-aware multiselection;
+- folder frames, deterministic Tidy commands, and persisted manual sheet/folder placement;
 - sheet reordering and moving between folders;
 - navigation to the real Rhino sheet/detail;
-- named-view drag-and-drop into detail slots.
+- named-view drag-and-drop into detail slots, plus a keyboard-accessible assignment action;
+- print-inclusion and diagnostics overlays drawn as vectors above each raster preview.
+
+Rhino page captures are the preview source. They include page-space text, dimensions, leaders, hatches, linework, title blocks, and other annotations, plus model-space geometry and annotations visible through each detail with the current display mode, projection, viewport layer visibility, and detail boundary. Foundry does not clone or serialize that geometry: cards contain disposable raster previews and lightweight vector interaction overlays only.
 
 Its first release does not move, resize, create, or delete page-space geometry directly. Any supported action invokes the same command and mutation pipeline as the tree-table.
 
@@ -239,7 +252,7 @@ Diagnostics have stable codes, severity, affected entity IDs, and a suggested re
 - Document and shared template libraries
 - Batch sheet creation
 - Named-view creation/assignment workflows
-- Observer canvas
+- Observer canvas hardening and cross-platform performance verification
 
 ### v1
 

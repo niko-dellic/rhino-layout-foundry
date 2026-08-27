@@ -36,7 +36,8 @@ public sealed record SheetOverview(
     double PageWidth = 0,
     double PageHeight = 0,
     string PageUnitSystem = "",
-    bool IncludeInPrintAll = true)
+    bool IncludeInPrintAll = true,
+    bool IsTemplate = false)
 {
     public int DetailCount => Details.Count;
 

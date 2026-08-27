@@ -177,6 +177,8 @@ Provide a Figma-like overview for navigation and assignment without building a s
 - Add keyboard and assistive-technology alternatives to drag-and-drop.
 - Stress-test thumbnail prioritization and memory behavior at the benchmark size.
 
+Implementation status: the schema-4 board model, schema-3 lazy migration, camera math, deterministic physical-paper placement, spatial index, integrated List/Thumbnail/Canvas view modes, a virtualized resizable page-thumbnail grid, a maximized Canvas workspace, placeholder virtualization, progressive resolution-aware Rhino previews, lasso/multiselection, shared table selection, navigation, print overlays/actions, persistent sheet/folder movement, Tidy operations, hierarchy moves, reorder handles, and named-view drop/keyboard assignment are implemented. `LayoutFoundryObserver` is retained as a shortcut into the main panel's Canvas mode rather than registering a second Rhino panel. Core contracts and all three projects build cleanly on macOS. Licensed Rhino annotation-fidelity fixtures, the 200-sheet/1,000-detail performance run, resize/memory soak, accessibility review, and Windows parity remain exit gates.
+
 ### Dependencies
 
 - Milestone 2 virtualization/thumbnails

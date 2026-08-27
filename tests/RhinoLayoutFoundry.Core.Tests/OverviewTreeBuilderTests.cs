@@ -11,7 +11,7 @@ public sealed class OverviewTreeBuilderTests
 
         var root = Assert.Single(roots);
         Assert.True(root.IsDocumentRoot);
-        Assert.Equal("Test", root.Label);
+        Assert.Equal("Test.3dm", root.Label);
         Assert.Equal("Plans", root.Children[0].Label);
         Assert.Equal("A-001", root.Children[0].Children[0].Label);
         Assert.Equal("Main Plan", root.Children[0].Children[0].Children[0].Label);
@@ -25,7 +25,7 @@ public sealed class OverviewTreeBuilderTests
         var roots = OverviewTreeBuilder.Build(CreateOverview(), "plans");
 
         Assert.Single(roots);
-        Assert.Equal("Test", roots[0].Label);
+        Assert.Equal("Test.3dm", roots[0].Label);
         Assert.Single(roots[0].Children);
         Assert.Equal("Plans", roots[0].Children[0].Label);
         Assert.Equal(2, roots[0].Children[0].Children[0].Children.Count);
@@ -119,6 +119,16 @@ public sealed class OverviewTreeBuilderTests
         var roots = OverviewTreeBuilder.Build(overview);
 
         Assert.Contains(roots[0].Children, child => child.Label == "A-100");
+    }
+
+    [Fact]
+    public void DocumentRootDoesNotDuplicateExistingThreeDmExtension()
+    {
+        var overview = CreateOverview() with { DocumentName = "Test.3DM" };
+
+        var root = Assert.Single(OverviewTreeBuilder.Build(overview));
+
+        Assert.Equal("Test.3DM", root.Label);
     }
 
     private static DocumentOverview CreateOverview()

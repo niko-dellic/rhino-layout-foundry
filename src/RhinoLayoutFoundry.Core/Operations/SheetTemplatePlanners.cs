@@ -31,6 +31,8 @@ public sealed class CaptureSheetTemplatePlanner : IOperationPlanner<CaptureSheet
             diagnostics.Add(Error("template.name_required", "Enter a template name."));
         if (snapshot.Templates.Any(item => string.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase)))
             diagnostics.Add(Error("template.duplicate_name", $"A template named '{name}' already exists."));
+        if (snapshot.Templates.Any(item => item.SourcePageViewId == request.SourcePageViewId))
+            diagnostics.Add(Error("template.source_registered", "The source layout is already registered as a template."));
         if (pattern.Length == 0)
             diagnostics.Add(Error("template.pattern_required", "Enter a default naming pattern."));
 

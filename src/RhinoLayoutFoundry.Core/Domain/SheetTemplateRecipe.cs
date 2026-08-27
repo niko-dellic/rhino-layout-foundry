@@ -12,6 +12,8 @@ public sealed record SheetTemplateRecipe(
     string DefaultNamingPattern)
 {
     public const int CurrentRecipeVersion = 1;
+
+    public Guid? SourcePageViewId { get; init; }
 }
 
 public sealed record PaperRecipe(

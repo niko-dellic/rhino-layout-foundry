@@ -39,6 +39,10 @@ internal sealed class RhinoDocumentOverviewProvider : IDocumentOverviewProvider
             .Where(group => group.Count() > 1)
             .Select(group => group.Key)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var templateSourceIds = state.Templates
+            .Where(template => template.SourcePageViewId is not null)
+            .Select(template => template.SourcePageViewId!.Value)
+            .ToHashSet();
         var sheets = pageViews
             .Select(page =>
             {
@@ -69,7 +73,8 @@ internal sealed class RhinoDocumentOverviewProvider : IDocumentOverviewProvider
                     PageWidth: page.PageWidth,
                     PageHeight: page.PageHeight,
                     PageUnitSystem: document.PageUnitSystem.ToString(),
-                    IncludeInPrintAll: record?.IncludeInPrintAll ?? true);
+                    IncludeInPrintAll: record?.IncludeInPrintAll ?? true,
+                    IsTemplate: templateSourceIds.Contains(pageId));
                 return sheet with
                 {
                     Diagnostics = OverviewDiagnostics.ForSheet(

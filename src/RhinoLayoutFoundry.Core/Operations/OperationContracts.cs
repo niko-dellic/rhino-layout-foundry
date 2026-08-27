@@ -126,6 +126,19 @@ public sealed record SetPrintInclusionChange(
     IReadOnlyDictionary<Guid, bool> ExpectedValues,
     bool IncludeInPrintAll) : OperationChange;
 
+public sealed record SetObserverCanvasStateChange(
+    ObserverCanvasState ExpectedState,
+    ObserverCanvasState NewState) : OperationChange;
+
+public sealed record AssignNamedViewToDetailsChange(
+    IReadOnlyList<Guid> DetailViewportIds,
+    string NamedViewName) : OperationChange;
+
+public sealed record ReorderSheetsChange(
+    Guid FolderId,
+    IReadOnlyDictionary<Guid, int> ExpectedOrders,
+    IReadOnlyDictionary<Guid, int> NewOrders) : OperationChange;
+
 public sealed record OperationResult(
     bool Succeeded,
     IReadOnlyList<Diagnostic> Diagnostics);

@@ -2,6 +2,7 @@ using Rhino;
 using Rhino.Commands;
 using Rhino.Display;
 using Rhino.DocObjects;
+using Rhino.DocObjects.Tables;
 using RhinoLayoutFoundry.Core.Overview;
 
 namespace RhinoLayoutFoundry.Rhino;
@@ -37,9 +38,15 @@ internal sealed class RhinoDocumentEventBridge : IDisposable
         Command.UndoRedo += OnUndoRedo;
         RhinoDoc.DocumentPropertiesChanged += OnDocumentChanged;
         RhinoDoc.AddRhinoObject += OnObjectChanged;
+        RhinoDoc.ReplaceRhinoObject += OnObjectReplaced;
         RhinoDoc.DeleteRhinoObject += OnObjectChanged;
         RhinoDoc.UndeleteRhinoObject += OnObjectChanged;
         RhinoDoc.ModifyObjectAttributes += OnObjectAttributesChanged;
+        RhinoDoc.LayerTableEvent += OnLayerChanged;
+        RhinoDoc.InstanceDefinitionTableEvent += OnInstanceDefinitionChanged;
+        RhinoDoc.DimensionStyleTableEvent += OnDimensionStyleChanged;
+        RhinoDoc.HatchPatternTableEvent += OnHatchPatternChanged;
+        RhinoDoc.LinetypeTableEvent += OnLinetypeChanged;
         _isStarted = true;
     }
 
@@ -59,9 +66,15 @@ internal sealed class RhinoDocumentEventBridge : IDisposable
         Command.UndoRedo -= OnUndoRedo;
         RhinoDoc.DocumentPropertiesChanged -= OnDocumentChanged;
         RhinoDoc.AddRhinoObject -= OnObjectChanged;
+        RhinoDoc.ReplaceRhinoObject -= OnObjectReplaced;
         RhinoDoc.DeleteRhinoObject -= OnObjectChanged;
         RhinoDoc.UndeleteRhinoObject -= OnObjectChanged;
         RhinoDoc.ModifyObjectAttributes -= OnObjectAttributesChanged;
+        RhinoDoc.LayerTableEvent -= OnLayerChanged;
+        RhinoDoc.InstanceDefinitionTableEvent -= OnInstanceDefinitionChanged;
+        RhinoDoc.DimensionStyleTableEvent -= OnDimensionStyleChanged;
+        RhinoDoc.HatchPatternTableEvent -= OnHatchPatternChanged;
+        RhinoDoc.LinetypeTableEvent -= OnLinetypeChanged;
         _isStarted = false;
     }
 
@@ -129,6 +142,30 @@ internal sealed class RhinoDocumentEventBridge : IDisposable
             eventArgs.Document,
             OverviewInvalidationKind.Thumbnails);
     }
+
+    private void OnObjectReplaced(object? sender, RhinoReplaceObjectEventArgs eventArgs) =>
+        Track(eventArgs.Document, OverviewInvalidationKind.Thumbnails);
+
+    private void OnLayerChanged(object? sender, LayerTableEventArgs eventArgs) =>
+        Track(eventArgs.Document,
+            OverviewInvalidationKind.Metadata | OverviewInvalidationKind.Thumbnails);
+
+    private void OnInstanceDefinitionChanged(
+        object? sender,
+        InstanceDefinitionTableEventArgs eventArgs) =>
+        Track(eventArgs.Document,
+            OverviewInvalidationKind.Metadata |
+            OverviewInvalidationKind.Diagnostics |
+            OverviewInvalidationKind.Thumbnails);
+
+    private void OnDimensionStyleChanged(object? sender, DimStyleTableEventArgs eventArgs) =>
+        Track(eventArgs.Document, OverviewInvalidationKind.Thumbnails);
+
+    private void OnHatchPatternChanged(object? sender, HatchPatternTableEventArgs eventArgs) =>
+        Track(eventArgs.Document, OverviewInvalidationKind.Thumbnails);
+
+    private void OnLinetypeChanged(object? sender, LinetypeTableEventArgs eventArgs) =>
+        Track(eventArgs.Document, OverviewInvalidationKind.Thumbnails);
 
     private void Track(
         RhinoDoc? document,

@@ -71,4 +71,24 @@ public sealed class OverviewTreeSorterTests
 
         Assert.Equal(["Page 1", "Page 2", "Page 10"], sorted[0].Children.Select(node => node.Label));
     }
+
+    [Fact]
+    public void TemplateSortPlacesRegisteredLayoutsFirst()
+    {
+        var overview = TestSnapshots.Overview(sheetCount: 2, detailsPerSheet: 1);
+        overview = overview with
+        {
+            Sheets =
+            [
+                overview.Sheets[0],
+                overview.Sheets[1] with { IsTemplate = true },
+            ],
+        };
+
+        var sorted = OverviewTreeSorter.Sort(OverviewTreeBuilder.Build(overview),
+            OverviewSortProperty.Template, OverviewSortDirection.Ascending);
+
+        Assert.True(sorted[0].Children[0].Sheet!.IsTemplate);
+        Assert.False(sorted[0].Children[1].Sheet!.IsTemplate);
+    }
 }

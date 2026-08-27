@@ -13,7 +13,8 @@ public sealed record DocumentSnapshot(
     IReadOnlySet<string>? NamedViewNames = null,
     IReadOnlySet<Guid>? InstanceDefinitionIds = null,
     IReadOnlyDictionary<Guid, string>? DisplayModeNames = null,
-    IReadOnlyDictionary<Guid, TitleBlockInstanceSnapshot>? TitleBlockInstanceChoices = null)
+    IReadOnlyDictionary<Guid, TitleBlockInstanceSnapshot>? TitleBlockInstanceChoices = null,
+    ObserverCanvasState? ObserverCanvas = null)
 {
     public IReadOnlyList<SheetTemplateRecipe> Templates => SheetTemplates ?? [];
     public IReadOnlyDictionary<string, string> Metadata =>
@@ -25,6 +26,7 @@ public sealed record DocumentSnapshot(
         DisplayModeNames ?? new Dictionary<Guid, string>();
     public IReadOnlyDictionary<Guid, TitleBlockInstanceSnapshot> TitleBlockInstances =>
         TitleBlockInstanceChoices ?? new Dictionary<Guid, TitleBlockInstanceSnapshot>();
+    public ObserverCanvasState Canvas => ObserverCanvas ?? ObserverCanvasState.Empty;
 }
 
 public sealed record SheetSnapshot(

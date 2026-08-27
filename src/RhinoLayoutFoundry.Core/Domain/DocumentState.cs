@@ -14,12 +14,16 @@ public sealed record DocumentState(
     IReadOnlyDictionary<Guid, SheetRecord> Sheets,
     IReadOnlyList<DisplayRule> DisplayRules,
     IReadOnlyDictionary<string, string> Metadata,
-    IReadOnlyList<SheetTemplateRecipe>? SheetTemplates = null)
+    IReadOnlyList<SheetTemplateRecipe>? SheetTemplates = null,
+    ObserverCanvasState? ObserverCanvas = null)
 {
-    public const int CurrentSchemaVersion = 3;
+    public const int CurrentSchemaVersion = 4;
 
     [JsonIgnore]
     public IReadOnlyList<SheetTemplateRecipe> Templates => SheetTemplates ?? [];
+
+    [JsonIgnore]
+    public ObserverCanvasState Canvas => ObserverCanvas ?? ObserverCanvasState.Empty;
 
     public static DocumentState Empty()
     {
@@ -32,8 +36,46 @@ public sealed record DocumentState(
             new Dictionary<Guid, SheetRecord>(),
             [],
             new Dictionary<string, string>(StringComparer.Ordinal),
-            []);
+            [],
+            ObserverCanvasState.Empty);
     }
+}
+
+/// <summary>
+/// Document-shared observer-board organization. Camera, selection, hover, and
+/// rendered previews are deliberately session-only and never enter this state.
+/// </summary>
+public sealed record ObserverCanvasState(
+    int LayoutAlgorithmVersion,
+    IReadOnlyDictionary<Guid, ObserverPointRecord> FolderOrigins,
+    IReadOnlyDictionary<Guid, ObserverPointRecord> SheetPlacements)
+{
+    public const int CurrentLayoutAlgorithmVersion = 1;
+
+    public static ObserverCanvasState Empty { get; } = new(
+        CurrentLayoutAlgorithmVersion,
+        new Dictionary<Guid, ObserverPointRecord>(),
+        new Dictionary<Guid, ObserverPointRecord>());
+}
+
+public readonly record struct ObserverPointRecord(double X, double Y);
+
+public static class ObserverCanvasStateComparer
+{
+    public static bool ContentEquals(ObserverCanvasState? first, ObserverCanvasState? second)
+    {
+        first ??= ObserverCanvasState.Empty;
+        second ??= ObserverCanvasState.Empty;
+        return first.LayoutAlgorithmVersion == second.LayoutAlgorithmVersion &&
+               DictionaryEquals(first.FolderOrigins, second.FolderOrigins) &&
+               DictionaryEquals(first.SheetPlacements, second.SheetPlacements);
+    }
+
+    private static bool DictionaryEquals(
+        IReadOnlyDictionary<Guid, ObserverPointRecord> first,
+        IReadOnlyDictionary<Guid, ObserverPointRecord> second) =>
+        first.Count == second.Count &&
+        first.All(pair => second.TryGetValue(pair.Key, out var value) && value == pair.Value);
 }
 
 public sealed record FolderRecord(

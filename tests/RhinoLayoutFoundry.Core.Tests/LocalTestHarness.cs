@@ -52,6 +52,14 @@ namespace Xunit
             }
         }
 
+        public static void Equal<T>(IEnumerable<T> expected, IEnumerable<T> actual)
+        {
+            if (!expected.SequenceEqual(actual))
+            {
+                throw new InvalidOperationException("The sequences are not equal.");
+            }
+        }
+
         public static void Empty(IEnumerable values)
         {
             var enumerator = values.GetEnumerator();
@@ -74,6 +82,76 @@ namespace Xunit
             if (count != 1)
             {
                 throw new InvalidOperationException($"Expected one item but found {count}.");
+            }
+        }
+
+        public static T Single<T>(IEnumerable<T> values)
+        {
+            var items = values.Take(2).ToArray();
+            if (items.Length != 1)
+            {
+                throw new InvalidOperationException($"Expected one item but found {items.Length}.");
+            }
+
+            return items[0];
+        }
+
+        public static T IsType<T>(object? value)
+        {
+            if (value is T typed)
+            {
+                return typed;
+            }
+
+            throw new InvalidOperationException(
+                $"Expected type '{typeof(T).Name}' but found '{value?.GetType().Name ?? "null"}'.");
+        }
+
+        public static void All<T>(IEnumerable<T> values, Action<T> assertion)
+        {
+            foreach (var value in values)
+            {
+                assertion(value);
+            }
+        }
+
+        public static void NotNull([System.Diagnostics.CodeAnalysis.NotNull] object? value)
+        {
+            if (value is null)
+            {
+                throw new InvalidOperationException("Expected a non-null value.");
+            }
+        }
+
+        public static void Null(object? value)
+        {
+            if (value is not null)
+            {
+                throw new InvalidOperationException("Expected null.");
+            }
+        }
+
+        public static void StartsWith(string expected, string actual)
+        {
+            if (!actual.StartsWith(expected, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException($"Expected '{actual}' to start with '{expected}'.");
+            }
+        }
+
+        public static void DoesNotContain<T>(T expected, IEnumerable<T> values)
+        {
+            if (values.Contains(expected))
+            {
+                throw new InvalidOperationException($"Expected the sequence not to contain '{expected}'.");
+            }
+        }
+
+        public static void DoesNotContain<T>(IEnumerable<T> values, Func<T, bool> predicate)
+        {
+            if (values.Any(predicate))
+            {
+                throw new InvalidOperationException("A sequence item unexpectedly matched the predicate.");
             }
         }
 

@@ -11,7 +11,7 @@ public sealed record OverviewRowPresentation(
         bool useMacSafeSingleColumn)
     {
         ArgumentNullException.ThrowIfNull(node);
-        var label = $"{Glyph(node.Key.Kind)}  {node.Label}";
+        var label = $"{Glyph(node)}  {node.Label}";
 
         if (!useMacSafeSingleColumn)
         {
@@ -36,14 +36,22 @@ public sealed record OverviewRowPresentation(
             ShowThumbnail: false);
     }
 
-    private static string Glyph(OverviewNodeKind kind)
+    private static string Glyph(OverviewTreeNode node)
     {
-        return kind switch
+        if (node.IsDocumentRoot)
+        {
+            return "3DM";
+        }
+
+        return node.Key.Kind switch
         {
             OverviewNodeKind.Folder => "📁",
             OverviewNodeKind.Sheet => "▣",
             OverviewNodeKind.Detail => "⌗",
-            _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
+            _ => throw new ArgumentOutOfRangeException(
+                nameof(node),
+                node.Key.Kind,
+                null),
         };
     }
 }

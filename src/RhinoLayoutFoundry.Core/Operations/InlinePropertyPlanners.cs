@@ -80,7 +80,7 @@ public sealed class SetPrintInclusionPlanner : IOperationPlanner<SetPrintInclusi
             ? []
             : [new SetPrintInclusionChange(expected, request.IncludeInPrintAll)];
         return new OperationPlan(snapshot.DocumentRuntimeSerialNumber, snapshot.Revision,
-            request.IncludeInPrintAll ? "Include layouts in Print All" : "Exclude layouts from Print All",
+            request.IncludeInPrintAll ? "Enable layouts for printing" : "Disable layouts from printing",
             changes,
             diagnostics);
     }

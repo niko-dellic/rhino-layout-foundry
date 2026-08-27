@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using Eto.Drawing;
 using Eto.Forms;
 using RhinoLayoutFoundry.Core.Operations;
+using RhinoLayoutFoundry.Core.Observer;
 using RhinoLayoutFoundry.Core.Overview;
 
 namespace RhinoLayoutFoundry.UI;
@@ -19,16 +20,17 @@ public sealed class LayoutFoundryPanel : Panel
     private readonly Button _clearFilterButton;
     private readonly TextBox _renameTextBox;
     private readonly Button _renameButton;
-    private readonly Button _openButton;
     private readonly Button _manageButton;
-    private readonly Button _clearSelectionButton;
     private readonly Button _addFolderButton;
-    private readonly Button _captureTemplateButton;
     private readonly Button _batchCreateButton;
+    private readonly ToggleButton _listViewButton;
+    private readonly ToggleButton _thumbnailViewButton;
+    private readonly ToggleButton _canvasViewButton;
     private readonly bool _usesMacSafeHierarchy = OperatingSystem.IsMacOS();
     private readonly TreeGridView _treeGrid;
     private readonly GridColumn _layoutsColumn;
     private readonly GridColumn _printColumn;
+    private readonly GridColumn _templateColumn;
     private readonly GridColumn _paperColumn;
     private readonly GridColumn _detailsColumn;
     private readonly GridColumn _displayModeColumn;
@@ -37,6 +39,10 @@ public sealed class LayoutFoundryPanel : Panel
     private readonly Panel _contentHost;
     private readonly Panel _toolbarSurface;
     private readonly Panel _renameActions;
+    private readonly Control _managementView;
+    private readonly ThumbnailFoundryPanel _thumbnailView;
+    private readonly ObserverFoundryPanel _observerView;
+    private readonly Panel _viewHost;
     private ButtonMenuItem _setCurrentMenuItem = null!;
     private ButtonMenuItem _newFolderMenuItem = null!;
     private ButtonMenuItem _newPageMenuItem = null!;
@@ -81,6 +87,8 @@ public sealed class LayoutFoundryPanel : Panel
     private InlineDraft? _inlineDraft;
     private Guid? _contextDestinationFolderId;
     private Guid? _contextPrintFolderId;
+    private Form? _fullscreenCanvasWindow;
+    private FoundryPanelViewMode _viewMode = FoundryPanelViewMode.List;
 
     public LayoutFoundryPanel()
     {
@@ -136,30 +144,30 @@ public sealed class LayoutFoundryPanel : Panel
             ToolTip = "Batch create layouts from templates",
             Enabled = false,
         });
-        _captureTemplateButton = FoundryTheme.ConfigureToolbarButton(new Button
-        {
-            Text = "◇",
-            ToolTip = "Capture selected layout as a template",
-            Enabled = false,
-        });
-        _openButton = FoundryTheme.ConfigureToolbarButton(new Button
-        {
-            Text = "↗",
-            ToolTip = "Open selected layout or detail in Rhino",
-            Enabled = false,
-        });
         _manageButton = FoundryTheme.ConfigureToolbarButton(new Button
         {
             Text = "⋯",
             ToolTip = "Manage selected layouts",
             Enabled = false,
         });
-        _clearSelectionButton = FoundryTheme.ConfigureToolbarButton(new Button
+        _listViewButton = new ToggleButton
         {
-            Text = "×",
-            ToolTip = "Clear selection",
-            Enabled = false,
-        });
+            Text = "☷",
+            ToolTip = "List view",
+        };
+        _canvasViewButton = new ToggleButton
+        {
+            Text = "◇",
+            ToolTip = "Canvas view",
+        };
+        _thumbnailViewButton = new ToggleButton
+        {
+            Text = "▦",
+            ToolTip = "Thumbnail view",
+        };
+        FoundryTheme.ConfigureToolbarButton(_listViewButton);
+        FoundryTheme.ConfigureToolbarButton(_thumbnailViewButton);
+        FoundryTheme.ConfigureToolbarButton(_canvasViewButton);
         _creationFolderMenuItem = new ButtonMenuItem { Text = "New Folder" };
         _creationPageMenuItem = new ButtonMenuItem { Text = "New Layout" };
         _creationFolderMenuItem.Click += (_, _) => BeginInlineCreation(InlineDraftKind.Folder);
@@ -174,7 +182,8 @@ public sealed class LayoutFoundryPanel : Panel
         {
             DataStore = new[] { "—" },
         };
-        (_treeGrid, _layoutsColumn, _printColumn, _paperColumn, _detailsColumn, _displayModeColumn) = CreateTreeGrid();
+        (_treeGrid, _layoutsColumn, _printColumn, _templateColumn, _paperColumn, _detailsColumn,
+            _displayModeColumn) = CreateTreeGrid();
         CreateHierarchyContextMenu();
         _toolbarSurface = FoundryTheme.Surface(
             CreateToolbarContent(),
@@ -182,6 +191,21 @@ public sealed class LayoutFoundryPanel : Panel
         _contentHost = FoundryTheme.Surface(CreateEmptyState());
         _renameActions = CreateRenameActions();
 
+        _managementView = new StackLayout
+        {
+            Spacing = FoundryTheme.Space3,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            Items =
+            {
+                _toolbarSurface,
+                new StackLayoutItem(_contentHost, expand: true),
+                CreateFooter(),
+            },
+        };
+        _thumbnailView = new ThumbnailFoundryPanel();
+        _observerView = new ObserverFoundryPanel();
+        _observerView.FullscreenRequested += (_, _) => ToggleCanvasFullscreen();
+        _viewHost = new Panel { Content = _managementView };
         Content = new StackLayout
         {
             Padding = new Padding(FoundryTheme.Space4),
@@ -190,11 +214,10 @@ public sealed class LayoutFoundryPanel : Panel
             Items =
             {
                 CreateHeader(),
-                _toolbarSurface,
-                new StackLayoutItem(_contentHost, expand: true),
-                CreateFooter(),
+                new StackLayoutItem(_viewHost, expand: true),
             },
         };
+        UpdateViewModeButtons(FoundryPanelViewMode.List);
 
         _treeGrid.SelectedItemChanged += OnSelectionChanged;
         _treeGrid.CellDoubleClick += (_, _) => NavigateSelected();
@@ -218,12 +241,12 @@ public sealed class LayoutFoundryPanel : Panel
         _filterTextBox.TextChanged += (_, _) => OnFilterChanged();
         _filterKindDropDown.SelectedIndexChanged += (_, _) => OnFilterChanged();
         _clearFilterButton.Click += (_, _) => ClearFilter();
-        _clearSelectionButton.Click += (_, _) => ClearSelection();
         _addFolderButton.Click += (_, _) => ShowCreationMenu();
         _batchCreateButton.Click += (_, _) => OpenCreateLayouts(ResolveCreationDestinationFolderId());
-        _captureTemplateButton.Click += (_, _) => OpenCaptureTemplate();
-        _openButton.Click += (_, _) => NavigateSelected();
         _manageButton.Click += (_, _) => OpenBatchProperties();
+        _listViewButton.Click += (_, _) => ShowListView();
+        _thumbnailViewButton.Click += (_, _) => ShowThumbnailView();
+        _canvasViewButton.Click += (_, _) => ShowCanvasView();
         _renameButton.Click += async (_, _) => await RenameSelectedSheetAsync();
 
         _layoutPollTimer = new UITimer { Interval = 0.5 };
@@ -252,6 +275,7 @@ public sealed class LayoutFoundryPanel : Panel
     }
 
     private (TreeGridView TreeGrid, GridColumn LayoutsColumn, GridColumn PrintColumn,
+        GridColumn TemplateColumn,
         GridColumn PaperColumn, GridColumn DetailsColumn, GridColumn DisplayModeColumn) CreateTreeGrid()
     {
         var treeGrid = new TreeGridView
@@ -275,11 +299,24 @@ public sealed class LayoutFoundryPanel : Panel
             DataCell = new TextBoxCell
             {
                 Binding = Binding.Property<HierarchyTreeItem, string>(item => item.PrintText),
+                TextAlignment = TextAlignment.Center,
             },
             Width = 52,
             Sortable = true,
         };
         treeGrid.Columns.Add(printColumn);
+        var templateColumn = new GridColumn
+        {
+            HeaderText = "Template",
+            DataCell = new TextBoxCell
+            {
+                Binding = Binding.Property<HierarchyTreeItem, string>(item => item.TemplateText),
+                TextAlignment = TextAlignment.Center,
+            },
+            Width = 76,
+            Sortable = true,
+        };
+        treeGrid.Columns.Add(templateColumn);
         var paperColumn = new GridColumn
         {
             HeaderText = "Paper size",
@@ -320,20 +357,20 @@ public sealed class LayoutFoundryPanel : Panel
             Sortable = true,
         });
 
-        return (treeGrid, layoutsColumn, printColumn, paperColumn, detailsColumn, displayModeColumn);
+        return (treeGrid, layoutsColumn, printColumn, templateColumn, paperColumn, detailsColumn,
+            displayModeColumn);
     }
 
     private Cell CreateLayoutsDataCell(bool inlineEditing)
     {
-        return inlineEditing || _usesMacSafeHierarchy
+        return inlineEditing
             ? new TextBoxCell
             {
                 Binding = Binding.Property<HierarchyTreeItem, string>(item => item.DisplayText),
             }
-            : new TextBoxCell
-            {
-                Binding = Binding.Property<HierarchyTreeItem, string>(item => item.DisplayText),
-            };
+            : new ImageTextCell(
+                nameof(HierarchyTreeItem.RowIcon),
+                nameof(HierarchyTreeItem.DisplayText));
     }
 
     private void SetInlineEditing(bool enabled)
@@ -355,9 +392,93 @@ public sealed class LayoutFoundryPanel : Panel
         {
             Rows =
             {
-                new TableRow(brandLabel, new TableCell(null, scaleWidth: true)),
+                new TableRow(
+                    brandLabel,
+                    new TableCell(null, scaleWidth: true),
+                    new StackLayout
+                    {
+                        Orientation = Orientation.Horizontal,
+                        Spacing = FoundryTheme.Space1,
+                        VerticalContentAlignment = VerticalAlignment.Center,
+                        Items = { _listViewButton, _thumbnailViewButton, _canvasViewButton },
+                    }),
             },
         };
+    }
+
+    public void ShowListView() => SetViewMode(FoundryPanelViewMode.List);
+
+    public void ShowThumbnailView() => SetViewMode(FoundryPanelViewMode.Thumbnail);
+
+    public void ShowCanvasView() => SetViewMode(FoundryPanelViewMode.Canvas);
+
+    private void SetViewMode(FoundryPanelViewMode mode)
+    {
+        if (mode != FoundryPanelViewMode.Canvas && _fullscreenCanvasWindow is not null)
+            _fullscreenCanvasWindow.Close();
+
+        _viewMode = mode;
+        var next = mode switch
+        {
+            FoundryPanelViewMode.Thumbnail => _thumbnailView,
+            FoundryPanelViewMode.Canvas => _observerView,
+            _ => _managementView,
+        };
+        if (!ReferenceEquals(_viewHost.Content, next))
+            _viewHost.Content = next;
+        UpdateViewModeButtons(mode);
+    }
+
+    private void UpdateViewModeButtons(FoundryPanelViewMode mode)
+    {
+        _listViewButton.Checked = mode == FoundryPanelViewMode.List;
+        _thumbnailViewButton.Checked = mode == FoundryPanelViewMode.Thumbnail;
+        _canvasViewButton.Checked = mode == FoundryPanelViewMode.Canvas;
+    }
+
+    private void ToggleCanvasFullscreen()
+    {
+        if (_fullscreenCanvasWindow is not null)
+        {
+            _fullscreenCanvasWindow.Close();
+            return;
+        }
+
+        if (_viewMode != FoundryPanelViewMode.Canvas)
+            SetViewMode(FoundryPanelViewMode.Canvas);
+
+        _viewHost.Content = null;
+        var window = new Form
+        {
+            Title = "Layout Foundry — Canvas",
+            MinimumSize = new Size(720, 480),
+            WindowState = WindowState.Maximized,
+            Content = _observerView,
+        };
+        _fullscreenCanvasWindow = window;
+        _observerView.SetFullscreenState(true);
+        window.KeyDown += (_, eventArgs) =>
+        {
+            if (eventArgs.Key != Keys.Escape)
+                return;
+
+            eventArgs.Handled = true;
+            window.Close();
+        };
+        window.Closing += (_, _) => RestoreCanvasFromFullscreen(window);
+        window.Show();
+    }
+
+    private void RestoreCanvasFromFullscreen(Form window)
+    {
+        if (!ReferenceEquals(_fullscreenCanvasWindow, window))
+            return;
+
+        window.Content = null;
+        _fullscreenCanvasWindow = null;
+        _observerView.SetFullscreenState(false);
+        if (_viewMode == FoundryPanelViewMode.Canvas)
+            _viewHost.Content = _observerView;
     }
 
     private Control CreateToolbarContent()
@@ -377,10 +498,7 @@ public sealed class LayoutFoundryPanel : Panel
                     {
                         _addFolderButton,
                         _batchCreateButton,
-                        _captureTemplateButton,
-                        _openButton,
                         _manageButton,
-                        _clearSelectionButton,
                         new StackLayoutItem(null, expand: true),
                     },
                 },
@@ -410,8 +528,8 @@ public sealed class LayoutFoundryPanel : Panel
         _renamePageMenuItem = new ButtonMenuItem { Text = "Rename" };
         _newDetailMenuItem = new ButtonMenuItem { Text = "New Detail" };
         _printPageMenuItem = new ButtonMenuItem { Text = "Print…" };
-        _printScopeMenuItem = new ButtonMenuItem { Text = "Print All…" };
-        _propertiesPageMenuItem = new ButtonMenuItem { Text = "Properties…" };
+        _printScopeMenuItem = new ButtonMenuItem { Text = "Print Enabled…" };
+        _propertiesPageMenuItem = new ButtonMenuItem { Text = "Layout Properties…" };
         _renameFolderMenuItem = new ButtonMenuItem { Text = "Rename Folder…" };
 
         _setCurrentMenuItem.Click += (_, _) => NavigateSelected();
@@ -425,7 +543,7 @@ public sealed class LayoutFoundryPanel : Panel
         _newDetailMenuItem.Click += (_, _) => RunSelectedSheetCommand(LayoutSheetCommand.NewDetail);
         _printPageMenuItem.Click += (_, _) => RunSelectedSheetCommand(LayoutSheetCommand.Print);
         _printScopeMenuItem.Click += async (_, _) => await PrintHierarchyScopeAsync();
-        _propertiesPageMenuItem.Click += (_, _) => RunSelectedSheetCommand(LayoutSheetCommand.Properties);
+        _propertiesPageMenuItem.Click += (_, _) => OpenBatchProperties();
         _renameFolderMenuItem.Click += async (_, _) => await RenameSelectedFolderAsync();
 
         var contextMenu = new ContextMenu(
@@ -537,6 +655,11 @@ public sealed class LayoutFoundryPanel : Panel
         var selectedItems = SelectedItems();
         var anchor = (_treeGrid.SelectedItem as HierarchyTreeItem)?.Node.Key;
         _selection.Replace(selectedItems.Select(item => item.Node.Key), anchor);
+        LayoutFoundryUiHost.Selection.Replace(
+            _overview.DocumentRuntimeSerialNumber,
+            _selection.Selected,
+            _selection.Anchor,
+            this);
         UpdatePresentation();
     }
 
@@ -623,7 +746,7 @@ public sealed class LayoutFoundryPanel : Panel
 
         var dialog = new SaveFileDialog
         {
-            Title = _contextPrintFolderId is null ? "Print All Layouts" : $"Print {scope.Name}",
+            Title = _contextPrintFolderId is null ? "Print Enabled Layouts" : $"Print {scope.Name}",
             FileName = $"{safeName}.pdf",
         };
         dialog.Filters.Add(new FileFilter("PDF document", ".pdf"));
@@ -871,6 +994,7 @@ public sealed class LayoutFoundryPanel : Panel
         _isLoaded = true;
         ApplyResponsiveLayout();
         LayoutFoundryUiHost.OverviewChanged += OnOverviewChanged;
+        LayoutFoundryUiHost.Selection.Changed += OnSharedSelectionChanged;
         _layoutPollTimer.Start();
         RefreshOverview();
         QueueThumbnails();
@@ -878,6 +1002,12 @@ public sealed class LayoutFoundryPanel : Panel
 
     private void OnPanelUnloaded(object? sender, EventArgs eventArgs)
     {
+        if (_fullscreenCanvasWindow is not null)
+        {
+            _viewMode = FoundryPanelViewMode.List;
+            _fullscreenCanvasWindow.Close();
+        }
+
         if (!_isLoaded)
         {
             return;
@@ -889,6 +1019,7 @@ public sealed class LayoutFoundryPanel : Panel
         _responsiveTimer.Stop();
         ResetThumbnailCapture();
         LayoutFoundryUiHost.OverviewChanged -= OnOverviewChanged;
+        LayoutFoundryUiHost.Selection.Changed -= OnSharedSelectionChanged;
     }
 
     private void OnLayoutPoll(object? sender, EventArgs eventArgs)
@@ -915,6 +1046,11 @@ public sealed class LayoutFoundryPanel : Panel
 
             ResetThumbnailCapture();
             _selection.Clear();
+            if (LayoutFoundryUiHost.Selection.DocumentRuntimeSerialNumber !=
+                _overview.DocumentRuntimeSerialNumber)
+            {
+                LayoutFoundryUiHost.Selection.Clear(_overview.DocumentRuntimeSerialNumber, this);
+            }
             _collapsedNodeKeys.Clear();
             _documentSerialNumber = _overview.DocumentRuntimeSerialNumber;
         }
@@ -1014,6 +1150,20 @@ public sealed class LayoutFoundryPanel : Panel
         QueueThumbnails();
     }
 
+    private void OnSharedSelectionChanged(
+        object? sender,
+        DocumentSelectionChangedEventArgs eventArgs)
+    {
+        if (ReferenceEquals(eventArgs.Source, this) ||
+            eventArgs.DocumentRuntimeSerialNumber != _overview.DocumentRuntimeSerialNumber)
+        {
+            return;
+        }
+
+        _selection.Replace(eventArgs.Selection, eventArgs.Anchor);
+        PopulateTree();
+    }
+
     private DocumentOverview OverviewWithInlineDraft()
     {
         if (_inlineDraft is not { } draft)
@@ -1085,13 +1235,15 @@ public sealed class LayoutFoundryPanel : Panel
             ? OverviewSortProperty.Name
             : ReferenceEquals(eventArgs.Column, _printColumn)
                 ? OverviewSortProperty.Print
-                : ReferenceEquals(eventArgs.Column, _paperColumn)
-                    ? OverviewSortProperty.PaperSize
-                    : ReferenceEquals(eventArgs.Column, _detailsColumn)
-                        ? OverviewSortProperty.DetailCount
-                        : ReferenceEquals(eventArgs.Column, _displayModeColumn)
-                            ? OverviewSortProperty.DisplayMode
-                            : OverviewSortProperty.Status;
+                : ReferenceEquals(eventArgs.Column, _templateColumn)
+                    ? OverviewSortProperty.Template
+                    : ReferenceEquals(eventArgs.Column, _paperColumn)
+                        ? OverviewSortProperty.PaperSize
+                        : ReferenceEquals(eventArgs.Column, _detailsColumn)
+                            ? OverviewSortProperty.DetailCount
+                            : ReferenceEquals(eventArgs.Column, _displayModeColumn)
+                                ? OverviewSortProperty.DisplayMode
+                                : OverviewSortProperty.Status;
         if (_sortProperty == property)
         {
             _sortDirection = _sortDirection == OverviewSortDirection.Ascending
@@ -1111,12 +1263,14 @@ public sealed class LayoutFoundryPanel : Panel
     {
         _layoutsColumn.HeaderText = SortHeader("Layouts", OverviewSortProperty.Name);
         _printColumn.HeaderText = SortHeader("Print", OverviewSortProperty.Print);
+        _templateColumn.HeaderText = SortHeader("Template", OverviewSortProperty.Template);
         _paperColumn.HeaderText = SortHeader("Paper size", OverviewSortProperty.PaperSize);
         _detailsColumn.HeaderText = SortHeader("Details", OverviewSortProperty.DetailCount);
         _displayModeColumn.HeaderText = SortHeader("Display mode", OverviewSortProperty.DisplayMode);
         var statusColumn = _treeGrid.Columns.FirstOrDefault(column =>
             !ReferenceEquals(column, _layoutsColumn) &&
             !ReferenceEquals(column, _printColumn) &&
+            !ReferenceEquals(column, _templateColumn) &&
             !ReferenceEquals(column, _paperColumn) &&
             !ReferenceEquals(column, _detailsColumn) &&
             !ReferenceEquals(column, _displayModeColumn));
@@ -1141,12 +1295,10 @@ public sealed class LayoutFoundryPanel : Panel
             .ToArray();
         var selectionCount = selectedItems.Count;
         var canRename = selectedSheets.Length == 1 && selectionCount == 1;
-        var canOpen = selectionCount == 1 && selectedItems[0].Node.NavigationTarget is not null;
         var capabilities = LayoutFoundryUiHost.CaptureMutationCapabilities();
 
         _addFolderButton.Enabled = _overview.DocumentRuntimeSerialNumber is not null;
         _batchCreateButton.Enabled = _overview.DocumentRuntimeSerialNumber is not null;
-        _captureTemplateButton.Enabled = canRename;
         var folderDestination = FolderCreationDestination.Resolve(
             _overview,
             selectedItems.Select(item => item.Node.Key));
@@ -1154,9 +1306,7 @@ public sealed class LayoutFoundryPanel : Panel
                                    folderDestination.ParentFolderId != _overview.RootFolderId
             ? $"Create a folder or layout inside {folderDestination.DisplayName}"
             : "Create a folder or layout at the hierarchy root";
-        _openButton.Enabled = canOpen;
         _manageButton.Enabled = selectionCount > 0;
-        _clearSelectionButton.Enabled = selectionCount > 0;
         var renameAvailable = canRename && capabilities.PageRenameUndo.IsSupported;
         _renameActions.Visible = renameAvailable;
         _renameTextBox.Enabled = renameAvailable;
@@ -1237,22 +1387,42 @@ public sealed class LayoutFoundryPanel : Panel
 
     private async Task OnTreeCellClickAsync(GridCellMouseEventArgs eventArgs)
     {
-        if (!ReferenceEquals(eventArgs.GridColumn, _printColumn) ||
-            eventArgs.Item is not HierarchyTreeItem item ||
-            !item.HasSheetTargets)
+        if (eventArgs.Item is not HierarchyTreeItem item)
         {
             return;
         }
 
+        if (ReferenceEquals(eventArgs.GridColumn, _templateColumn))
+        {
+            if (item.Node.Sheet is not { } sheet) return;
+            var register = !sheet.IsTemplate;
+            _statusLabel.Text = register
+                ? "Registering layout as a template…"
+                : "Unregistering layout template…";
+            var registrationResult = await LayoutFoundryUiHost.SetSheetTemplateRegistrationAsync(
+                sheet.PageViewId,
+                register);
+            _statusLabel.Text = registrationResult.Succeeded
+                ? register
+                    ? $"'{sheet.Name}' is available as a layout template."
+                    : $"'{sheet.Name}' is no longer a layout template."
+                : DiagnosticMessage(registrationResult);
+            RefreshOverview();
+            return;
+        }
+
+        if (!ReferenceEquals(eventArgs.GridColumn, _printColumn) || !item.HasSheetTargets)
+            return;
+
         var include = !item.AllPrintIncluded;
         _statusLabel.Text = include
-            ? "Including layouts in Print All…"
-            : "Excluding layouts from Print All…";
+            ? "Enabling layouts for printing…"
+            : "Disabling layouts for printing…";
         var result = await LayoutFoundryUiHost.SetPrintInclusionAsync([item.Node.Key], include);
         _statusLabel.Text = result.Succeeded
             ? include
-                ? "Included in Print All."
-                : "Excluded from Print All."
+                ? "Enabled for printing."
+                : "Disabled from printing."
             : DiagnosticMessage(result);
         RefreshOverview();
     }
@@ -1442,6 +1612,7 @@ public sealed class LayoutFoundryPanel : Panel
         var isFolderContext = folder is not null && !isDocumentContext;
         var isSheetContext = selectedSheet is not null;
         var isRootContext = selectedItems.Count == 0 || isDocumentContext;
+        var hasLayoutPropertyTargets = selectedItems.Any(item => item.HasSheetTargets);
         _contextDestinationFolderId = ResolveCreationDestinationFolderId();
         _contextPrintFolderId = isFolderContext ? folder?.Node.Key.Id : null;
         var printScope = LayoutPrintScopeResolver.Resolve(_overview, _contextPrintFolderId);
@@ -1481,9 +1652,9 @@ public sealed class LayoutFoundryPanel : Panel
         _printPageMenuItem.Enabled = isSheetContext;
         _printScopeMenuItem.Visible = isFolderContext || isRootContext;
         _printScopeMenuItem.Enabled = printScope.Exists && printScope.HasSheets;
-        _printScopeMenuItem.Text = isFolderContext ? "Print Folder…" : "Print All…";
-        _propertiesPageMenuItem.Visible = isSheetContext;
-        _propertiesPageMenuItem.Enabled = isSheetContext;
+        _printScopeMenuItem.Text = isFolderContext ? "Print Folder…" : "Print Enabled…";
+        _propertiesPageMenuItem.Visible = hasLayoutPropertyTargets;
+        _propertiesPageMenuItem.Enabled = hasLayoutPropertyTargets;
         _renameFolderMenuItem.Enabled = folder is not null && !isDocumentContext;
         _renameFolderMenuItem.Visible = folder is not null && !isDocumentContext;
     }
@@ -1793,29 +1964,6 @@ public sealed class LayoutFoundryPanel : Panel
         }
     }
 
-    private void OpenCaptureTemplate()
-    {
-        var selected = SelectedSheets().Take(2).ToArray();
-        if (selected.Length != 1 || SelectedItemCount() != 1)
-        {
-            _statusLabel.Text = "Select one layout to capture as a template.";
-            return;
-        }
-        var context = LayoutFoundryUiHost.CaptureTemplateContext(selected[0].PageViewId);
-        if (context is null)
-        {
-            _statusLabel.Text = "The layout is no longer available.";
-            return;
-        }
-        var dialog = new CaptureTemplateDialog(selected[0].PageViewId, selected[0].Name, context);
-        dialog.ShowModal(this);
-        if (dialog.Captured)
-        {
-            _statusLabel.Text = $"Captured '{selected[0].Name}' as a reusable template.";
-            RefreshOverview();
-        }
-    }
-
     private void OpenCreateLayouts(Guid? preferredFolderId)
     {
         var snapshot = LayoutFoundryUiHost.CaptureSnapshot();
@@ -2038,6 +2186,7 @@ public sealed class LayoutFoundryPanel : Panel
     private void ClearSelection()
     {
         _selection.Clear();
+        LayoutFoundryUiHost.Selection.Clear(_overview.DocumentRuntimeSerialNumber, this);
         _isPopulatingTree = true;
         try
         {
@@ -2150,7 +2299,12 @@ public sealed class LayoutFoundryPanel : Panel
             Node = node;
             Presentation = OverviewRowPresentation.Create(node, useMacSafeSingleColumn: false);
             IsInlineDraft = inlineDraftId == node.Key.Id;
-            _displayText = IsInlineDraft ? node.Label : Presentation.PrimaryText;
+            RowIcon = node.IsDocumentRoot ? LayoutFoundryUiHost.ProjectIcon : null;
+            _displayText = IsInlineDraft
+                ? node.Label
+                : RowIcon is not null
+                    ? node.Label
+                    : Presentation.PrimaryText;
             foreach (var child in node.Children)
             {
                 Children.Add(new HierarchyTreeItem(
@@ -2172,6 +2326,8 @@ public sealed class LayoutFoundryPanel : Panel
         public OverviewRowPresentation Presentation { get; }
 
         public bool IsInlineDraft { get; }
+
+        public Image? RowIcon { get; }
 
         private string _displayText;
 
@@ -2214,12 +2370,16 @@ public sealed class LayoutFoundryPanel : Panel
                 var sheets = DescendantSheets(Node).ToArray();
                 if (sheets.Length == 0) return string.Empty;
                 return sheets.All(sheet => sheet.IncludeInPrintAll)
-                    ? "💡"
+                    ? "●"
                     : sheets.All(sheet => !sheet.IncludeInPrintAll)
                         ? "○"
                         : "◐";
             }
         }
+
+        public string TemplateText => Node.Sheet is null
+            ? string.Empty
+            : Node.Sheet.IsTemplate ? "●" : "○";
 
         private string? _paperText;
 
@@ -2302,6 +2462,13 @@ public sealed class LayoutFoundryPanel : Panel
         Folder,
         Sheet,
         RenameSheet,
+    }
+
+    private enum FoundryPanelViewMode
+    {
+        List,
+        Thumbnail,
+        Canvas,
     }
 
     private sealed class InlineDraft(

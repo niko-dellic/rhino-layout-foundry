@@ -12,6 +12,7 @@ public sealed class LayoutFoundryPlugin : PlugIn
     private readonly DocumentStateStore _stateStore = new();
     private readonly DocumentRevisionTracker _revisionTracker = new();
     private RhinoDocumentEventBridge? _eventBridge;
+    private System.Drawing.Icon? _panelIcon;
 
     public LayoutFoundryPlugin()
     {
@@ -35,8 +36,11 @@ public sealed class LayoutFoundryPlugin : PlugIn
             new RhinoLayoutPdfExportService(),
             new RhinoDocumentThumbnailProvider(),
             new RhinoMutationCapabilityProvider(),
-            new RhinoTemplateCaptureContextProvider());
-        Panels.RegisterPanel(this, typeof(LayoutFoundryPanel), "Layout Foundry", null);
+            new RhinoTemplateCaptureContextProvider(),
+            new RhinoDocumentObserverSnapshotProvider(_stateStore, _revisionTracker),
+            RhinoProjectIconLoader.Load());
+        _panelIcon = TemporaryPanelIcon.Create();
+        Panels.RegisterPanel(this, typeof(LayoutFoundryPanel), "Layout Foundry", _panelIcon);
         _eventBridge = new RhinoDocumentEventBridge(
             _revisionTracker,
             LayoutFoundryUiHost.NotifyOverviewChanged);
@@ -53,6 +57,7 @@ public sealed class LayoutFoundryPlugin : PlugIn
         _eventBridge?.Dispose();
         _eventBridge = null;
         LayoutFoundryUiHost.Reset();
+        _panelIcon = null;
         Instance = null;
     }
 

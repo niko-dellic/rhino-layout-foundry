@@ -20,6 +20,24 @@ public sealed class SheetTemplatePlannerTests
     }
 
     [Fact]
+    public void CaptureRejectsAnAlreadyRegisteredSourceLayout()
+    {
+        var snapshot = TestSnapshots.Create();
+        var source = snapshot.Sheets.Values.First();
+        var existing = Template("Existing", 420, 297) with
+        {
+            SourcePageViewId = source.PageViewId,
+        };
+        snapshot = WithTemplates(snapshot, [existing]);
+
+        var plan = new CaptureSheetTemplatePlanner().Plan(new CaptureSheetTemplateRequest(
+            42, 1, Guid.NewGuid(), source.PageViewId, "Another", "{index:00}", null), snapshot);
+
+        Assert.False(plan.CanApply);
+        Assert.Contains(plan.Diagnostics, diagnostic => diagnostic.Code == "template.source_registered");
+    }
+
+    [Fact]
     public void MixedTemplateBatchProducesOrderedUniqueNames()
     {
         var a3 = Template("A3", 420, 297);

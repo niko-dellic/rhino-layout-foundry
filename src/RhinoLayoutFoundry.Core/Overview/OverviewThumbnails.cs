@@ -5,7 +5,8 @@ public readonly record struct OverviewThumbnailKey(
     Guid SheetPageViewId,
     int Width,
     int Height,
-    long ContentVersion = 0);
+    long ContentVersion = 0,
+    int ResolutionBucket = 0);
 
 public sealed record OverviewThumbnailRequest(
     OverviewThumbnailKey Key,
@@ -17,6 +18,36 @@ public sealed record OverviewThumbnailResult(
     string? Error = null)
 {
     public bool Succeeded => PngBytes is { Length: > 0 } && Error is null;
+}
+
+public static class ObserverThumbnailResolution
+{
+    public static readonly int[] Buckets = [256, 512, 1024, 2048];
+
+    public static int Select(double longestVisibleEdgePixels, int currentBucket = 0)
+    {
+        var required = longestVisibleEdgePixels switch
+        {
+            <= 192 => 256,
+            <= 384 => 512,
+            <= 768 => 1024,
+            _ => 2048,
+        };
+
+        if (Buckets.Contains(currentBucket))
+        {
+            // A small hysteresis band prevents repeated requests when zooming
+            // close to a resolution boundary.
+            var lower = currentBucket * 0.32;
+            var upper = currentBucket * 0.82;
+            if (longestVisibleEdgePixels >= lower && longestVisibleEdgePixels <= upper)
+            {
+                return currentBucket;
+            }
+        }
+
+        return required;
+    }
 }
 
 public interface IDocumentThumbnailProvider

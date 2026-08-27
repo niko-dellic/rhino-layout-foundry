@@ -1,6 +1,6 @@
 # Rhino Layout Foundry
 
-Rhino Layout Foundry is a planned open-source layout manager for Rhino 8. It is designed for fast, pleasant batch work across many drawing sheets without forcing users to activate and edit each layout individually.
+Rhino Layout Foundry is an open-source layout manager under active development for Rhino 8. It is designed for fast, pleasant batch work across many drawing sheets without forcing users to activate and edit each layout individually.
 
 The main interface is a dockable tree-table:
 
@@ -11,7 +11,7 @@ Folder
     └── Detail viewport
 ```
 
-Development now includes a functional existing-sheet batch editor and the first Milestone 5 creation slice. The plug-in provides a folder → sheet → detail tree-table, Finder-style hierarchy editing, mixed-selection folder/layout duplication and confirmed deletion, table-driven batch renaming, unit-aware page sizing, live-filtered detail display-mode assignment, batch title-block assignment/replacement/removal from document instances, hierarchy-ordered folder/all multipage PDF output, and a review-first layout creator with quantities, built-in detail arrangements, captured templates, paper presets, title blocks, display modes, and named views. Windows validation, shared-template asset import, title-block field mappings, richer PDF presets/progress, and observer mode remain release gates. See the [development status](docs/DEVELOPMENT_STATUS.md) for exact capability and verification status.
+Development now includes a functional existing-sheet batch editor, the first Milestone 5 creation slice, and an implementation-ready Milestone 6 observer. The plug-in provides a folder → sheet → detail tree-table, Finder-style hierarchy editing, mixed-selection folder/layout duplication and confirmed deletion, unit-aware batch properties, title-block assignment, hierarchy-ordered PDF output, and review-first batch layout creation. The same panel now provides List, Thumbnail, and Canvas modes. Thumbnail mode is a virtualized, resizable page-image grid; Canvas adds a Figma-like spatial board with physical paper proportions, progressive Rhino-rendered previews, pan/zoom/lasso, persisted spatial organization, shared selection, hierarchy/order operations, and named-view assignment. `LayoutFoundryObserver` remains a shortcut that opens the main panel directly in Canvas view. Licensed Rhino soak testing, Windows validation, shared-template asset import, title-block field mappings, and richer PDF presets/progress remain release gates. See the [development status](docs/DEVELOPMENT_STATUS.md) for exact capability and verification status.
 
 ## What it will do
 
@@ -23,7 +23,7 @@ Development now includes a functional existing-sheet batch editor and the first 
 - Export an ordered folder or sheet selection to a multipage PDF.
 - Capture layouts as reusable document-local or shared sheet templates.
 - Create sheets in batches and assign named views to detail slots.
-- Present every sheet on an observer canvas for navigation, reordering, and named-view drag-and-drop.
+- Present every sheet on an observer canvas for navigation, spatial organization, reordering, and named-view assignment.
 
 ## Terminology
 

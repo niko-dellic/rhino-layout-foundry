@@ -65,7 +65,8 @@ public sealed record DocumentState(
     IReadOnlyList<DisplayRule> DisplayRules,
     IReadOnlyList<SheetTemplate> LocalTemplates,
     IReadOnlyList<ExportPreset> ExportPresets,
-    DocumentMetadata Metadata);
+    DocumentMetadata Metadata,
+    ObserverCanvasState? ObserverCanvas);
 
 public sealed record FolderRecord(
     Guid Id,
@@ -202,6 +203,8 @@ The serialized payload uses an `ArchivableDictionary` envelope containing:
 
 The payload contains metadata and stable IDs only, never thumbnails or duplicate Rhino geometry. Title-block source values remain available through standard Rhino Document User Text and Layout User Text where the mapping requests them.
 
+Schema 4 adds optional observer board organization: folder spatial origins, manual sheet placements keyed by Rhino page-view ID, and the placement-algorithm version. Camera, hover, lasso, transient selection, preview bytes, and decoded bitmaps are deliberately session-only. Reading a schema-3 document produces an empty in-memory board, but opening or panning the observer does not advance the stored schema. Schema 4 is written only after the user intentionally changes persistent board organization and later saves the document.
+
 ### 5.2 Compatibility behavior
 
 - Minor additive changes migrate automatically and preserve unknown extension fields where feasible.
@@ -265,7 +268,15 @@ The UI presents a flattened window over the expanded hierarchy rather than mater
 
 The cache is size-bounded and uses least-recently-used eviction. It never enters document plug-in data. Closing a document cancels queued captures and releases images.
 
-### 8.3 Event invalidation
+### 8.3 Observer canvas
+
+The main panel exposes List, Thumbnail, and Canvas modes while preserving one per-document selection coordinator. Thumbnail mode is one `Eto.Forms.Drawable` inside a vertical `Scrollable`; `ThumbnailGridLayout` computes deterministic columns and visible/overscan row ranges as the user changes card size. It never creates one native control per page. Canvas is a separate `Drawable` with its own Cartesian world coordinates; it is neither Rhino model geometry nor one Eto control per sheet. `LayoutFoundryObserver` is a command shortcut into Canvas mode, not a second registered Rhino panel. `ObserverCamera` owns reversible world/screen transforms. `ObserverPlacementPlanner` creates deterministic folder-aware placement from physical paper dimensions, and `ObserverSpatialIndex` performs visible-card queries, lasso selection, hit-testing, and drag-target resolution. Only cards intersecting the visible region plus overscan are drawn in either image mode.
+
+Observer captures reuse the Rhino page-preview adapter, so page-space and model-space annotations are represented exactly as Rhino renders them. Resolution-aware keys use 256, 512, 1024, and 2048 pixel buckets. Selected, visible, overscan, and background requests have descending priority; duplicate requests coalesce; only one Rhino capture may run at a time. Encoded previews use a byte/count-bounded LRU, while decoded Eto bitmaps exist only for visible/overscan cards and are disposed on replacement, eviction, document switch, or panel close.
+
+A per-document `DocumentSelectionState` synchronizes the management table, observer canvas, and Navigator by stable folder/sheet/detail IDs. Canvas hierarchy moves, reorder operations, print changes, named-view assignments, duplicate/delete actions, and batch properties all reuse existing planners and mutation services. Pan and zoom are session-local. Persisted board movement is validated against the current revision and participates in one Foundry metadata Undo record.
+
+### 8.4 Event invalidation
 
 The event bridge subscribes once per plug-in and routes by document runtime identity. Relevant document, page, layer, object-attribute, instance-definition, undo/redo, save/open/close, and active-document events invalidate only affected indexes and thumbnails. Bursts are coalesced before the UI refreshes.
 

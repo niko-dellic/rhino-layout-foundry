@@ -39,6 +39,12 @@ public sealed class OverviewRowPresentationTests
     [Fact]
     public void HierarchyKindsReceiveDistinctMonochromeGlyphs()
     {
+        var project = new OverviewTreeNode(
+            new OverviewNodeKey(OverviewNodeKind.Folder, Guid.NewGuid()),
+            "Museum",
+            "2 sheets",
+            [],
+            IsDocumentRoot: true);
         var folder = new OverviewTreeNode(
             new OverviewNodeKey(OverviewNodeKind.Folder, Guid.NewGuid()),
             "Plans",
@@ -52,6 +58,9 @@ public sealed class OverviewRowPresentationTests
 
         var sheet = CreateSheetNode();
 
+        Assert.Equal(
+            "3DM  Museum  ·  2 sheets",
+            OverviewRowPresentation.Create(project, useMacSafeSingleColumn: true).PrimaryText);
         Assert.Equal(
             "📁  Plans  ·  2 sheets",
             OverviewRowPresentation.Create(folder, useMacSafeSingleColumn: true).PrimaryText);

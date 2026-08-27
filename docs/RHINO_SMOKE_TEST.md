@@ -83,7 +83,7 @@ Alternatively, launch the `Rhino 8 (Windows)` configuration from VS Code.
 17. Run Rhino Undo and Redo; confirm the nested folder disappears and returns as one named undo action.
 18. Save As, close, and reopen the 3DM; confirm both folders and their nesting survive.
 19. Right-click root whitespace, a folder, a sheet, and a detail. Confirm New Folder and New Layout target the root, selected folder, or containing folder as appropriate. Folder-only Rename/Delete actions must only appear for a folder target. Sheet/detail targets must expose Set Current, New Layout, Duplicate Layout, Delete, Rename, New Detail, Print, and Properties.
-20. Right-click a populated folder and confirm `Print Folder…` is available; confirm it is disabled for an empty folder. Export the populated folder and verify the PDF contains only that folder's layouts, including nested folders, in visible tree order. Right-click hierarchy whitespace, choose `Print All…`, and verify the PDF contains every layout in tree order.
+20. Right-click a populated folder and confirm `Print Folder…` is available; confirm it is disabled for an empty folder. Export the populated folder and verify the PDF contains only that folder's enabled layouts, including nested folders, in visible tree order. Right-click hierarchy whitespace, choose `Print Enabled…`, and verify the PDF contains every enabled layout in tree order.
 20. Choose Rename on a sheet, enter a distinct name directly in its hierarchy row, and press Return. Confirm both Foundry and Rhino's native Layouts panel update and Foundry reports that the page rename is not undoable.
 20. Right-click an empty folder, delete it after the confirmation, then Undo/Redo. Confirm each state updates automatically and the Rhino Edit menu names the folder action.
 21. Drag a sheet row onto a folder. Confirm the sheet becomes a child of that folder and one Undo returns it to its original location.
@@ -106,14 +106,15 @@ Alternatively, launch the `Rhino 8 (Windows)` configuration from VS Code.
 2. On Windows, wait for visible sheet previews to populate. On macOS, confirm the resize-safe text-only hierarchy does not start preview capture.
 3. Create or open a diagnostic fixture with a duplicate sheet name, missing Foundry folder reference, or sheet without details. Confirm the Status column reports `Info · n`, `Warning · n`, or `Error · n` without hiding the row.
 4. On Windows, resize across compact, standard, and wide breakpoints; confirm filters and selection survive. On macOS, close and reopen the panel at the intended dock width to select its density, then confirm native splitter resizing remains responsive.
-5. Confirm both toolbar rows remain compact and no separate gray surface bands appear behind them. Confirm the hierarchy shows fixed Name, Print, Paper size, Details, Display mode, and Status columns.
+5. Confirm both toolbar rows remain compact and no separate gray surface bands appear behind them. Confirm the hierarchy shows fixed Name, Print, Template, Paper size, Details, Display mode, and Status columns.
 6. Confirm the first column header remains exactly `Layouts`; sheet/detail totals, filtered results, and selection counts must update in the bottom bar without shifting any column header.
-7. Confirm the active 3DM filename without its extension appears as the top project-root row. Collapse it, trigger an automatic refresh, and confirm it remains collapsed. Confirm its context menu offers root creation and Print All but not rename, drag, duplicate, or delete.
+7. Confirm the active 3DM filename appears as the top project-root row. Collapse it, trigger an automatic refresh, and confirm it remains collapsed. Confirm its context menu offers root creation and Print Enabled but not rename, drag, duplicate, or delete.
 8. Click every property header twice. Confirm each sibling group sorts ascending and then descending without flattening folders; verify `Page 2` sorts before `Page 10` by name.
 9. Resize the dock repeatedly on macOS, including narrow and wide extremes. Confirm Rhino remains responsive, columns keep fixed widths, and no thumbnail or column-visibility work occurs during splitter tracking.
-10. Toggle the Print light on one layout and confirm Print All omits it. Toggle a populated folder and confirm every descendant layout follows; a mixed folder shows the mixed indicator.
-11. Change a folder paper preset and confirm every descendant layout changes without activation. Change a sheet preset and confirm siblings do not change.
-12. Change display mode on a folder, a sheet, and a single detail. Confirm the scopes are respectively all descendant details, all details on the sheet, and only the selected detail.
+10. Toggle the Print light on one layout and confirm Print Enabled omits it. Toggle a populated folder and confirm every descendant layout follows; a mixed folder shows the mixed indicator.
+11. Click an empty circle in the Template column for a layout. Confirm it becomes filled and the layout appears in the batch-creation template list. Click the filled circle, confirm it becomes empty, and confirm the template is removed from that list.
+12. Change a folder paper preset and confirm every descendant layout changes without activation. Change a sheet preset and confirm siblings do not change.
+13. Change display mode on a folder, a sheet, and a single detail. Confirm the scopes are respectively all descendant details, all details on the sheet, and only the selected detail.
 
 ## 6. Batch-properties and mutation-capability checks
 
@@ -122,6 +123,7 @@ Alternatively, launch the `Rhino 8 (Windows)` configuration from VS Code.
 3. Use the Manage icon and confirm its tooltip is present and Targets, Properties, and Review tabs open in a native modal.
 4. Toggle target inclusion and stage values. Confirm Rhino does not change before Apply.
 5. Confirm Apply remains disabled and exposes the page-property Undo capability reason.
+6. Right-click one layout, several layouts, a populated folder, and a mixed folder/layout selection. Confirm `Layout Properties…` appears in the same context-menu position and opens the Foundry properties editor with every resolved layout listed as a target.
 6. Close the modal and confirm selection remains intact.
 
 Do not enable page rename or batch Apply until a supported cross-platform Rhino Undo path has passed the integration criterion.
@@ -135,7 +137,23 @@ Do not enable page rename or batch Apply until a supported cross-platform Rhino 
 5. Save, close, and reopen a document. Confirm empty Foundry schema-1 data does not produce an error.
 6. Quit Rhino normally and confirm no shutdown exception appears.
 
-## 8. Reporting a failure
+## 8. Observer Canvas checks
+
+1. Open `LayoutFoundry`, switch among the List, Thumbnail, and Canvas icons in the shared header, and confirm the same panel changes view without losing selection. In Thumbnail mode, drag the size control end to end and confirm that the card size and pages-per-row count update smoothly while paper proportions remain correct. Double-click a thumbnail and confirm Rhino opens that layout. Run `LayoutFoundryObserver` and confirm it opens the main panel directly in Canvas mode rather than creating a second panel. Paper/detail placeholders should appear within one second without activating or modifying a layout.
+2. Confirm the Layout Foundry Rhino tab shows the temporary sheet-stack icon instead of a blank tab on both macOS and Windows.
+3. Pan, pointer-zoom, Fit, Focus, and reset the board. Confirm the cursor anchor remains stable while zooming and the 3DM modified flag does not change from camera-only activity.
+4. Wait for visible previews. Confirm only one page capture runs at a time and that visible/selected cards become sharp before offscreen cards.
+5. On fixtures containing page-space text, dimensions, leaders, hatches, linework, and title blocks, confirm all annotations appear. Confirm model-space annotations, current display modes, projection, and per-detail layer visibility match the real layout.
+6. Lasso and modifier-select mixed folders, layouts, and details. Confirm the same stable selection appears after switching back to List and in the Canvas Navigator without activating sheets.
+7. Move a sheet spatially, then a folder containing nested folders. Confirm hierarchy/order remain unchanged and the complete group moves. Save/reopen and confirm board positions persist; Undo/Redo must round-trip each move as one Foundry action.
+8. Run Tidy Selection, Tidy Folder, and Tidy All. Confirm deterministic, non-overlapping placement preserving physical paper proportions.
+9. Drag a sheet onto a folder and use a reorder handle within a folder. Confirm hierarchy and print order change through one operation and stale targets are rejected cleanly.
+10. Drag a named view onto a detail, then repeat without a pointer by selecting a detail/layout/folder and using `Assign to selection`. Confirm cameras update only through the shared assignment mutation.
+11. Exercise Open, Batch Properties, duplicate, delete, print enablement, Print Folder/Enabled, navigation, and keyboard commands from the observer context/Navigator surfaces. Verify Option/Alt+Arrow nudges a spatial selection, Page Up/Down reorders one selected layout, and `Move to Folder` handles a mixed folder/layout/detail selection as one operation.
+12. Resize, zoom, pan, change thumbnail density, switch List/Thumbnail/Canvas modes, open/close, and switch documents repeatedly on macOS and Windows. Confirm Rhino does not freeze; pending work cancels; preview memory returns near baseline after leaving either image mode or closing the panel.
+13. Run the 200-sheet/1,000-detail fixture. Record placeholder-open time, interaction latency, capture concurrency, encoded/decoded cache size, stale-discard count, and retained memory after traversing and closing the board.
+
+## 9. Reporting a failure
 
 Include:
 

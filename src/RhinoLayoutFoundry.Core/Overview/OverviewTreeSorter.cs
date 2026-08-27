@@ -5,6 +5,7 @@ public enum OverviewSortProperty
     None,
     Name,
     Print,
+    Template,
     PaperSize,
     DetailCount,
     DisplayMode,
@@ -54,6 +55,7 @@ public static class OverviewTreeSorter
         {
             OverviewSortProperty.Name => node.Label,
             OverviewSortProperty.Print => PrintRank(sheets),
+            OverviewSortProperty.Template => TemplateRank(sheets),
             OverviewSortProperty.PaperSize => PaperValue(sheets),
             OverviewSortProperty.DetailCount => details.Length,
             OverviewSortProperty.DisplayMode => Summary(details.Select(detail => detail.DisplayModeName)),
@@ -68,6 +70,12 @@ public static class OverviewTreeSorter
         if (sheets.All(sheet => sheet.IncludeInPrintAll)) return 0;
         if (sheets.All(sheet => !sheet.IncludeInPrintAll)) return 2;
         return 1;
+    }
+
+    private static int TemplateRank(IReadOnlyList<SheetOverview> sheets)
+    {
+        if (sheets.Count == 0) return 2;
+        return sheets.All(sheet => sheet.IsTemplate) ? 0 : 1;
     }
 
     private static double PaperValue(IReadOnlyList<SheetOverview> sheets)

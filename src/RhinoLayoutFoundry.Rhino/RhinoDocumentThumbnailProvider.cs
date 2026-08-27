@@ -7,33 +7,49 @@ namespace RhinoLayoutFoundry.Rhino;
 
 internal sealed class RhinoDocumentThumbnailProvider : IDocumentThumbnailProvider
 {
-    public Task<OverviewThumbnailResult> CaptureAsync(
+    private static readonly SemaphoreSlim CaptureGate = new(1, 1);
+
+    public async Task<OverviewThumbnailResult> CaptureAsync(
         OverviewThumbnailRequest request,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        if (!RhinoApp.InvokeRequired)
+        var enteredGate = false;
+        try
         {
-            return Task.FromResult(CaptureOnUiThread(request, cancellationToken));
-        }
+            await CaptureGate.WaitAsync(cancellationToken);
+            enteredGate = true;
+            if (!RhinoApp.InvokeRequired)
+            {
+                return CaptureOnUiThread(request, cancellationToken);
+            }
 
-        var completion = new TaskCompletionSource<OverviewThumbnailResult>(
-            TaskCreationOptions.RunContinuationsAsynchronously);
-        RhinoApp.InvokeOnUiThread((Action)(() =>
+            var completion = new TaskCompletionSource<OverviewThumbnailResult>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            RhinoApp.InvokeOnUiThread((Action)(() =>
+            {
+                try
+                {
+                    completion.SetResult(CaptureOnUiThread(request, cancellationToken));
+                }
+                catch (Exception exception)
+                {
+                    completion.SetResult(new OverviewThumbnailResult(
+                        request.Key,
+                        null,
+                        exception.Message));
+                }
+            }));
+            return await completion.Task;
+        }
+        catch (OperationCanceledException)
         {
-            try
-            {
-                completion.SetResult(CaptureOnUiThread(request, cancellationToken));
-            }
-            catch (Exception exception)
-            {
-                completion.SetResult(new OverviewThumbnailResult(
-                    request.Key,
-                    null,
-                    exception.Message));
-            }
-        }));
-        return completion.Task;
+            return new OverviewThumbnailResult(request.Key, null, "Thumbnail capture was cancelled.");
+        }
+        finally
+        {
+            if (enteredGate) CaptureGate.Release();
+        }
     }
 
     private static OverviewThumbnailResult CaptureOnUiThread(
