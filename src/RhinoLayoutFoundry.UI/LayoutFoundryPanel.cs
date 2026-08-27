@@ -157,13 +157,13 @@ public sealed class LayoutFoundryPanel : Panel
         };
         _canvasViewButton = new ToggleButton
         {
-            Text = "◇",
-            ToolTip = "Canvas view",
+            Image = FoundryViewIcons.CartesianPlane(),
+            ToolTip = "Canvas view (spatial board)",
         };
         _thumbnailViewButton = new ToggleButton
         {
-            Text = "▦",
-            ToolTip = "Thumbnail view",
+            Image = FoundryViewIcons.ThumbnailStack(),
+            ToolTip = "Thumbnail view (page grid)",
         };
         FoundryTheme.ConfigureToolbarButton(_listViewButton);
         FoundryTheme.ConfigureToolbarButton(_thumbnailViewButton);

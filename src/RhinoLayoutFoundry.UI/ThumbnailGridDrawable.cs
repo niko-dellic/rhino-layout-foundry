@@ -157,7 +157,7 @@ internal sealed class ThumbnailGridDrawable : Drawable
         }
 
         graphics.DrawRectangle(
-            new Pen(selected ? Color.FromArgb(255, 55, 135, 255) : Color.FromArgb(125, 90, 90, 90),
+            new Pen(selected ? FoundryTheme.SelectionAccent : Color.FromArgb(125, 90, 90, 90),
                 selected ? 3 : 1),
             image);
         graphics.FillEllipse(
