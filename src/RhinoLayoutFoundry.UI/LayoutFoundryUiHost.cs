@@ -608,6 +608,102 @@ public static class LayoutFoundryUiHost
         }
     }
 
+    public static async Task<OperationResult> SetDisplayModeAsync(
+        IReadOnlyList<OverviewNodeKey> targets,
+        Guid displayModeId,
+        CancellationToken cancellationToken = default)
+    {
+        if (_snapshotProvider is null || _mutationService is null)
+            return UnavailableResult("Foundry is not connected to an active Rhino plug-in.");
+        try
+        {
+            var snapshot = _snapshotProvider.Capture();
+            var detailIds = BatchTargetResolver.ResolveDetailIds(snapshot, targets);
+            var plan = new UpdateDetailDisplayModesPlanner().Plan(
+                new UpdateDetailDisplayModesRequest(
+                    snapshot.DocumentRuntimeSerialNumber,
+                    snapshot.Revision,
+                    detailIds,
+                    displayModeId),
+                snapshot);
+            var result = plan.CanApply
+                ? await _mutationService.ApplyAsync(plan, cancellationToken)
+                : new OperationResult(false, plan.Diagnostics);
+            if (result.Succeeded)
+                NotifyOverviewChanged(new OverviewInvalidation(
+                    snapshot.DocumentRuntimeSerialNumber,
+                    OverviewInvalidationKind.Metadata |
+                    OverviewInvalidationKind.Diagnostics |
+                    OverviewInvalidationKind.Thumbnails,
+                    detailIds.ToHashSet()));
+            return result;
+        }
+        catch (InvalidOperationException exception)
+        {
+            return UnavailableResult(exception.Message);
+        }
+    }
+
+    public static async Task<OperationResult> SetPaperSizeAsync(
+        IReadOnlyList<OverviewNodeKey> targets,
+        double width,
+        double height,
+        string unitSystem,
+        CancellationToken cancellationToken = default)
+    {
+        if (_snapshotProvider is null)
+            return UnavailableResult("Foundry is not connected to an active Rhino plug-in.");
+        var snapshot = CaptureSnapshot();
+        if (snapshot is null)
+            return UnavailableResult("The active Rhino document is unavailable.");
+        var sheetIds = BatchTargetResolver.ResolveSheetIds(snapshot, targets);
+        return await BatchUpdateSheetsAsync(new BatchUpdateSheetsRequest(
+            snapshot.DocumentRuntimeSerialNumber,
+            snapshot.Revision,
+            sheetIds,
+            null,
+            1,
+            1,
+            width,
+            height,
+            unitSystem,
+            null), cancellationToken);
+    }
+
+    public static async Task<OperationResult> SetPrintInclusionAsync(
+        IReadOnlyList<OverviewNodeKey> targets,
+        bool include,
+        CancellationToken cancellationToken = default)
+    {
+        if (_snapshotProvider is null || _mutationService is null)
+            return UnavailableResult("Foundry is not connected to an active Rhino plug-in.");
+        try
+        {
+            var snapshot = _snapshotProvider.Capture();
+            var sheetIds = BatchTargetResolver.ResolveSheetIds(snapshot, targets);
+            var plan = new SetPrintInclusionPlanner().Plan(
+                new SetPrintInclusionRequest(
+                    snapshot.DocumentRuntimeSerialNumber,
+                    snapshot.Revision,
+                    sheetIds,
+                    include),
+                snapshot);
+            var result = plan.CanApply
+                ? await _mutationService.ApplyAsync(plan, cancellationToken)
+                : new OperationResult(false, plan.Diagnostics);
+            if (result.Succeeded)
+                NotifyOverviewChanged(new OverviewInvalidation(
+                    snapshot.DocumentRuntimeSerialNumber,
+                    OverviewInvalidationKind.Metadata | OverviewInvalidationKind.Diagnostics,
+                    sheetIds.ToHashSet()));
+            return result;
+        }
+        catch (InvalidOperationException exception)
+        {
+            return UnavailableResult(exception.Message);
+        }
+    }
+
     public static void Reset()
     {
         _overviewProvider = null;

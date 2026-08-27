@@ -70,7 +70,8 @@ public static class LayoutPrintScopeResolver
         var sheetIds = new List<Guid>();
         foreach (var node in nodes)
         {
-            if (node.Key.Kind == OverviewNodeKind.Sheet)
+            if (node.Key.Kind == OverviewNodeKind.Sheet &&
+                node.Sheet?.IncludeInPrintAll != false)
             {
                 sheetIds.Add(node.Key.Id);
             }

@@ -16,7 +16,7 @@ public sealed record DocumentState(
     IReadOnlyDictionary<string, string> Metadata,
     IReadOnlyList<SheetTemplateRecipe>? SheetTemplates = null)
 {
-    public const int CurrentSchemaVersion = 2;
+    public const int CurrentSchemaVersion = 3;
 
     [JsonIgnore]
     public IReadOnlyList<SheetTemplateRecipe> Templates => SheetTemplates ?? [];
@@ -48,7 +48,8 @@ public sealed record SheetRecord(
     int Order,
     IReadOnlyList<string> Tags,
     IReadOnlyDictionary<string, string> Metadata,
-    TitleBlockRole? TitleBlock);
+    TitleBlockRole? TitleBlock,
+    bool IncludeInPrintAll = true);
 
 public sealed record TitleBlockRole(
     Guid InstanceObjectId,

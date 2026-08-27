@@ -87,6 +87,7 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
             [RenameSheetChange rename] => ApplyRename(document, plan, rename),
             [CreateSheetChange create] => ApplyCreateSheet(document, plan, create),
             [BatchUpdateSheetsChange update] => ApplyBatchUpdate(document, plan, update),
+            [UpdateDetailDisplayModesChange updateDetails] => ApplyDetailDisplayModes(document, plan, updateDetails),
             [CaptureSheetTemplateChange capture] => ApplyCaptureTemplate(document, plan, capture),
             [DeleteSheetTemplateChange delete] => ApplyDeleteTemplate(document, plan, delete),
             _ when plan.Changes.All(change => change is DeleteFolderChange or DeleteSheetChange) =>
@@ -103,7 +104,7 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
     private static bool IsDocumentStateChange(OperationChange change)
     {
         return change is AddFolderChange or RenameFolderChange or
-            MoveSheetChange or MoveFolderChange;
+            MoveSheetChange or MoveFolderChange or SetPrintInclusionChange;
     }
 
     private OperationResult ApplyRename(
@@ -176,7 +177,10 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
         RhinoDoc document,
         OperationPlan plan)
     {
-        var beforeState = _stateStore.Get(document);
+        var storedBeforeState = _stateStore.Get(document);
+        var beforeState = plan.Changes.Any(change => change is SetPrintInclusionChange)
+            ? WithCurrentPageRecords(document, storedBeforeState)
+            : storedBeforeState;
         var folders = beforeState.Folders.ToList();
         var sheets = beforeState.Sheets.ToDictionary(pair => pair.Key, pair => pair.Value);
         var pageIds = document.Views.GetPageViews()
@@ -200,6 +204,7 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
                     beforeState.RootFolderId,
                     folders,
                     moveFolder),
+                SetPrintInclusionChange print => ApplyPrintInclusion(sheets, print),
                 _ => Failure("operation.unsupported_plan", "The hierarchy operation is not supported."),
             };
             if (failure is not null)
@@ -226,7 +231,7 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
             var undoEvent = document.AddCustomUndoEvent(
                 plan.UndoDescription,
                 OnUndoDocumentState,
-                new DocumentStateUndoTag(plan.UndoDescription, beforeState));
+                new DocumentStateUndoTag(plan.UndoDescription, storedBeforeState));
             if (!undoEvent)
             {
                 return Failure(
@@ -241,7 +246,7 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
         }
         catch (Exception exception)
         {
-            _stateStore.Set(document, beforeState);
+            _stateStore.Set(document, storedBeforeState);
             return Failure(
                 "operation.apply_failed",
                 $"The hierarchy change failed and the previous state was restored: {exception.Message}");
@@ -250,6 +255,29 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
         {
             document.EndUndoRecord(undoRecord);
         }
+    }
+
+    private static OperationResult? ApplyPrintInclusion(
+        IDictionary<Guid, SheetRecord> sheets,
+        SetPrintInclusionChange change)
+    {
+        foreach (var expected in change.ExpectedValues)
+        {
+            if (!sheets.TryGetValue(expected.Key, out var sheet))
+            {
+                return Failure("print.sheet_missing", "A targeted layout no longer exists.");
+            }
+
+            if (sheet.IncludeInPrintAll != expected.Value)
+            {
+                return Failure("print.before_value_changed",
+                    "Print inclusion changed before this edit was applied.");
+            }
+
+            sheets[expected.Key] = sheet with { IncludeInPrintAll = change.IncludeInPrintAll };
+        }
+
+        return null;
     }
 
     private static OperationResult? ApplyAddFolder(
@@ -920,6 +948,53 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
             document.Views.Redraw();
             return Failure("batch.apply_failed",
                 $"Batch Apply failed and every available before-value was restored: {exception.Message}");
+        }
+    }
+
+    private OperationResult ApplyDetailDisplayModes(
+        RhinoDoc document,
+        OperationPlan plan,
+        UpdateDetailDisplayModesChange update)
+    {
+        var details = document.Views.GetPageViews()
+            .SelectMany(page => page.GetDetailViews())
+            .Where(detail => update.DetailViewportIds.Contains(detail.Viewport.Id))
+            .ToArray();
+        if (details.Length != update.DetailViewportIds.Distinct().Count())
+            return Failure("inline.detail_missing", "A targeted detail viewport no longer exists.");
+
+        var before = details.Select(detail => new DetailModeBefore(
+            detail,
+            detail.Viewport.DisplayMode.Id)).ToArray();
+        try
+        {
+            using var mode = DisplayModeDescription.GetDisplayMode(update.DisplayModeId)
+                ?? throw new InvalidOperationException("The selected display mode is unavailable.");
+            foreach (var detail in details)
+            {
+                detail.Viewport.DisplayMode = mode;
+                if (!detail.CommitViewportChanges())
+                    throw new InvalidOperationException("Rhino did not commit a detail display-mode change.");
+            }
+
+            document.Modified = true;
+            _revisionTracker.Bump(document);
+            document.Views.Redraw();
+            return new OperationResult(true, plan.Diagnostics);
+        }
+        catch (Exception exception)
+        {
+            foreach (var item in before)
+            {
+                using var mode = DisplayModeDescription.GetDisplayMode(item.DisplayModeId);
+                if (mode is null) continue;
+                item.Detail.Viewport.DisplayMode = mode;
+                item.Detail.CommitViewportChanges();
+            }
+
+            document.Views.Redraw();
+            return Failure("inline.apply_failed",
+                $"The display-mode edit failed and every available before-value was restored: {exception.Message}");
         }
     }
 

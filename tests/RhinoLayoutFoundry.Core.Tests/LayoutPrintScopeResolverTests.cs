@@ -45,6 +45,22 @@ public sealed class LayoutPrintScopeResolverTests
         Assert.Empty(result.SheetPageViewIds);
     }
 
+    [Fact]
+    public void ResolveAllOmitsLayoutsExcludedFromPrintAll()
+    {
+        var overview = CreateOverview();
+        overview = overview with
+        {
+            Sheets = overview.Sheets.Select(sheet => sheet.PageViewId == FolderSheetId
+                ? sheet with { IncludeInPrintAll = false }
+                : sheet).ToArray(),
+        };
+
+        var result = LayoutPrintScopeResolver.Resolve(overview, null);
+
+        Assert.Equal([NestedSheetId, RootSheetId], result.SheetPageViewIds);
+    }
+
     private static readonly Guid RootId = Guid.Parse("10000000-0000-0000-0000-000000000001");
     private static readonly Guid FolderId = Guid.Parse("10000000-0000-0000-0000-000000000002");
     private static readonly Guid NestedFolderId = Guid.Parse("10000000-0000-0000-0000-000000000003");

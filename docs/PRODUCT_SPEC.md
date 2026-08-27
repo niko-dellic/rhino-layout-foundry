@@ -89,6 +89,10 @@ Document
 
 Supported properties grow by milestone and include page name, order, paper dimensions, active title block, detail projection, scale, display mode, layer visibility, and named-view assignment. Searchable selectors filter their visible choices as the user types; they do not merely jump to the nearest match.
 
+The hierarchy table is also an immediate property editor. A folder-row paper or display-mode edit applies to all descendant layouts/details, a sheet-row edit applies to that layout, and a detail-row display-mode edit applies only to that viewport. Each sheet stores a Print All inclusion flag; folder rows summarize and toggle all descendant flags, and mixed folder values remain visible. Folder PDF and Print All scopes omit excluded layouts while an explicit single-layout Print command remains available.
+
+Each open 3DM is represented by an explicit, collapsible project-root row above its Foundry folders and Rhino layouts. The root is an aggregate property target but cannot be renamed, dragged, duplicated, or deleted from the hierarchy. Column headers toggle ascending/descending sort within every parent without flattening the tree; name sorting uses natural numeric order. This root boundary is intentionally compatible with a later multi-document overview.
+
 ### 4.3 Organize sheets
 
 - Create, rename, reorder, nest, and remove folders.

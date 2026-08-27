@@ -5,15 +5,17 @@ namespace RhinoLayoutFoundry.Core.Tests;
 public sealed class OverviewTreeBuilderTests
 {
     [Fact]
-    public void HidesPersistenceRootAndBuildsTopLevelFoldersAndSheets()
+    public void WrapsTopLevelFoldersAndSheetsInDocumentRoot()
     {
         var roots = OverviewTreeBuilder.Build(CreateOverview());
 
-        Assert.Equal(2, roots.Count);
-        Assert.Equal("Plans", roots[0].Label);
-        Assert.Equal("A-001", roots[0].Children[0].Label);
-        Assert.Equal("Main Plan", roots[0].Children[0].Children[0].Label);
-        Assert.Equal("A-100", roots[1].Label);
+        var root = Assert.Single(roots);
+        Assert.True(root.IsDocumentRoot);
+        Assert.Equal("Test", root.Label);
+        Assert.Equal("Plans", root.Children[0].Label);
+        Assert.Equal("A-001", root.Children[0].Children[0].Label);
+        Assert.Equal("Main Plan", root.Children[0].Children[0].Children[0].Label);
+        Assert.Equal("A-100", root.Children[1].Label);
         Assert.False(Flatten(roots).Any(node => node.Label == "Unorganized"));
     }
 
@@ -23,9 +25,10 @@ public sealed class OverviewTreeBuilderTests
         var roots = OverviewTreeBuilder.Build(CreateOverview(), "plans");
 
         Assert.Single(roots);
-        Assert.Equal("Plans", roots[0].Label);
+        Assert.Equal("Test", roots[0].Label);
         Assert.Single(roots[0].Children);
-        Assert.Equal(2, roots[0].Children[0].Children.Count);
+        Assert.Equal("Plans", roots[0].Children[0].Label);
+        Assert.Equal(2, roots[0].Children[0].Children[0].Children.Count);
     }
 
     [Fact]
@@ -42,7 +45,7 @@ public sealed class OverviewTreeBuilderTests
         var roots = OverviewTreeBuilder.Build(CreateOverview(), "issue-a");
 
         Assert.Single(roots);
-        var sheet = roots[0].Children[0];
+        var sheet = Flatten(roots).Single(node => node.Key.Kind == OverviewNodeKind.Sheet);
         Assert.Equal("A-001", sheet.Label);
         Assert.Equal(2, sheet.Children.Count);
     }
@@ -52,7 +55,7 @@ public sealed class OverviewTreeBuilderTests
     {
         var roots = OverviewTreeBuilder.Build(CreateOverview(), "ceiling");
 
-        var sheet = roots[0].Children[0];
+        var sheet = Flatten(roots).Single(node => node.Key.Kind == OverviewNodeKind.Sheet);
         Assert.Single(sheet.Children);
         Assert.Equal("Ceiling Plan", sheet.Children[0].Label);
     }
@@ -115,7 +118,7 @@ public sealed class OverviewTreeBuilderTests
 
         var roots = OverviewTreeBuilder.Build(overview);
 
-        Assert.Contains(roots, child => child.Label == "A-100");
+        Assert.Contains(roots[0].Children, child => child.Label == "A-100");
     }
 
     private static DocumentOverview CreateOverview()

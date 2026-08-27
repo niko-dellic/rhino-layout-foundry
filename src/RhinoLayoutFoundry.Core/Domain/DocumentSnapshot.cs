@@ -39,7 +39,8 @@ public sealed record SheetSnapshot(
     string PageUnitSystem = "",
     IReadOnlyList<DetailSnapshot>? DetailSettings = null,
     Guid? TitleBlockInstanceObjectId = null,
-    string? TitleBlockDefinitionName = null)
+    string? TitleBlockDefinitionName = null,
+    bool IncludeInPrintAll = true)
 {
     public IReadOnlyList<DetailSnapshot> Details => DetailSettings ?? [];
 }

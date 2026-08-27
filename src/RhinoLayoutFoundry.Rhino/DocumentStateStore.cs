@@ -58,7 +58,7 @@ internal sealed class DocumentStateStore
 
             var schemaVersion = (int)envelope[SchemaVersionKey];
             var payload = envelope[PayloadKey] as string;
-            if ((schemaVersion != 1 && schemaVersion != DocumentState.CurrentSchemaVersion) ||
+            if ((schemaVersion is < 1 or > DocumentState.CurrentSchemaVersion) ||
                 string.IsNullOrWhiteSpace(payload))
             {
                 _states[document.RuntimeSerialNumber] = DocumentState.Empty();

@@ -54,7 +54,9 @@ internal sealed class RhinoDocumentOverviewProvider : IDocumentOverviewProvider
                         string.IsNullOrWhiteSpace(detail.DescriptiveTitle)
                             ? $"Detail {index + 1}"
                             : detail.DescriptiveTitle,
-                        index))
+                        index,
+                        detail.Viewport.DisplayMode.Id,
+                        detail.Viewport.DisplayMode.LocalName))
                     .ToArray();
 
                 var sheet = new SheetOverview(
@@ -63,7 +65,11 @@ internal sealed class RhinoDocumentOverviewProvider : IDocumentOverviewProvider
                     page.PageName,
                     record?.Order ?? page.PageNumber,
                     record?.Tags ?? [],
-                    details);
+                    details,
+                    PageWidth: page.PageWidth,
+                    PageHeight: page.PageHeight,
+                    PageUnitSystem: document.PageUnitSystem.ToString(),
+                    IncludeInPrintAll: record?.IncludeInPrintAll ?? true);
                 return sheet with
                 {
                     Diagnostics = OverviewDiagnostics.ForSheet(
@@ -76,7 +82,7 @@ internal sealed class RhinoDocumentOverviewProvider : IDocumentOverviewProvider
 
         var documentName = string.IsNullOrWhiteSpace(document.Name)
             ? "Untitled Rhino document"
-            : document.Name;
+            : Path.GetFileNameWithoutExtension(document.Name);
 
         return new DocumentOverview(
             document.RuntimeSerialNumber,

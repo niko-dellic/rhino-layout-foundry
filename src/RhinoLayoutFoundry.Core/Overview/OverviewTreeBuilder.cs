@@ -37,8 +37,10 @@ public sealed record OverviewTreeNode(
     string SecondaryText,
     IReadOnlyList<OverviewTreeNode> Children,
     SheetOverview? Sheet = null,
+    DetailOverview? Detail = null,
     OverviewNavigationTarget? NavigationTarget = null,
-    IReadOnlyList<OverviewIssue>? Diagnostics = null)
+    IReadOnlyList<OverviewIssue>? Diagnostics = null,
+    bool IsDocumentRoot = false)
 {
     public IReadOnlyList<OverviewIssue> Issues => Diagnostics ?? [];
 
@@ -89,15 +91,27 @@ public static class OverviewTreeBuilder
                     .ThenBy(sheet => sheet.Name, StringComparer.OrdinalIgnoreCase)
                     .ToArray());
 
-        // The root folder is a persistence detail, not a row. Its children are the
-        // Foundry equivalent of files and folders in the same directory.
-        return BuildFolderChildren(
+        var rootChildren = BuildFolderChildren(
             rootId,
             childFolders,
             sheetsByFolder,
             filter,
             new HashSet<Guid> { rootId },
             includeAllTextMatches: false);
+        if (filter.IsActive && rootChildren.Count == 0)
+        {
+            return [];
+        }
+
+        return
+        [
+            new OverviewTreeNode(
+                new OverviewNodeKey(OverviewNodeKind.Folder, rootId),
+                overview.DocumentName,
+                Pluralize(CountSheets(rootChildren), "sheet"),
+                rootChildren,
+                IsDocumentRoot: true),
+        ];
     }
 
     private static IReadOnlyList<OverviewTreeNode> BuildFolderChildren(
@@ -201,6 +215,7 @@ public static class OverviewTreeBuilder
                     detail.Name,
                     "Detail viewport",
                     [],
+                    Detail: detail,
                     NavigationTarget: new OverviewNavigationTarget(
                         sheet.PageViewId,
                         detail.DetailViewportId)))
@@ -217,9 +232,9 @@ public static class OverviewTreeBuilder
             sheet.Name,
             Pluralize(sheet.DetailCount, "detail"),
             details,
-            sheet,
-            new OverviewNavigationTarget(sheet.PageViewId),
-            sheet.Issues);
+            Sheet: sheet,
+            NavigationTarget: new OverviewNavigationTarget(sheet.PageViewId),
+            Diagnostics: sheet.Issues);
     }
 
     private static bool MatchesKind(SheetOverview sheet, OverviewFilterKind kind)

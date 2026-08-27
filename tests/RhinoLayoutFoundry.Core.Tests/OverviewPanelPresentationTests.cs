@@ -44,7 +44,7 @@ public sealed class OverviewPanelPresentationTests
     }
 
     [Fact]
-    public void EmptyDocumentDoesNotRenderAnEmptyRootAsContent()
+    public void EmptyDocumentStillRendersItsCollapsibleProjectRoot()
     {
         var rootId = Guid.NewGuid();
         var overview = new DocumentOverview(
@@ -59,9 +59,9 @@ public sealed class OverviewPanelPresentationTests
             new OverviewTreeFilter(null),
             []);
 
-        Assert.Equal(OverviewContentState.EmptyDocument, presentation.ContentState);
+        Assert.Equal(OverviewContentState.Hierarchy, presentation.ContentState);
         Assert.Equal("0 sheets · 0 details", presentation.DocumentSummary);
-        Assert.Equal("No layout sheets yet", presentation.EmptyTitle);
+        Assert.Equal(string.Empty, presentation.EmptyTitle);
     }
 
     [Fact]

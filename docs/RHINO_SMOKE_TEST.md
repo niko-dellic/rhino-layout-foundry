@@ -106,7 +106,14 @@ Alternatively, launch the `Rhino 8 (Windows)` configuration from VS Code.
 2. On Windows, wait for visible sheet previews to populate. On macOS, confirm the resize-safe text-only hierarchy does not start preview capture.
 3. Create or open a diagnostic fixture with a duplicate sheet name, missing Foundry folder reference, or sheet without details. Confirm the Status column reports `Info · n`, `Warning · n`, or `Error · n` without hiding the row.
 4. On Windows, resize across compact, standard, and wide breakpoints; confirm filters and selection survive. On macOS, close and reopen the panel at the intended dock width to select its density, then confirm native splitter resizing remains responsive.
-5. Confirm both toolbar rows remain compact and no separate gray surface bands appear behind them. On macOS, confirm metadata and diagnostics appear inline in the single hierarchy column.
+5. Confirm both toolbar rows remain compact and no separate gray surface bands appear behind them. Confirm the hierarchy shows fixed Name, Print, Paper size, Details, Display mode, and Status columns.
+6. Confirm the first column header remains exactly `Layouts`; sheet/detail totals, filtered results, and selection counts must update in the bottom bar without shifting any column header.
+7. Confirm the active 3DM filename without its extension appears as the top project-root row. Collapse it, trigger an automatic refresh, and confirm it remains collapsed. Confirm its context menu offers root creation and Print All but not rename, drag, duplicate, or delete.
+8. Click every property header twice. Confirm each sibling group sorts ascending and then descending without flattening folders; verify `Page 2` sorts before `Page 10` by name.
+9. Resize the dock repeatedly on macOS, including narrow and wide extremes. Confirm Rhino remains responsive, columns keep fixed widths, and no thumbnail or column-visibility work occurs during splitter tracking.
+10. Toggle the Print light on one layout and confirm Print All omits it. Toggle a populated folder and confirm every descendant layout follows; a mixed folder shows the mixed indicator.
+11. Change a folder paper preset and confirm every descendant layout changes without activation. Change a sheet preset and confirm siblings do not change.
+12. Change display mode on a folder, a sheet, and a single detail. Confirm the scopes are respectively all descendant details, all details on the sheet, and only the selected detail.
 
 ## 6. Batch-properties and mutation-capability checks
 

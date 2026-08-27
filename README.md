@@ -47,7 +47,7 @@ Rhino documentation and users often use “page,” “layout,” and “sheet�
 
 RhinoCommon is Rhino's supported [cross-platform .NET plug-in SDK](https://developer.rhino3d.com/guides/rhinocommon/). Rhino 8.20 and later default to .NET 8, which is the project's initial runtime target. Rust is not part of the initial implementation; it would be considered only for an isolated workload after profiling demonstrates a material need.
 
-The current Windows hierarchy uses the full multi-column table with inline previews. The macOS dock uses a resize-safe single text column with detail metadata and diagnostics folded into each row; inline previews remain disabled there until a stable native presentation path replaces the affected Rhino/Eto multi-column image table.
+The hierarchy is a fixed-column property table on both platforms: Name, Print, Paper size, Details, Display mode, and Status. The active 3DM/project is an explicit top-level row that can collapse its entire hierarchy and provides a future boundary for multi-document management. Every property header sorts sibling rows ascending or descending while retaining hierarchy, including Finder-style numeric name ordering. Print inclusion, standard paper sizes, and display modes can be changed directly from the table at folder, sheet, or detail scope. The macOS implementation deliberately remains text-only and never reconfigures columns during splitter tracking; inline previews remain disabled there to avoid the Rhino/Eto multi-column image-table recursion previously isolated during dock resizing.
 
 ## Documentation
 

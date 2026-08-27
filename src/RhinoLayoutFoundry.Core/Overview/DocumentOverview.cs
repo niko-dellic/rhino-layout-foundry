@@ -32,7 +32,11 @@ public sealed record SheetOverview(
     int Order,
     IReadOnlyList<string> Tags,
     IReadOnlyList<DetailOverview> Details,
-    IReadOnlyList<OverviewIssue>? Diagnostics = null)
+    IReadOnlyList<OverviewIssue>? Diagnostics = null,
+    double PageWidth = 0,
+    double PageHeight = 0,
+    string PageUnitSystem = "",
+    bool IncludeInPrintAll = true)
 {
     public int DetailCount => Details.Count;
 
@@ -44,7 +48,9 @@ public sealed record SheetOverview(
 public sealed record DetailOverview(
     Guid DetailViewportId,
     string Name,
-    int Order);
+    int Order,
+    Guid DisplayModeId = default,
+    string DisplayModeName = "");
 
 public readonly record struct DocumentOverviewIdentity(
     uint? DocumentRuntimeSerialNumber,

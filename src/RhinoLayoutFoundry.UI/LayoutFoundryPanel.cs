@@ -12,6 +12,7 @@ public sealed class LayoutFoundryPanel : Panel
     private const string InternalHierarchyDragType = "application/x-layout-foundry-hierarchy";
     private readonly Label _emptyTitleLabel;
     private readonly Label _emptyDescriptionLabel;
+    private readonly Label _summaryLabel;
     private readonly Label _statusLabel;
     private readonly SearchBox _filterTextBox;
     private readonly DropDown _filterKindDropDown;
@@ -27,7 +28,12 @@ public sealed class LayoutFoundryPanel : Panel
     private readonly bool _usesMacSafeHierarchy = OperatingSystem.IsMacOS();
     private readonly TreeGridView _treeGrid;
     private readonly GridColumn _layoutsColumn;
+    private readonly GridColumn _printColumn;
+    private readonly GridColumn _paperColumn;
     private readonly GridColumn _detailsColumn;
+    private readonly GridColumn _displayModeColumn;
+    private readonly ComboBoxCell _paperCell;
+    private readonly ComboBoxCell _displayModeCell;
     private readonly Panel _contentHost;
     private readonly Panel _toolbarSurface;
     private readonly Panel _renameActions;
@@ -54,6 +60,7 @@ public sealed class LayoutFoundryPanel : Panel
     private readonly OverviewThumbnailRequestQueue _thumbnailQueue = new();
     private readonly Dictionary<OverviewThumbnailKey, Bitmap> _thumbnailBitmaps = [];
     private readonly Dictionary<Guid, HierarchyTreeItem> _sheetItems = [];
+    private readonly HashSet<OverviewNodeKey> _collapsedNodeKeys = [];
     private IReadOnlyList<HierarchyTreeItem> _renderedTreeItems = [];
     private readonly object _invalidationSyncRoot = new();
     private DocumentOverview _overview = DocumentOverview.NoDocument;
@@ -66,6 +73,8 @@ public sealed class LayoutFoundryPanel : Panel
     private bool _isApplyingResponsiveLayout;
     private bool _thumbnailCaptureInProgress;
     private bool _dragInProgress;
+    private OverviewSortProperty _sortProperty = OverviewSortProperty.None;
+    private OverviewSortDirection _sortDirection = OverviewSortDirection.Ascending;
     private PointF? _dragStart;
     private HierarchyTreeItem? _dragSourceItem;
     private IReadOnlyList<OverviewNodeKey> _dragSourceKeys = [];
@@ -85,7 +94,9 @@ public sealed class LayoutFoundryPanel : Panel
         };
         _emptyDescriptionLabel = FoundryTheme.MutedLabel();
         _emptyDescriptionLabel.TextAlignment = TextAlignment.Center;
+        _summaryLabel = FoundryTheme.MutedLabel();
         _statusLabel = FoundryTheme.MutedLabel();
+        _statusLabel.TextAlignment = TextAlignment.Right;
 
         _filterTextBox = new SearchBox
         {
@@ -155,7 +166,15 @@ public sealed class LayoutFoundryPanel : Panel
         _creationPageMenuItem.Click += (_, _) => QueueOpenCreateLayouts(ResolveCreationDestinationFolderId());
         _creationMenu = new ContextMenu(_creationFolderMenuItem, _creationPageMenuItem);
 
-        (_treeGrid, _layoutsColumn, _detailsColumn) = CreateTreeGrid();
+        _paperCell = new ComboBoxCell(nameof(HierarchyTreeItem.PaperText))
+        {
+            DataStore = PaperSizeChoices.Select(choice => choice.Label).ToArray(),
+        };
+        _displayModeCell = new ComboBoxCell(nameof(HierarchyTreeItem.DisplayModeText))
+        {
+            DataStore = new[] { "—" },
+        };
+        (_treeGrid, _layoutsColumn, _printColumn, _paperColumn, _detailsColumn, _displayModeColumn) = CreateTreeGrid();
         CreateHierarchyContextMenu();
         _toolbarSurface = FoundryTheme.Surface(
             CreateToolbarContent(),
@@ -185,7 +204,17 @@ public sealed class LayoutFoundryPanel : Panel
         _treeGrid.DragOver += OnTreeDragOver;
         _treeGrid.DragDrop += async (_, eventArgs) => await CompleteInternalDragAsync(eventArgs);
         _treeGrid.DragEnd += (_, _) => ResetPendingDrag();
-        _treeGrid.CellEdited += async (_, eventArgs) => await CommitInlineDraftAsync(eventArgs);
+        _treeGrid.CellClick += async (_, eventArgs) => await OnTreeCellClickAsync(eventArgs);
+        _treeGrid.CellEdited += async (_, eventArgs) => await OnTreeCellEditedAsync(eventArgs);
+        _treeGrid.ColumnHeaderClick += (_, eventArgs) => OnColumnHeaderClick(eventArgs);
+        _treeGrid.Collapsed += (_, eventArgs) =>
+        {
+            if (eventArgs.Item is HierarchyTreeItem item) _collapsedNodeKeys.Add(item.Node.Key);
+        };
+        _treeGrid.Expanded += (_, eventArgs) =>
+        {
+            if (eventArgs.Item is HierarchyTreeItem item) _collapsedNodeKeys.Remove(item.Node.Key);
+        };
         _filterTextBox.TextChanged += (_, _) => OnFilterChanged();
         _filterKindDropDown.SelectedIndexChanged += (_, _) => OnFilterChanged();
         _clearFilterButton.Click += (_, _) => ClearFilter();
@@ -222,7 +251,8 @@ public sealed class LayoutFoundryPanel : Panel
         RefreshOverview();
     }
 
-    private (TreeGridView TreeGrid, GridColumn LayoutsColumn, GridColumn DetailsColumn) CreateTreeGrid()
+    private (TreeGridView TreeGrid, GridColumn LayoutsColumn, GridColumn PrintColumn,
+        GridColumn PaperColumn, GridColumn DetailsColumn, GridColumn DisplayModeColumn) CreateTreeGrid()
     {
         var treeGrid = new TreeGridView
         {
@@ -232,48 +262,78 @@ public sealed class LayoutFoundryPanel : Panel
         };
         var layoutsColumn = new GridColumn
         {
-            HeaderText = _usesMacSafeHierarchy ? "Layouts" : "Name",
+            HeaderText = "Layouts",
             DataCell = CreateLayoutsDataCell(inlineEditing: false),
-            Expand = true,
+            Width = 260,
             Editable = false,
+            Sortable = true,
         };
         treeGrid.Columns.Add(layoutsColumn);
+        var printColumn = new GridColumn
+        {
+            HeaderText = "Print",
+            DataCell = new TextBoxCell
+            {
+                Binding = Binding.Property<HierarchyTreeItem, string>(item => item.PrintText),
+            },
+            Width = 52,
+            Sortable = true,
+        };
+        treeGrid.Columns.Add(printColumn);
+        var paperColumn = new GridColumn
+        {
+            HeaderText = "Paper size",
+            DataCell = _paperCell,
+            Width = 178,
+            Editable = true,
+            Sortable = true,
+        };
+        treeGrid.Columns.Add(paperColumn);
         var detailsColumn = new GridColumn
         {
             HeaderText = "Details",
             DataCell = new TextBoxCell
             {
-                Binding = Binding.Property<HierarchyTreeItem, string>(item => item.SecondaryText),
+                Binding = Binding.Property<HierarchyTreeItem, string>(item => item.DetailsText),
             },
-            Width = 190,
+            Width = 70,
+            Sortable = true,
         };
-        if (!_usesMacSafeHierarchy)
+        treeGrid.Columns.Add(detailsColumn);
+        var displayModeColumn = new GridColumn
         {
-            treeGrid.Columns.Add(detailsColumn);
-            treeGrid.Columns.Add(new GridColumn
+            HeaderText = "Display mode",
+            DataCell = _displayModeCell,
+            Width = 175,
+            Editable = true,
+            Sortable = true,
+        };
+        treeGrid.Columns.Add(displayModeColumn);
+        treeGrid.Columns.Add(new GridColumn
+        {
+            HeaderText = "Status",
+            DataCell = new TextBoxCell
             {
-                HeaderText = "Status",
-                DataCell = new TextBoxCell
-                {
-                    Binding = Binding.Property<HierarchyTreeItem, string>(item => item.StatusText),
-                },
-                Width = 82,
-            });
-        }
+                Binding = Binding.Property<HierarchyTreeItem, string>(item => item.StatusText),
+            },
+            Width = 82,
+            Sortable = true,
+        });
 
-        return (treeGrid, layoutsColumn, detailsColumn);
+        return (treeGrid, layoutsColumn, printColumn, paperColumn, detailsColumn, displayModeColumn);
     }
 
     private Cell CreateLayoutsDataCell(bool inlineEditing)
     {
-        return _usesMacSafeHierarchy || inlineEditing
+        return inlineEditing || _usesMacSafeHierarchy
             ? new TextBoxCell
             {
                 Binding = Binding.Property<HierarchyTreeItem, string>(item => item.DisplayText),
             }
-            : new ImageTextCell(
-                nameof(HierarchyTreeItem.Thumbnail),
-                nameof(HierarchyTreeItem.PrimaryText));
+            : new TextBoxCell
+            {
+                Binding = Binding.Property<HierarchyTreeItem, string>(item => item.DisplayText),
+            };
     }
 
     private void SetInlineEditing(bool enabled)
@@ -431,7 +491,15 @@ public sealed class LayoutFoundryPanel : Panel
             Items =
             {
                 _renameActions,
-                _statusLabel,
+                new TableLayout
+                {
+                    Rows =
+                    {
+                        new TableRow(
+                            new TableCell(_summaryLabel, scaleWidth: true),
+                            new TableCell(_statusLabel)),
+                    },
+                },
             },
         };
     }
@@ -504,7 +572,8 @@ public sealed class LayoutFoundryPanel : Panel
         }
         else if (eventArgs.Modifiers == Keys.None &&
                  eventArgs.Key is Keys.Delete or Keys.Backspace &&
-                 SelectedItemCount() > 0)
+                 SelectedItemCount() > 0 &&
+                 SelectedItems().All(item => !item.Node.IsDocumentRoot))
         {
             _ = DeleteSelectionAsync();
             eventArgs.Handled = true;
@@ -607,7 +676,13 @@ public sealed class LayoutFoundryPanel : Panel
 
     private async Task DuplicateSelectionAsync()
     {
-        var keys = SelectedItems().Select(item => item.Node.Key).Distinct().ToArray();
+        var selected = SelectedItems();
+        if (selected.Any(item => item.Node.IsDocumentRoot))
+        {
+            _statusLabel.Text = "The project root cannot be duplicated.";
+            return;
+        }
+        var keys = selected.Select(item => item.Node.Key).Distinct().ToArray();
         if (keys.Length == 0) return;
         _statusLabel.Text = $"Duplicating {keys.Length} selected item{(keys.Length == 1 ? string.Empty : "s")}…";
         var result = await LayoutFoundryUiHost.DuplicateSelectionAsync(keys);
@@ -623,7 +698,13 @@ public sealed class LayoutFoundryPanel : Panel
 
     private async Task DeleteSelectionAsync()
     {
-        var keys = SelectedItems().Select(item => item.Node.Key).Distinct().ToArray();
+        var selected = SelectedItems();
+        if (selected.Any(item => item.Node.IsDocumentRoot))
+        {
+            _statusLabel.Text = "The project root cannot be deleted.";
+            return;
+        }
+        var keys = selected.Select(item => item.Node.Key).Distinct().ToArray();
         var snapshot = LayoutFoundryUiHost.CaptureSnapshot();
         if (keys.Length == 0 || snapshot is null) return;
         var resolved = HierarchySelectionResolver.Resolve(snapshot, keys);
@@ -823,6 +904,7 @@ public sealed class LayoutFoundryPanel : Panel
     private void RefreshOverview()
     {
         _overview = LayoutFoundryUiHost.CaptureOverview();
+        RefreshPropertyChoiceLists();
         if (_documentSerialNumber != _overview.DocumentRuntimeSerialNumber)
         {
             if (_documentSerialNumber is { } previousSerial)
@@ -833,6 +915,7 @@ public sealed class LayoutFoundryPanel : Panel
 
             ResetThumbnailCapture();
             _selection.Clear();
+            _collapsedNodeKeys.Clear();
             _documentSerialNumber = _overview.DocumentRuntimeSerialNumber;
         }
 
@@ -840,11 +923,34 @@ public sealed class LayoutFoundryPanel : Panel
         PopulateTree();
     }
 
+    private void RefreshPropertyChoiceLists()
+    {
+        var paperLabels = PaperSizeChoices.Select(choice => choice.Label)
+            .Concat(_overview.Sheets
+                .Where(sheet => sheet.PageWidth > 0 && sheet.PageHeight > 0)
+                .Select(PaperLabel))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        _paperCell.DataStore = paperLabels;
+
+        var snapshot = LayoutFoundryUiHost.CaptureSnapshot();
+        _displayModeCell.DataStore = new[] { "—", "Mixed" }
+            .Concat(snapshot?.DisplayModes.Values ?? [])
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(value => value is "—" or "Mixed" ? 0 : 1)
+            .ThenBy(value => value, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
     private void PopulateTree()
     {
         var filter = CurrentFilter;
         var renderOverview = OverviewWithInlineDraft();
-        var nodes = OverviewTreeBuilder.Build(renderOverview, filter);
+        var nodes = OverviewTreeSorter.Sort(
+            OverviewTreeBuilder.Build(renderOverview, filter),
+            _sortProperty,
+            _sortDirection);
         var nodeKeys = Flatten(nodes).Select(node => node.Key).ToHashSet();
         var draftKey = _inlineDraft is { } draft
             ? new OverviewNodeKey(
@@ -862,7 +968,8 @@ public sealed class LayoutFoundryPanel : Panel
                 filter.IsActive,
                 preferredSelection,
                 _usesMacSafeHierarchy,
-                _inlineDraft?.Id))
+                _inlineDraft?.Id,
+                _collapsedNodeKeys))
             .ToArray();
         _renderedTreeItems = items;
         var visibleItems = Flatten(items).ToDictionary(item => item.Node.Key);
@@ -950,7 +1057,10 @@ public sealed class LayoutFoundryPanel : Panel
         var hierarchyContext = selectedItems.Count > 0
             ? presentation.SelectionSummary
             : presentation.ResultSummary;
-        _layoutsColumn.HeaderText = OverviewHierarchyHeader.Create(_overview, hierarchyContext);
+        UpdateSortHeaders();
+        _summaryLabel.Text = string.IsNullOrWhiteSpace(hierarchyContext)
+            ? presentation.DocumentSummary
+            : $"{presentation.DocumentSummary}  ·  {hierarchyContext}";
         _emptyTitleLabel.Text = presentation.EmptyTitle;
         _emptyDescriptionLabel.Text = presentation.EmptyDescription;
 
@@ -968,6 +1078,56 @@ public sealed class LayoutFoundryPanel : Panel
 
         UpdateSelectionActions(presentation, selectedItems);
     }
+
+    private void OnColumnHeaderClick(GridColumnEventArgs eventArgs)
+    {
+        var property = ReferenceEquals(eventArgs.Column, _layoutsColumn)
+            ? OverviewSortProperty.Name
+            : ReferenceEquals(eventArgs.Column, _printColumn)
+                ? OverviewSortProperty.Print
+                : ReferenceEquals(eventArgs.Column, _paperColumn)
+                    ? OverviewSortProperty.PaperSize
+                    : ReferenceEquals(eventArgs.Column, _detailsColumn)
+                        ? OverviewSortProperty.DetailCount
+                        : ReferenceEquals(eventArgs.Column, _displayModeColumn)
+                            ? OverviewSortProperty.DisplayMode
+                            : OverviewSortProperty.Status;
+        if (_sortProperty == property)
+        {
+            _sortDirection = _sortDirection == OverviewSortDirection.Ascending
+                ? OverviewSortDirection.Descending
+                : OverviewSortDirection.Ascending;
+        }
+        else
+        {
+            _sortProperty = property;
+            _sortDirection = OverviewSortDirection.Ascending;
+        }
+
+        PopulateTree();
+    }
+
+    private void UpdateSortHeaders()
+    {
+        _layoutsColumn.HeaderText = SortHeader("Layouts", OverviewSortProperty.Name);
+        _printColumn.HeaderText = SortHeader("Print", OverviewSortProperty.Print);
+        _paperColumn.HeaderText = SortHeader("Paper size", OverviewSortProperty.PaperSize);
+        _detailsColumn.HeaderText = SortHeader("Details", OverviewSortProperty.DetailCount);
+        _displayModeColumn.HeaderText = SortHeader("Display mode", OverviewSortProperty.DisplayMode);
+        var statusColumn = _treeGrid.Columns.FirstOrDefault(column =>
+            !ReferenceEquals(column, _layoutsColumn) &&
+            !ReferenceEquals(column, _printColumn) &&
+            !ReferenceEquals(column, _paperColumn) &&
+            !ReferenceEquals(column, _detailsColumn) &&
+            !ReferenceEquals(column, _displayModeColumn));
+        if (statusColumn is not null)
+            statusColumn.HeaderText = SortHeader("Status", OverviewSortProperty.Status);
+    }
+
+    private string SortHeader(string label, OverviewSortProperty property) =>
+        _sortProperty == property
+            ? $"{label} {(_sortDirection == OverviewSortDirection.Ascending ? "▲" : "▼")}"
+            : label;
 
     private void UpdateSelectionActions(
         OverviewPanelPresentation presentation,
@@ -1073,6 +1233,93 @@ public sealed class LayoutFoundryPanel : Panel
             _treeGrid.ScrollToRow(row);
             _treeGrid.BeginEdit(row, 0);
         });
+    }
+
+    private async Task OnTreeCellClickAsync(GridCellMouseEventArgs eventArgs)
+    {
+        if (!ReferenceEquals(eventArgs.GridColumn, _printColumn) ||
+            eventArgs.Item is not HierarchyTreeItem item ||
+            !item.HasSheetTargets)
+        {
+            return;
+        }
+
+        var include = !item.AllPrintIncluded;
+        _statusLabel.Text = include
+            ? "Including layouts in Print All…"
+            : "Excluding layouts from Print All…";
+        var result = await LayoutFoundryUiHost.SetPrintInclusionAsync([item.Node.Key], include);
+        _statusLabel.Text = result.Succeeded
+            ? include
+                ? "Included in Print All."
+                : "Excluded from Print All."
+            : DiagnosticMessage(result);
+        RefreshOverview();
+    }
+
+    private async Task OnTreeCellEditedAsync(GridViewCellEventArgs eventArgs)
+    {
+        if (_inlineDraft is not null)
+        {
+            await CommitInlineDraftAsync(eventArgs);
+            return;
+        }
+
+        if (eventArgs.Item is not HierarchyTreeItem item)
+            return;
+
+        OperationResult? result = null;
+        if (ReferenceEquals(eventArgs.GridColumn, _paperColumn))
+        {
+            var choice = PaperSizeChoices.FirstOrDefault(candidate =>
+                string.Equals(candidate.Label, item.PaperText, StringComparison.OrdinalIgnoreCase));
+            if (choice is null || !item.HasSheetTargets)
+            {
+                _statusLabel.Text = item.HasSheetTargets
+                    ? "Choose one of the standard paper sizes from the list."
+                    : "Paper size applies to folders and layouts, not individual details.";
+                RefreshOverview();
+                return;
+            }
+
+            _statusLabel.Text = $"Setting {choice.Label}…";
+            result = await LayoutFoundryUiHost.SetPaperSizeAsync(
+                [item.Node.Key],
+                choice.Width,
+                choice.Height,
+                choice.UnitSystem);
+        }
+        else if (ReferenceEquals(eventArgs.GridColumn, _displayModeColumn))
+        {
+            if (!item.HasDetailTargets || item.DisplayModeText is "—" or "Mixed")
+            {
+                _statusLabel.Text = item.HasDetailTargets
+                    ? "Choose a Rhino display mode from the list."
+                    : "This row does not contain any detail viewports.";
+                RefreshOverview();
+                return;
+            }
+
+            var snapshot = LayoutFoundryUiHost.CaptureSnapshot();
+            var mode = snapshot?.DisplayModes.FirstOrDefault(pair => string.Equals(
+                pair.Value,
+                item.DisplayModeText,
+                StringComparison.OrdinalIgnoreCase));
+            if (mode is null || mode.Value.Key == Guid.Empty)
+            {
+                _statusLabel.Text = "The selected Rhino display mode is unavailable.";
+                RefreshOverview();
+                return;
+            }
+
+            _statusLabel.Text = $"Setting {mode.Value.Value}…";
+            result = await LayoutFoundryUiHost.SetDisplayModeAsync([item.Node.Key], mode.Value.Key);
+        }
+
+        if (result is null)
+            return;
+        _statusLabel.Text = result.Succeeded ? "Layout properties updated." : DiagnosticMessage(result);
+        RefreshOverview();
     }
 
     private async Task CommitInlineDraftAsync(GridViewCellEventArgs eventArgs)
@@ -1188,14 +1435,15 @@ public sealed class LayoutFoundryPanel : Panel
         var folder = SelectedFolderItem();
         var selectedItems = SelectedItems();
         var selectionCount = selectedItems.Count;
+        var isDocumentContext = selectedItems is [{ Node.IsDocumentRoot: true }];
         var selectedSheet = selectedItems.Count == 1
             ? ResolveSheetPageViewId(selectedItems[0])
             : null;
-        var isFolderContext = folder is not null;
+        var isFolderContext = folder is not null && !isDocumentContext;
         var isSheetContext = selectedSheet is not null;
-        var isRootContext = selectedItems.Count == 0;
+        var isRootContext = selectedItems.Count == 0 || isDocumentContext;
         _contextDestinationFolderId = ResolveCreationDestinationFolderId();
-        _contextPrintFolderId = folder?.Node.Key.Id;
+        _contextPrintFolderId = isFolderContext ? folder?.Node.Key.Id : null;
         var printScope = LayoutPrintScopeResolver.Resolve(_overview, _contextPrintFolderId);
         var destinationName = _overview.Folders
             .FirstOrDefault(candidate => candidate.Id == _contextDestinationFolderId)?.Name;
@@ -1211,10 +1459,10 @@ public sealed class LayoutFoundryPanel : Panel
         _newPageMenuItem.Text = destinationName is null || _contextDestinationFolderId == _overview.RootFolderId
             ? "New Layout…"
             : $"New Layout in {destinationName}…";
-        _duplicateSelectionMenuItem.Visible = selectionCount > 0;
-        _duplicateSelectionMenuItem.Enabled = selectionCount > 0;
-        _deleteSelectionMenuItem.Visible = selectionCount > 0;
-        _deleteSelectionMenuItem.Enabled = selectionCount > 0;
+        _duplicateSelectionMenuItem.Visible = selectionCount > 0 && !isDocumentContext;
+        _duplicateSelectionMenuItem.Enabled = selectionCount > 0 && !isDocumentContext;
+        _deleteSelectionMenuItem.Visible = selectionCount > 0 && !isDocumentContext;
+        _deleteSelectionMenuItem.Enabled = selectionCount > 0 && !isDocumentContext;
         _duplicateSelectionMenuItem.Text = folder is not null
             ? "Duplicate Folder"
             : isSheetContext
@@ -1236,8 +1484,8 @@ public sealed class LayoutFoundryPanel : Panel
         _printScopeMenuItem.Text = isFolderContext ? "Print Folder…" : "Print All…";
         _propertiesPageMenuItem.Visible = isSheetContext;
         _propertiesPageMenuItem.Enabled = isSheetContext;
-        _renameFolderMenuItem.Enabled = folder is not null;
-        _renameFolderMenuItem.Visible = folder is not null;
+        _renameFolderMenuItem.Enabled = folder is not null && !isDocumentContext;
+        _renameFolderMenuItem.Visible = folder is not null && !isDocumentContext;
     }
 
     private async Task RenameSelectedFolderAsync()
@@ -1307,7 +1555,8 @@ public sealed class LayoutFoundryPanel : Panel
         if ((eventArgs.Buttons & MouseButtons.Primary) == 0 ||
             eventArgs.Modifiers != Keys.None ||
             item is null ||
-            item.IsInlineDraft)
+            item.IsInlineDraft ||
+            item.Node.IsDocumentRoot)
         {
             ResetPendingDrag();
             return;
@@ -1844,6 +2093,50 @@ public sealed class LayoutFoundryPanel : Panel
         }
     }
 
+    private static string PaperLabel(SheetOverview sheet)
+    {
+        var preset = PaperSizeChoices.FirstOrDefault(choice =>
+            string.Equals(choice.UnitSystem, sheet.PageUnitSystem, StringComparison.OrdinalIgnoreCase) &&
+            Math.Abs(choice.Width - sheet.PageWidth) < 0.01 &&
+            Math.Abs(choice.Height - sheet.PageHeight) < 0.01);
+        return preset?.Label ??
+               $"{sheet.PageWidth:0.###} × {sheet.PageHeight:0.###} {UnitAbbreviation(sheet.PageUnitSystem)}";
+    }
+
+    private static string UnitAbbreviation(string unitSystem) => unitSystem switch
+    {
+        "Millimeters" => "mm",
+        "Centimeters" => "cm",
+        "Meters" => "m",
+        "Inches" => "in",
+        "Feet" => "ft",
+        _ => unitSystem,
+    };
+
+    private static readonly PaperSizeChoice[] PaperSizeChoices =
+    [
+        new("A0 P · 841 × 1189 mm", 841, 1189, "Millimeters"),
+        new("A0 L · 1189 × 841 mm", 1189, 841, "Millimeters"),
+        new("A1 P · 594 × 841 mm", 594, 841, "Millimeters"),
+        new("A1 L · 841 × 594 mm", 841, 594, "Millimeters"),
+        new("A2 P · 420 × 594 mm", 420, 594, "Millimeters"),
+        new("A2 L · 594 × 420 mm", 594, 420, "Millimeters"),
+        new("A3 P · 297 × 420 mm", 297, 420, "Millimeters"),
+        new("A3 L · 420 × 297 mm", 420, 297, "Millimeters"),
+        new("A4 P · 210 × 297 mm", 210, 297, "Millimeters"),
+        new("A4 L · 297 × 210 mm", 297, 210, "Millimeters"),
+        new("ANSI A P · 8.5 × 11 in", 8.5, 11, "Inches"),
+        new("ANSI A L · 11 × 8.5 in", 11, 8.5, "Inches"),
+        new("ANSI B P · 11 × 17 in", 11, 17, "Inches"),
+        new("ANSI B L · 17 × 11 in", 17, 11, "Inches"),
+        new("ANSI C P · 17 × 22 in", 17, 22, "Inches"),
+        new("ANSI C L · 22 × 17 in", 22, 17, "Inches"),
+        new("ANSI D P · 22 × 34 in", 22, 34, "Inches"),
+        new("ANSI D L · 34 × 22 in", 34, 22, "Inches"),
+    ];
+
+    private sealed record PaperSizeChoice(string Label, double Width, double Height, string UnitSystem);
+
     private sealed class HierarchyTreeItem : TreeGridItem
     {
         public HierarchyTreeItem(
@@ -1851,10 +2144,11 @@ public sealed class LayoutFoundryPanel : Panel
             bool expandAll,
             OverviewNodeKey preferredSelection,
             bool useMacSafeSingleColumn,
-            Guid? inlineDraftId)
+            Guid? inlineDraftId,
+            IReadOnlySet<OverviewNodeKey> collapsedNodeKeys)
         {
             Node = node;
-            Presentation = OverviewRowPresentation.Create(node, useMacSafeSingleColumn);
+            Presentation = OverviewRowPresentation.Create(node, useMacSafeSingleColumn: false);
             IsInlineDraft = inlineDraftId == node.Key.Id;
             _displayText = IsInlineDraft ? node.Label : Presentation.PrimaryText;
             foreach (var child in node.Children)
@@ -1864,12 +2158,13 @@ public sealed class LayoutFoundryPanel : Panel
                     expandAll,
                     preferredSelection,
                     useMacSafeSingleColumn,
-                    inlineDraftId));
+                    inlineDraftId,
+                    collapsedNodeKeys));
             }
 
             Expanded = expandAll ||
-                       node.Key.Kind == OverviewNodeKind.Folder ||
-                       Contains(node.Children, preferredSelection);
+                       Contains(node.Children, preferredSelection) ||
+                       (node.Key.Kind == OverviewNodeKind.Folder && !collapsedNodeKeys.Contains(node.Key));
         }
 
         public OverviewTreeNode Node { get; }
@@ -1898,7 +2193,101 @@ public sealed class LayoutFoundryPanel : Panel
 
         public string StatusText => Presentation.StatusText;
 
+        public bool HasSheetTargets => DescendantSheets(Node).Any();
+
+        public bool HasDetailTargets => DescendantDetails(Node).Any();
+
+        public bool AllPrintIncluded
+        {
+            get
+            {
+                var sheets = DescendantSheets(Node).ToArray();
+                return sheets.Length > 0 && sheets.All(sheet => sheet.IncludeInPrintAll);
+            }
+        }
+
+        public string PrintText
+        {
+            get
+            {
+                if (Node.Key.Kind == OverviewNodeKind.Detail) return string.Empty;
+                var sheets = DescendantSheets(Node).ToArray();
+                if (sheets.Length == 0) return string.Empty;
+                return sheets.All(sheet => sheet.IncludeInPrintAll)
+                    ? "💡"
+                    : sheets.All(sheet => !sheet.IncludeInPrintAll)
+                        ? "○"
+                        : "◐";
+            }
+        }
+
+        private string? _paperText;
+
+        public string PaperText
+        {
+            get => _paperText ??= PropertySummary(
+                DescendantSheets(Node).Select(PaperLabel),
+                Node.Key.Kind == OverviewNodeKind.Detail ? string.Empty : "—");
+            set => _paperText = value;
+        }
+
+        public string DetailsText => Node.Key.Kind switch
+        {
+            OverviewNodeKind.Detail => string.Empty,
+            OverviewNodeKind.Sheet => Node.Sheet?.DetailCount.ToString() ?? "0",
+            OverviewNodeKind.Folder => DescendantDetails(Node).Count().ToString(),
+            _ => string.Empty,
+        };
+
+        private string? _displayModeText;
+
+        public string DisplayModeText
+        {
+            get => _displayModeText ??= PropertySummary(
+                DescendantDetails(Node).Select(detail => detail.DisplayModeName)
+                    .Where(name => !string.IsNullOrWhiteSpace(name)),
+                "—");
+            set => _displayModeText = value;
+        }
+
         public Image? Thumbnail { get; set; }
+
+        private static string PropertySummary(IEnumerable<string> values, string empty)
+        {
+            var distinct = values.Distinct(StringComparer.OrdinalIgnoreCase).Take(2).ToArray();
+            return distinct.Length switch
+            {
+                0 => empty,
+                1 => distinct[0],
+                _ => "Mixed",
+            };
+        }
+
+        private static IEnumerable<SheetOverview> DescendantSheets(OverviewTreeNode node)
+        {
+            if (node.Sheet is not null) yield return node.Sheet;
+            foreach (var child in node.Children)
+            foreach (var sheet in DescendantSheets(child))
+                yield return sheet;
+        }
+
+        private static IEnumerable<DetailOverview> DescendantDetails(OverviewTreeNode node)
+        {
+            if (node.Sheet is not null)
+            {
+                foreach (var detail in node.Sheet.Details)
+                    yield return detail;
+                yield break;
+            }
+            if (node.Detail is not null)
+            {
+                yield return node.Detail;
+                yield break;
+            }
+            foreach (var child in node.Children)
+            foreach (var detail in DescendantDetails(child))
+                yield return detail;
+        }
 
         private static bool Contains(
             IEnumerable<OverviewTreeNode> nodes,

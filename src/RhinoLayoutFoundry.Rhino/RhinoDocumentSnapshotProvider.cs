@@ -90,7 +90,8 @@ internal sealed class RhinoDocumentSnapshotProvider : IDocumentSnapshotProvider
                     document.PageUnitSystem.ToString(),
                     detailSettings,
                     titleBlock?.InstanceObjectId,
-                    titleBlockName);
+                    titleBlockName,
+                    record?.IncludeInPrintAll ?? true);
             })
             .ToDictionary(sheet => sheet.PageViewId);
 

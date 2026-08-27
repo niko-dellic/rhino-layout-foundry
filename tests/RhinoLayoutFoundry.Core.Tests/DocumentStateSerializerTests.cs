@@ -18,7 +18,8 @@ public sealed class DocumentStateSerializerTests
             2,
             ["Issue A", "Permit"],
             new Dictionary<string, string> { ["discipline"] = "A" },
-            titleBlock);
+            titleBlock,
+            IncludeInPrintAll: false);
         var rule = new DisplayRule(
             Guid.NewGuid(),
             "Plans shaded",
@@ -58,6 +59,7 @@ public sealed class DocumentStateSerializerTests
         Assert.Equal("A", restored.Sheets[sheetId].Metadata["discipline"]);
         Assert.Contains("Permit", restored.Sheets[sheetId].Tags);
         Assert.Equal(titleBlock.InstanceObjectId, restored.Sheets[sheetId].TitleBlock!.InstanceObjectId);
+        Assert.False(restored.Sheets[sheetId].IncludeInPrintAll);
         Assert.Equal(rule.DisplayModeId, restored.DisplayRules.Single().DisplayModeId);
         Assert.Equal("Foundry", restored.Metadata["project"]);
         Assert.Equal("A3 plan", restored.Templates.Single().Name);
@@ -67,7 +69,7 @@ public sealed class DocumentStateSerializerTests
     public void VersionOneStateMigratesWithAnEmptyTemplateLibrary()
     {
         var payload = DocumentStateSerializer.Serialize(DocumentState.Empty())
-            .Replace("\"SchemaVersion\":2", "\"SchemaVersion\":1", StringComparison.Ordinal)
+            .Replace("\"SchemaVersion\":3", "\"SchemaVersion\":1", StringComparison.Ordinal)
             .Replace(",\"SheetTemplates\":[]", string.Empty, StringComparison.Ordinal);
 
         var restored = DocumentStateSerializer.Deserialize(payload);
@@ -77,10 +79,32 @@ public sealed class DocumentStateSerializerTests
     }
 
     [Fact]
+    public void VersionTwoStateMigratesExistingSheetsAsIncludedInPrintAll()
+    {
+        var sheetId = Guid.NewGuid();
+        var state = DocumentState.Empty() with
+        {
+            Sheets = new Dictionary<Guid, SheetRecord>
+            {
+                [sheetId] = new(sheetId, WellKnownIds.UnorganizedFolderId, 0, [],
+                    new Dictionary<string, string>(), null),
+            },
+        };
+        var payload = DocumentStateSerializer.Serialize(state)
+            .Replace("\"SchemaVersion\":3", "\"SchemaVersion\":2", StringComparison.Ordinal)
+            .Replace(",\"IncludeInPrintAll\":true", string.Empty, StringComparison.Ordinal);
+
+        var restored = DocumentStateSerializer.Deserialize(payload);
+
+        Assert.Equal(DocumentState.CurrentSchemaVersion, restored.SchemaVersion);
+        Assert.True(restored.Sheets[sheetId].IncludeInPrintAll);
+    }
+
+    [Fact]
     public void UnsupportedSchemaIsRejected()
     {
         var payload = DocumentStateSerializer.Serialize(DocumentState.Empty())
-            .Replace("\"SchemaVersion\":2", "\"SchemaVersion\":99", StringComparison.Ordinal);
+            .Replace("\"SchemaVersion\":3", "\"SchemaVersion\":99", StringComparison.Ordinal);
 
         Assert.Throws<NotSupportedException>(() => DocumentStateSerializer.Deserialize(payload));
     }

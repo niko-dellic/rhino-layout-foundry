@@ -118,6 +118,14 @@ public sealed record BatchUpdateSheetsChange(
     bool ChangeTitleBlock = false,
     Guid? TitleBlockSourceInstanceObjectId = null) : OperationChange;
 
+public sealed record UpdateDetailDisplayModesChange(
+    IReadOnlyList<Guid> DetailViewportIds,
+    Guid DisplayModeId) : OperationChange;
+
+public sealed record SetPrintInclusionChange(
+    IReadOnlyDictionary<Guid, bool> ExpectedValues,
+    bool IncludeInPrintAll) : OperationChange;
+
 public sealed record OperationResult(
     bool Succeeded,
     IReadOnlyList<Diagnostic> Diagnostics);
