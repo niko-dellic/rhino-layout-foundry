@@ -135,8 +135,38 @@ public sealed class SheetTemplatePlannerTests
         var changes = plan.Changes.Cast<CreateSheetFromTemplateChange>().ToArray();
         Assert.Equal(["Page 1", "Page 2", "Page 3"], changes.Select(change => change.Name));
         Assert.All(changes, change => Assert.Equal(4, change.Template.DetailSlots.Count));
+        Assert.All(changes, change => Assert.True(change.UseDedicatedDetailLayer));
         Assert.All(changes.SelectMany(change => change.Template.DetailSlots), detail =>
             Assert.Equal(TestSnapshots.DisplayModeOneId, detail.DisplayModeId));
+    }
+
+    [Fact]
+    public void DedicatedDetailLayerChoiceIsPreservedPerCreationSpec()
+    {
+        var snapshot = WithTemplates(TestSnapshots.Create(), []);
+        var plan = new BatchCreateSheetsPlanner().Plan(new BatchCreateSheetsRequest(
+            42,
+            1,
+            TestSnapshots.RootFolderId,
+            [],
+            "Layer {index}",
+            1,
+            1,
+            CreationSpecs:
+            [
+                new LayoutCreationSpec(
+                    1,
+                    new PaperRecipe(594, 420, "Millimeters"),
+                    UseDedicatedDetailLayer: false),
+                new LayoutCreationSpec(
+                    1,
+                    new PaperRecipe(594, 420, "Millimeters"),
+                    UseDedicatedDetailLayer: true),
+            ]), snapshot);
+
+        Assert.True(plan.CanApply);
+        Assert.Equal([false, true], plan.Changes.Cast<CreateSheetFromTemplateChange>()
+            .Select(change => change.UseDedicatedDetailLayer));
     }
 
     [Fact]

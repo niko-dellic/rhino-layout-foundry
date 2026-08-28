@@ -16,9 +16,10 @@ public sealed record DocumentState(
     IReadOnlyDictionary<string, string> Metadata,
     IReadOnlyList<SheetTemplateRecipe>? SheetTemplates = null,
     ObserverCanvasState? ObserverCanvas = null,
-    IReadOnlyList<ImportRecoveryRecord>? ImportRecovery = null)
+    IReadOnlyList<ImportRecoveryRecord>? ImportRecovery = null,
+    Guid? DedicatedDetailLayerId = null)
 {
-    public const int CurrentSchemaVersion = 5;
+    public const int CurrentSchemaVersion = 6;
 
     [JsonIgnore]
     public IReadOnlyList<SheetTemplateRecipe> Templates => SheetTemplates ?? [];

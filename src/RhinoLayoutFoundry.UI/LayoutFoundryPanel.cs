@@ -96,6 +96,7 @@ public sealed class LayoutFoundryPanel : Panel
     private PointF? _dragStart;
     private HierarchyTreeItem? _dragSourceItem;
     private IReadOnlyList<OverviewNodeKey> _dragSourceKeys = [];
+    private CellInteractionGuard? _cellInteractionGuard;
     private InlineDraft? _inlineDraft;
     private Guid? _contextDestinationFolderId;
     private Guid? _contextPrintFolderId;
@@ -263,6 +264,7 @@ public sealed class LayoutFoundryPanel : Panel
         UpdateViewModeButtons(FoundryPanelViewMode.List);
 
         _treeGrid.SelectedItemChanged += OnSelectionChanged;
+        _treeGrid.CellFormatting += OnHierarchyCellFormatting;
         _treeGrid.CellDoubleClick += (_, _) => NavigateSelected();
         _treeGrid.KeyDown += OnTreeKeyDown;
         _treeGrid.MouseDown += OnTreeMouseDown;
@@ -271,6 +273,7 @@ public sealed class LayoutFoundryPanel : Panel
         _treeGrid.DragDrop += async (_, eventArgs) => await CompleteInternalDragAsync(eventArgs);
         _treeGrid.DragEnd += (_, _) => ResetPendingDrag();
         _treeGrid.CellClick += async (_, eventArgs) => await OnTreeCellClickAsync(eventArgs);
+        _treeGrid.CellEditing += OnTreeCellEditing;
         _treeGrid.CellEdited += async (_, eventArgs) => await OnTreeCellEditedAsync(eventArgs);
         _treeGrid.ColumnHeaderClick += (_, eventArgs) => OnColumnHeaderClick(eventArgs);
         _treeGrid.Collapsed += (_, eventArgs) =>
@@ -284,7 +287,7 @@ public sealed class LayoutFoundryPanel : Panel
         _filterTextBox.TextChanged += (_, _) => OnFilterChanged();
         _filterKindDropDown.SelectedIndexChanged += (_, _) => OnFilterChanged();
         _clearFilterButton.Click += (_, _) => ClearFilter();
-        _addFolderButton.Click += (_, _) => BeginFolderCreation(ResolveCreationDestinationFolderId());
+        _addFolderButton.Click += (_, _) => BeginFolderCreationForCurrentView();
         _batchCreateButton.Click += (_, _) => OpenCreateLayouts(ResolveCreationDestinationFolderId());
         _manageButton.Click += (_, _) => OpenBatchProperties();
         _deleteButton.Click += async (_, _) => await DeleteSelectionAsync();
@@ -343,6 +346,7 @@ public sealed class LayoutFoundryPanel : Panel
         var treeGrid = new TreeGridView
         {
             AllowMultipleSelection = true,
+            AllowColumnReordering = false,
             AllowDrop = true,
             ShowHeader = true,
         };
@@ -351,6 +355,7 @@ public sealed class LayoutFoundryPanel : Panel
             HeaderText = "Layouts",
             DataCell = CreateLayoutsDataCell(inlineEditing: false),
             Width = 260,
+            MinWidth = 220,
             Editable = false,
             Sortable = true,
         };
@@ -423,6 +428,30 @@ public sealed class LayoutFoundryPanel : Panel
             displayModeColumn);
     }
 
+    private void OnHierarchyCellFormatting(
+        object? sender,
+        GridCellFormatEventArgs eventArgs)
+    {
+        if (eventArgs.Item is not HierarchyTreeItem item ||
+            item.Node.Key.Kind != OverviewNodeKind.Folder)
+        {
+            return;
+        }
+
+        if (_treeGrid.SelectedItems
+            .OfType<HierarchyTreeItem>()
+            .Any(selected => selected.Node.Key == item.Node.Key))
+        {
+            eventArgs.BackgroundColor = SystemColors.Selection;
+            eventArgs.ForegroundColor = SystemColors.SelectionText;
+            return;
+        }
+
+        eventArgs.BackgroundColor = item.Node.IsDocumentRoot
+            ? FoundryTheme.HierarchyDocumentBackground
+            : FoundryTheme.HierarchyFolderBackground;
+    }
+
     private Cell CreateLayoutsDataCell(bool inlineEditing)
     {
         return inlineEditing
@@ -464,14 +493,6 @@ public sealed class LayoutFoundryPanel : Panel
                         VerticalContentAlignment = VerticalAlignment.Center,
                         Items =
                         {
-                            _importButton,
-                            _exportButton,
-                            new Panel
-                            {
-                                Width = 1,
-                                Height = 20,
-                                BackgroundColor = FoundryTheme.CanvasBorder,
-                            },
                             _listViewButton,
                             _thumbnailViewButton,
                             _canvasViewButton,
@@ -597,6 +618,35 @@ public sealed class LayoutFoundryPanel : Panel
         _fullscreenButton.ToolTip = _fullscreenWindow is null
             ? $"Expand {ViewModeLabel(mode)} to a maximized workspace"
             : "Return Layout Foundry to the Rhino panel (Esc)";
+        UpdateFolderCreationAvailability();
+    }
+
+    private void BeginFolderCreationForCurrentView()
+    {
+        var destination = ResolveCreationDestinationFolderId();
+        if (_viewMode == FoundryPanelViewMode.Canvas)
+        {
+            _observerView.BeginInlineFolderCreation(destination);
+            return;
+        }
+
+        if (_viewMode == FoundryPanelViewMode.List)
+            BeginInlineCreation(InlineDraftKind.Folder, destination);
+    }
+
+    private void UpdateFolderCreationAvailability()
+    {
+        var hasDocument = _overview.DocumentRuntimeSerialNumber is not null;
+        _addFolderButton.Enabled = hasDocument && _viewMode != FoundryPanelViewMode.Thumbnail;
+        if (_viewMode == FoundryPanelViewMode.Thumbnail)
+        {
+            _addFolderButton.ToolTip = "Folder creation is available in Hierarchy and Canvas views";
+            return;
+        }
+
+        var destinationId = ResolveCreationDestinationFolderId();
+        var destinationName = destinationId is { } id ? FolderDestinationName(id) : "Layouts";
+        _addFolderButton.ToolTip = $"Create a folder in {destinationName}";
     }
 
     private void ToggleFullscreen()
@@ -676,6 +726,14 @@ public sealed class LayoutFoundryPanel : Panel
                         _batchCreateButton,
                         _manageButton,
                         _deleteButton,
+                        new Panel
+                        {
+                            Width = 1,
+                            Height = 20,
+                            BackgroundColor = FoundryTheme.CanvasBorder,
+                        },
+                        _importButton,
+                        _exportButton,
                         new StackLayoutItem(null, expand: true),
                     },
                 },
@@ -710,7 +768,8 @@ public sealed class LayoutFoundryPanel : Panel
         _renameFolderMenuItem = new ButtonMenuItem { Text = "Rename Folder…" };
 
         _setCurrentMenuItem.Click += (_, _) => NavigateSelected();
-        _newFolderMenuItem.Click += (_, _) => BeginFolderCreation(_contextDestinationFolderId);
+        _newFolderMenuItem.Click += (_, _) =>
+            BeginInlineCreation(InlineDraftKind.Folder, _contextDestinationFolderId);
         _newPageMenuItem.Click += (_, _) => QueueOpenCreateLayouts(_contextDestinationFolderId);
         _duplicateSelectionMenuItem.Click += async (_, _) => await DuplicateSelectionAsync();
         _deleteSelectionMenuItem.Click += async (_, _) => await DeleteSelectionAsync();
@@ -1523,14 +1582,13 @@ public sealed class LayoutFoundryPanel : Panel
         var canRename = selectedSheets.Length == 1 && selectionCount == 1;
         var capabilities = LayoutFoundryUiHost.CaptureMutationCapabilities();
 
-        _addFolderButton.Enabled = _overview.DocumentRuntimeSerialNumber is not null;
         _importButton.Enabled = _overview.DocumentRuntimeSerialNumber is not null;
         _exportButton.Enabled = _overview.DocumentRuntimeSerialNumber is not null;
         _batchCreateButton.Enabled = _overview.DocumentRuntimeSerialNumber is not null;
         var destinationId = ResolveCreationDestinationFolderId();
         var destinationName = destinationId is { } id ? FolderDestinationName(id) : "Layouts";
-        _addFolderButton.ToolTip = $"Create a folder in {destinationName}";
         _batchCreateButton.ToolTip = $"Create layouts in {destinationName}";
+        UpdateFolderCreationAvailability();
         _manageButton.Enabled = selectionCount > 0;
         _deleteButton.Enabled = selectionCount > 0 &&
                                 selectedKeys.All(key => !IsDocumentRootKey(key));
@@ -1727,6 +1785,14 @@ public sealed class LayoutFoundryPanel : Panel
             return;
         }
 
+        if ((ReferenceEquals(eventArgs.GridColumn, _printColumn) ||
+             ReferenceEquals(eventArgs.GridColumn, _templateColumn)) &&
+            ConsumeCellInteractionGuard(item, eventArgs.GridColumn))
+        {
+            _statusLabel.Text = "Row selected. Click the property again to change it.";
+            return;
+        }
+
         if (ReferenceEquals(eventArgs.GridColumn, _templateColumn))
         {
             if (item.Node.Sheet is not { } sheet) return;
@@ -1760,6 +1826,22 @@ public sealed class LayoutFoundryPanel : Panel
                 : "Disabled from printing."
             : DiagnosticMessage(result);
         RefreshOverview();
+    }
+
+    private void OnTreeCellEditing(object? sender, GridViewCellEventArgs eventArgs)
+    {
+        if (_inlineDraft is not null || eventArgs.Item is not HierarchyTreeItem item)
+        {
+            return;
+        }
+
+        if (!ConsumeCellInteractionGuard(item, eventArgs.GridColumn))
+        {
+            return;
+        }
+
+        _treeGrid.CancelEdit();
+        _statusLabel.Text = "Row selected. Click the property again to edit it.";
     }
 
     private async Task OnTreeCellEditedAsync(GridViewCellEventArgs eventArgs)
@@ -2029,7 +2111,29 @@ public sealed class LayoutFoundryPanel : Panel
 
     private void OnTreeMouseDown(object? sender, MouseEventArgs eventArgs)
     {
-        var item = _treeGrid.GetCellAt(eventArgs.Location).Item as HierarchyTreeItem;
+        var cell = _treeGrid.GetCellAt(eventArgs.Location);
+        var item = cell.Item as HierarchyTreeItem;
+        var column = cell.Column;
+        _cellInteractionGuard = null;
+        if ((eventArgs.Buttons & MouseButtons.Primary) != 0 &&
+            eventArgs.Modifiers == Keys.None &&
+            item is not null &&
+            !item.IsInlineDraft &&
+            !SelectedItems().Contains(item) &&
+            column is not null &&
+            IsInteractivePropertyColumn(column))
+        {
+            var guard = new CellInteractionGuard(item.Node.Key, column);
+            _cellInteractionGuard = guard;
+            Application.Instance.AsyncInvoke(() =>
+            {
+                if (ReferenceEquals(_cellInteractionGuard, guard))
+                {
+                    _cellInteractionGuard = null;
+                }
+            });
+        }
+
         if ((eventArgs.Buttons & MouseButtons.Alternate) != 0)
         {
             if (item is null)
@@ -2062,6 +2166,25 @@ public sealed class LayoutFoundryPanel : Panel
 
         _dragStart = eventArgs.Location;
         _dragSourceItem = item;
+    }
+
+    private bool IsInteractivePropertyColumn(GridColumn column) =>
+        ReferenceEquals(column, _printColumn) ||
+        ReferenceEquals(column, _templateColumn) ||
+        ReferenceEquals(column, _paperColumn) ||
+        ReferenceEquals(column, _displayModeColumn);
+
+    private bool ConsumeCellInteractionGuard(HierarchyTreeItem item, GridColumn column)
+    {
+        if (_cellInteractionGuard is not { } guard ||
+            guard.Key != item.Node.Key ||
+            !ReferenceEquals(guard.Column, column))
+        {
+            return false;
+        }
+
+        _cellInteractionGuard = null;
+        return true;
     }
 
     private void OnTreeMouseMove(object? sender, MouseEventArgs eventArgs)
@@ -2778,6 +2901,8 @@ public sealed class LayoutFoundryPanel : Panel
         Thumbnail,
         Canvas,
     }
+
+    private sealed record CellInteractionGuard(OverviewNodeKey Key, GridColumn Column);
 
     private sealed class InlineDraft(
         InlineDraftKind kind,

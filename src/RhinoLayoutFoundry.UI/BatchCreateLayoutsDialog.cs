@@ -21,14 +21,16 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
     private readonly NumericStepper _startStepper;
     private readonly NumericStepper _stepStepper;
     private readonly LayoutPreviewTray _layoutPreviewTray;
-    private readonly Button _layoutSelectorButton;
+    private readonly LayoutSelectionDrawable _layoutSelectorPreview;
     private readonly DropDown _paperPresetDropDown;
     private readonly DropDown _orientationDropDown;
     private readonly NumericStepper _widthStepper;
     private readonly NumericStepper _heightStepper;
     private readonly DropDown _unitDropDown;
     private readonly FilteredPicker _displayModePicker;
-    private readonly FilteredPicker _titleBlockPicker;
+    private readonly CheckBox _dedicatedDetailLayerCheck;
+    private readonly TitleBlockPreviewTray _titleBlockPreviewTray;
+    private readonly TitleBlockSelectionDrawable _titleBlockSelectorPreview;
     private readonly DropDown _namedViewDropDown;
     private readonly GridView _previewGrid;
     private readonly Label _countLabel;
@@ -39,6 +41,8 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
     private readonly List<CreationDraft> _drafts = [];
     private Form? _layoutGallery;
     private Scrollable? _layoutGalleryScroll;
+    private Form? _titleBlockGallery;
+    private Scrollable? _titleBlockGalleryScroll;
     private bool _updatingPaper;
     private bool _updatingEditors;
     private bool _updatingPreviewSelection;
@@ -79,18 +83,21 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             SelectedIndex = 0,
         };
         _layoutPreviewTray = new LayoutPreviewTray(_layoutChoices, selectedIndex: 1);
-        _layoutSelectorButton = FoundryTheme.ConfigureButton(new Button(), 210);
-        _layoutSelectorButton.Height = 36;
-        _layoutSelectorButton.ToolTip = "Open the layout gallery";
+        _layoutSelectorPreview = new LayoutSelectionDrawable(_layoutChoices, selectedIndex: 1);
+        _layoutSelectorPreview.ToolTip = "Open the layout gallery";
         UpdateLayoutSelector();
         _displayModePicker = new FilteredPicker(
             new[] { InheritDisplayMode }.Concat(snapshot.DisplayModes.Values),
             "Search display modes");
         _displayModePicker.Text = InheritDisplayMode;
-        _titleBlockPicker = new FilteredPicker(
-            _titleBlockChoices.Select(choice => choice.Label),
-            "Search title blocks");
-        _titleBlockPicker.Text = _titleBlockChoices[0].Label;
+        _dedicatedDetailLayerCheck = new CheckBox
+        {
+            Text = "Place details on dedicated .details layer",
+            Checked = true,
+            ToolTip = "Foundry tracks this layer by identity, so it can be renamed or moved in the layer hierarchy.",
+        };
+        _titleBlockPreviewTray = new TitleBlockPreviewTray(_titleBlockChoices, selectedIndex: 0);
+        _titleBlockSelectorPreview = new TitleBlockSelectionDrawable(_titleBlockChoices, selectedIndex: 0);
         _namedViewDropDown = new DropDown
         {
             DataStore = new[] { InheritNamedView }
@@ -110,6 +117,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         var cancel = FoundryTheme.ConfigureButton(new Button { Text = "Cancel" });
         cancel.Click += (_, _) => Close();
         _createButton.Click += async (_, _) => await CreateAsync();
+        DefaultButton = _createButton;
         AbortButton = cancel;
 
         _drafts.Add(DraftFromEditors());
@@ -125,16 +133,30 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         _patternBox.TextChanged += (_, _) => RefreshPreview();
         _paperPresetDropDown.SelectedIndexChanged += (_, _) => QueueApplyPaperPreset();
         _orientationDropDown.SelectedIndexChanged += (_, _) => QueueApplyPaperPreset();
-        _layoutSelectorButton.Click += (_, _) => ToggleLayoutGallery();
+        _layoutSelectorPreview.Activated += (_, _) => ToggleLayoutGallery();
         _layoutPreviewTray.SelectedIndexChanged += OnLayoutSelectionChanged;
         _layoutPreviewTray.SelectionCommitted += (_, _) => HideLayoutGallery();
         _displayModePicker.ValueChanged += (_, _) => ApplyDisplayModeToTargets();
-        _titleBlockPicker.ValueChanged += (_, _) => ApplyTitleBlockToTargets();
+        _dedicatedDetailLayerCheck.CheckedChanged += (_, _) => ApplyDedicatedDetailLayerToTargets();
+        _titleBlockSelectorPreview.Activated += (_, _) => ToggleTitleBlockGallery();
+        _titleBlockPreviewTray.SelectedIndexChanged += OnTitleBlockSelectionChanged;
+        _titleBlockPreviewTray.SelectionCommitted += (_, _) => HideTitleBlockGallery();
         _previewGrid.SelectedRowsChanged += OnPreviewSelectionChanged;
-        _displayModePicker.Opened += (_, _) => _titleBlockPicker.CloseResults();
-        _titleBlockPicker.Opened += (_, _) => _displayModePicker.CloseResults();
-        Closed += (_, _) => CloseLayoutGallery();
-        LocationChanged += (_, _) => PositionLayoutGallery();
+        _displayModePicker.Opened += (_, _) =>
+        {
+            HideLayoutGallery();
+            HideTitleBlockGallery();
+        };
+        Closed += (_, _) =>
+        {
+            CloseLayoutGallery();
+            CloseTitleBlockGallery();
+        };
+        LocationChanged += (_, _) =>
+        {
+            PositionLayoutGallery();
+            PositionTitleBlockGallery();
+        };
 
         Content = new StackLayout
         {
@@ -209,8 +231,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         HorizontalContentAlignment = HorizontalAlignment.Stretch,
         Items =
         {
-            new Label { Text = "Choose a built-in arrangement or a captured layout template." },
-            _layoutSelectorButton,
+            _layoutSelectorPreview,
         },
     };
 
@@ -243,6 +264,13 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         {
             new Label { Text = "Apply one Rhino display mode to every created detail." },
             _displayModePicker,
+            _dedicatedDetailLayerCheck,
+            new Label
+            {
+                Text = "The layer can be renamed or moved later; Foundry will continue using the same layer.",
+                TextColor = FoundryTheme.SecondaryText,
+                Wrap = WrapMode.Word,
+            },
         },
     };
 
@@ -252,8 +280,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         HorizontalContentAlignment = HorizontalAlignment.Stretch,
         Items =
         {
-            new Label { Text = "Use the template, no block, or copy a page-space block instance." },
-            _titleBlockPicker,
+            _titleBlockSelectorPreview,
         },
     };
 
@@ -282,6 +309,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         grid.Columns.Add(TextColumn("Layout type", row => row.LayoutType, 190, true));
         grid.Columns.Add(TextColumn("Paper", row => row.Paper, 170));
         grid.Columns.Add(TextColumn("Details", row => row.Details, 70));
+        grid.Columns.Add(TextColumn("Detail layer", row => row.DetailLayer, 105));
         grid.Columns.Add(TextColumn("Display mode", row => row.DisplayMode, 150, true));
         grid.Columns.Add(TextColumn("Title block", row => row.TitleBlock, 160, true));
         return grid;
@@ -312,6 +340,9 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             change.Template.Name,
             $"{change.Template.Paper.Width:0.###} × {change.Template.Paper.Height:0.###} {change.Template.Paper.UnitSystem}",
             change.Template.DetailSlots.Count.ToString(),
+            change.Template.DetailSlots.Count == 0
+                ? "—"
+                : change.UseDedicatedDetailLayer ? ".details" : "Active layer",
             DisplayModeSummary(change.Template),
             change.Template.TitleBlock?.InstanceDefinitionName ?? "None")).ToArray();
         _updatingPreviewSelection = true;
@@ -347,25 +378,36 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             !_snapshot.DisplayModes.Values.Any(name => string.Equals(
                 name, _displayModePicker.Text.Trim(), StringComparison.OrdinalIgnoreCase)))
             return "Choose an available Rhino display mode or use the layout/template setting.";
-        if (!_titleBlockChoices.Any(choice => string.Equals(
-                choice.Label, _titleBlockPicker.Text.Trim(), StringComparison.OrdinalIgnoreCase)))
-            return "Choose Use layout template, No title block, or an available title-block instance.";
         return null;
     }
 
     private async Task CreateAsync()
     {
-        _createButton.Enabled = false;
-        _status.Text = $"Creating {CreatedCount} layout{(CreatedCount == 1 ? string.Empty : "s")}…";
-        var result = await LayoutFoundryUiHost.BatchCreateSheetsAsync(Request());
-        if (!result.Succeeded)
+        try
         {
-            _status.Text = string.Join(" ", result.Diagnostics.Select(item => item.Message));
-            RefreshPreview();
-            return;
+            _createButton.Enabled = false;
+            _createButton.Text = "Creating…";
+            _status.Text = $"Creating {CreatedCount} layout{(CreatedCount == 1 ? string.Empty : "s")}…";
+            var result = await LayoutFoundryUiHost.BatchCreateSheetsAsync(Request());
+            if (!result.Succeeded)
+            {
+                RefreshPreview();
+                var message = string.Join(" ", result.Diagnostics.Select(item => item.Message));
+                _status.Text = string.IsNullOrWhiteSpace(message)
+                    ? "Rhino did not create the layouts. Review the settings and try again."
+                    : message;
+                MessageBox.Show(this, _status.Text, "Create layouts", MessageBoxType.Error);
+                return;
+            }
+            Succeeded = true;
+            Close();
         }
-        Succeeded = true;
-        Close();
+        catch (Exception exception)
+        {
+            RefreshPreview();
+            _status.Text = $"Layout creation failed: {exception.Message}";
+            MessageBox.Show(this, _status.Text, "Create layouts", MessageBoxType.Error);
+        }
     }
 
     private void ResizeDrafts()
@@ -383,13 +425,12 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
     {
         var displayModeId = _snapshot.DisplayModes.FirstOrDefault(pair => string.Equals(
             pair.Value, _displayModePicker.Text.Trim(), StringComparison.OrdinalIgnoreCase)).Key;
-        var titleBlock = _titleBlockChoices.FirstOrDefault(choice => string.Equals(
-            choice.Label, _titleBlockPicker.Text.Trim(), StringComparison.OrdinalIgnoreCase)) ??
-            _titleBlockChoices[0];
+        var titleBlock = _titleBlockChoices[Math.Max(0, _titleBlockPreviewTray.SelectedIndex)];
         return new CreationDraft(
             _layoutChoices[Math.Max(0, _layoutPreviewTray.SelectedIndex)],
             CurrentPaper(),
             displayModeId == Guid.Empty ? null : displayModeId,
+            _dedicatedDetailLayerCheck.Checked == true,
             titleBlock,
             _namedViewDropDown.SelectedIndex > 0 ? _namedViewDropDown.SelectedValue?.ToString() : null);
     }
@@ -409,8 +450,9 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
 
     private void UpdateLayoutSelector()
     {
-        var choice = _layoutChoices[Math.Max(0, _layoutPreviewTray.SelectedIndex)];
-        _layoutSelectorButton.Text = $"{choice.Label}   {(_layoutGallery?.Visible == true ? "▴" : "▾")}";
+        _layoutSelectorPreview.SetSelection(
+            Math.Max(0, _layoutPreviewTray.SelectedIndex),
+            _layoutGallery?.Visible == true);
     }
 
     private void ToggleLayoutGallery()
@@ -421,6 +463,8 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             return;
         }
 
+        _displayModePicker.CloseResults();
+        HideTitleBlockGallery();
         var gallery = EnsureLayoutGallery();
         PositionLayoutGallery();
         gallery.Show();
@@ -461,7 +505,21 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             {
                 BackgroundColor = FoundryTheme.CanvasSurface,
                 Padding = new Padding(FoundryTheme.Space2),
-                Content = scrollable,
+                Content = new StackLayout
+                {
+                    Spacing = FoundryTheme.Space2,
+                    HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                    Items =
+                    {
+                        new Label
+                        {
+                            Text = "Choose a built-in arrangement or a captured layout template.",
+                            Font = SystemFonts.Bold(10),
+                            TextColor = FoundryTheme.PrimaryText,
+                        },
+                        new StackLayoutItem(scrollable, true),
+                    },
+                },
             },
         };
         gallery.KeyDown += (_, eventArgs) =>
@@ -495,8 +553,8 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
     private void PositionLayoutGallery()
     {
         if (_layoutGallery is null) return;
-        var selectorBottomLeft = _layoutSelectorButton.PointToScreen(
-            new PointF(0, _layoutSelectorButton.Height));
+        var selectorBottomLeft = _layoutSelectorPreview.PointToScreen(
+            new PointF(0, _layoutSelectorPreview.Height));
         var screen = Screen.Screens.FirstOrDefault(candidate => candidate.Bounds.Contains(selectorBottomLeft)) ??
                      Screen.PrimaryScreen;
         var workArea = screen.WorkingArea;
@@ -506,13 +564,13 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         var workBottom = (int)Math.Floor(workArea.Bottom);
         var desiredWidth = Math.Clamp(_layoutPreviewTray.ContentWidth + FoundryTheme.Space4 + 2, 440, 780);
         var width = Math.Min(desiredWidth, Math.Max(320, workRight - workLeft - FoundryTheme.Space4 * 2));
-        var height = LayoutPreviewTray.TrayHeight + FoundryTheme.Space4 + 2;
-        var x = (int)Math.Round(selectorBottomLeft.X + _layoutSelectorButton.Width - width);
+        var height = LayoutPreviewTray.TrayHeight + 42 + FoundryTheme.Space4 + 2;
+        var x = (int)Math.Round(selectorBottomLeft.X + _layoutSelectorPreview.Width - width);
         x = Math.Clamp(x, workLeft + FoundryTheme.Space2, workRight - width - FoundryTheme.Space2);
         var y = (int)Math.Round(selectorBottomLeft.Y + FoundryTheme.Space1);
         if (y + height > workBottom - FoundryTheme.Space2)
         {
-            var selectorTop = _layoutSelectorButton.PointToScreen(PointF.Empty).Y;
+            var selectorTop = _layoutSelectorPreview.PointToScreen(PointF.Empty).Y;
             y = (int)Math.Round(selectorTop - height - FoundryTheme.Space1);
         }
         y = Math.Clamp(y, workTop + FoundryTheme.Space2, workBottom - height - FoundryTheme.Space2);
@@ -544,12 +602,161 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         _layoutGalleryScroll.ScrollPosition = new Point(target, 0);
     }
 
+    private void ToggleTitleBlockGallery()
+    {
+        if (_titleBlockGallery?.Visible == true)
+        {
+            HideTitleBlockGallery();
+            return;
+        }
+
+        _displayModePicker.CloseResults();
+        HideLayoutGallery();
+        var gallery = EnsureTitleBlockGallery();
+        PositionTitleBlockGallery();
+        gallery.Show();
+        gallery.BringToFront();
+        UpdateTitleBlockSelector();
+        Application.Instance.AsyncInvoke(() =>
+        {
+            ScrollTitleBlockSelectionIntoView();
+            _titleBlockPreviewTray.Focus();
+        });
+    }
+
+    private Form EnsureTitleBlockGallery()
+    {
+        if (_titleBlockGallery is not null) return _titleBlockGallery;
+        var scrollable = new Scrollable
+        {
+            Border = BorderType.None,
+            ExpandContentWidth = false,
+            ExpandContentHeight = false,
+            Content = _titleBlockPreviewTray,
+        };
+        _titleBlockGalleryScroll = scrollable;
+        var gallery = new Form
+        {
+            Owner = this,
+            WindowStyle = WindowStyle.None,
+            ShowInTaskbar = false,
+            Resizable = false,
+            Maximizable = false,
+            Minimizable = false,
+            Closeable = false,
+            AutoSize = false,
+            BackgroundColor = FoundryTheme.CanvasBorder,
+            Padding = new Padding(1),
+            Content = new Panel
+            {
+                BackgroundColor = FoundryTheme.CanvasSurface,
+                Padding = new Padding(FoundryTheme.Space2),
+                Content = new StackLayout
+                {
+                    Spacing = FoundryTheme.Space2,
+                    HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                    Items =
+                    {
+                        new Label
+                        {
+                            Text = "Use the template, no block, or copy a page-space block instance.",
+                            Font = SystemFonts.Bold(10),
+                            TextColor = FoundryTheme.PrimaryText,
+                        },
+                        new StackLayoutItem(scrollable, true),
+                    },
+                },
+            },
+        };
+        gallery.KeyDown += (_, eventArgs) =>
+        {
+            if (eventArgs.Key != Keys.Escape) return;
+            HideTitleBlockGallery();
+            eventArgs.Handled = true;
+        };
+        gallery.LostFocus += (_, _) => Application.Instance.AsyncInvoke(() =>
+        {
+            if (_titleBlockGallery != gallery || !gallery.Visible) return;
+            var mouse = Mouse.Position;
+            var mousePoint = new Point((int)Math.Round(mouse.X), (int)Math.Round(mouse.Y));
+            if (gallery.Bounds.Contains(mousePoint) || _titleBlockPreviewTray.HasFocus) return;
+            HideTitleBlockGallery();
+        });
+        gallery.Closed += (_, _) =>
+        {
+            if (ReferenceEquals(_titleBlockGallery, gallery))
+            {
+                _titleBlockGallery = null;
+                _titleBlockGalleryScroll = null;
+            }
+            UpdateTitleBlockSelector();
+        };
+        _titleBlockGallery = gallery;
+        PositionTitleBlockGallery();
+        return gallery;
+    }
+
+    private void PositionTitleBlockGallery()
+    {
+        if (_titleBlockGallery is null) return;
+        var anchor = _titleBlockSelectorPreview.PointToScreen(
+            new PointF(0, _titleBlockSelectorPreview.Height));
+        var screen = Screen.Screens.FirstOrDefault(candidate => candidate.Bounds.Contains(anchor)) ??
+                     Screen.PrimaryScreen;
+        var work = screen.WorkingArea;
+        var left = (int)Math.Ceiling(work.Left);
+        var top = (int)Math.Ceiling(work.Top);
+        var right = (int)Math.Floor(work.Right);
+        var bottom = (int)Math.Floor(work.Bottom);
+        var desiredWidth = Math.Clamp(_titleBlockPreviewTray.ContentWidth + FoundryTheme.Space4 + 2, 440, 780);
+        var width = Math.Min(desiredWidth, Math.Max(320, right - left - FoundryTheme.Space4 * 2));
+        var height = TitleBlockPreviewTray.TrayHeight + 42 + FoundryTheme.Space4 + 2;
+        var x = (int)Math.Round(anchor.X + _titleBlockSelectorPreview.Width - width);
+        x = Math.Clamp(x, left + FoundryTheme.Space2, right - width - FoundryTheme.Space2);
+        var y = (int)Math.Round(anchor.Y + FoundryTheme.Space1);
+        if (y + height > bottom - FoundryTheme.Space2)
+        {
+            var selectorTop = _titleBlockSelectorPreview.PointToScreen(PointF.Empty).Y;
+            y = (int)Math.Round(selectorTop - height - FoundryTheme.Space1);
+        }
+        y = Math.Clamp(y, top + FoundryTheme.Space2, bottom - height - FoundryTheme.Space2);
+        _titleBlockGallery.Size = new Size(width, height);
+        _titleBlockGallery.Location = new Point(x, y);
+    }
+
+    private void HideTitleBlockGallery()
+    {
+        if (_titleBlockGallery is not null) _titleBlockGallery.Visible = false;
+        UpdateTitleBlockSelector();
+    }
+
+    private void CloseTitleBlockGallery()
+    {
+        if (_titleBlockGallery is null) return;
+        var gallery = _titleBlockGallery;
+        _titleBlockGallery = null;
+        _titleBlockGalleryScroll = null;
+        gallery.Close();
+    }
+
+    private void ScrollTitleBlockSelectionIntoView()
+    {
+        if (_titleBlockGalleryScroll is null || _titleBlockGallery is null) return;
+        var viewportWidth = Math.Max(1, _titleBlockGallery.Width - FoundryTheme.Space4 - 2);
+        var maximum = Math.Max(0, _titleBlockPreviewTray.ContentWidth - viewportWidth);
+        var target = Math.Clamp(_titleBlockPreviewTray.SelectedCenter - viewportWidth / 2, 0, maximum);
+        _titleBlockGalleryScroll.ScrollPosition = new Point(target, 0);
+    }
+
     private void ApplyPaperToTargets()
     {
         if (_updatingEditors || _updatingPaper) return;
         var paper = CurrentPaper();
         SyncPaperSelectors(paper);
         _layoutPreviewTray.SetPaper(paper);
+        _layoutSelectorPreview.SetPaper(paper);
+        _titleBlockPreviewTray.SetPaper(paper);
+        _titleBlockSelectorPreview.SetPaper(paper);
         ApplyToTargets(draft => draft with { Paper = paper });
     }
 
@@ -572,17 +779,31 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         ApplyToTargets(draft => draft with { DisplayModeId = displayModeId });
     }
 
+    private void ApplyDedicatedDetailLayerToTargets()
+    {
+        if (_updatingEditors) return;
+        var useDedicatedLayer = _dedicatedDetailLayerCheck.Checked == true;
+        ApplyToTargets(draft => draft with { UseDedicatedDetailLayer = useDedicatedLayer });
+    }
+
     private void ApplyTitleBlockToTargets()
     {
         if (_updatingEditors) return;
-        var titleBlock = _titleBlockChoices.FirstOrDefault(choice => string.Equals(
-            choice.Label, _titleBlockPicker.Text.Trim(), StringComparison.OrdinalIgnoreCase));
-        if (titleBlock is null)
-        {
-            RefreshPreview();
-            return;
-        }
+        var titleBlock = _titleBlockChoices[Math.Max(0, _titleBlockPreviewTray.SelectedIndex)];
         ApplyToTargets(draft => draft with { TitleBlock = titleBlock });
+    }
+
+    private void OnTitleBlockSelectionChanged(object? sender, EventArgs eventArgs)
+    {
+        UpdateTitleBlockSelector();
+        ApplyTitleBlockToTargets();
+    }
+
+    private void UpdateTitleBlockSelector()
+    {
+        _titleBlockSelectorPreview.SetSelection(
+            Math.Max(0, _titleBlockPreviewTray.SelectedIndex),
+            _titleBlockGallery?.Visible == true);
     }
 
     private void ApplyNamedViewToTargets()
@@ -648,10 +869,15 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             _unitDropDown.SelectedIndex = UnitIndex(draft.Paper.UnitSystem);
             SyncPaperSelectors(draft.Paper);
             _layoutPreviewTray.SetPaper(draft.Paper);
+            _layoutSelectorPreview.SetPaper(draft.Paper);
+            _titleBlockPreviewTray.SetPaper(draft.Paper);
+            _titleBlockSelectorPreview.SetPaper(draft.Paper);
             _displayModePicker.Text = draft.DisplayModeId is { } modeId
                 ? _snapshot.DisplayModes.GetValueOrDefault(modeId) ?? InheritDisplayMode
                 : InheritDisplayMode;
-            _titleBlockPicker.Text = draft.TitleBlock.Label;
+            _dedicatedDetailLayerCheck.Checked = draft.UseDedicatedDetailLayer;
+            _titleBlockPreviewTray.SelectedIndex = Math.Max(0, Array.IndexOf(_titleBlockChoices, draft.TitleBlock));
+            UpdateTitleBlockSelector();
             _namedViewDropDown.SelectedIndex = NamedViewIndex(draft.NamedView);
         }
         finally
@@ -815,8 +1041,8 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
 
     private static TitleBlockChoice[] TitleBlockChoices(DocumentSnapshot snapshot) =>
     [
-        new TitleBlockChoice(true, null, "Use layout template"),
-        new TitleBlockChoice(false, null, "No title block"),
+        new TitleBlockChoice(true, null, "Use layout template", null),
+        new TitleBlockChoice(false, null, "No title block", null),
         .. snapshot.TitleBlockInstances.Values
             .Where(instance => instance.Transform is { Count: 16 })
             .OrderBy(instance => instance.InstanceDefinitionName, StringComparer.OrdinalIgnoreCase)
@@ -824,7 +1050,8 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             .Select(instance => new TitleBlockChoice(
                 false,
                 instance.InstanceObjectId,
-                $"{instance.InstanceDefinitionName}  ·  {instance.SourcePageName}  ·  {instance.InstanceObjectId.ToString()[..8]}")),
+                $"{instance.InstanceDefinitionName} — {instance.SourcePageName}",
+                instance)),
     ];
 
     private static IReadOnlyList<(Guid Id, string Label)> FolderChoices(DocumentSnapshot snapshot)
@@ -877,12 +1104,17 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         BuiltInLayoutKind BuiltInLayout,
         Guid? TemplateId,
         SheetTemplateRecipe? Template);
-    private sealed record TitleBlockChoice(bool UseTemplate, Guid? SourceInstanceObjectId, string Label);
+    private sealed record TitleBlockChoice(
+        bool UseTemplate,
+        Guid? SourceInstanceObjectId,
+        string Label,
+        TitleBlockInstanceSnapshot? Instance);
     private sealed record PaperPreset(string Label, double Width, double Height, string UnitSystem);
     private sealed record CreationDraft(
         LayoutChoice Layout,
         PaperRecipe Paper,
         Guid? DisplayModeId,
+        bool UseDedicatedDetailLayer,
         TitleBlockChoice TitleBlock,
         string? NamedView)
     {
@@ -894,7 +1126,8 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             DisplayModeId,
             TitleBlock.UseTemplate,
             TitleBlock.SourceInstanceObjectId,
-            NamedView);
+            NamedView,
+            UseDedicatedDetailLayer);
     }
 
     private sealed record CreationPreviewRow(
@@ -903,8 +1136,349 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         string LayoutType,
         string Paper,
         string Details,
+        string DetailLayer,
         string DisplayMode,
         string TitleBlock);
+
+    private sealed class TitleBlockSelectionDrawable : Drawable
+    {
+        private readonly TitleBlockChoice[] _choices;
+        private readonly Font _titleFont = SystemFonts.Bold(9);
+        private readonly Font _subtitleFont = SystemFonts.Default(8);
+        private int _selectedIndex;
+        private bool _expanded;
+        private PaperRecipe _paper = new(594, 420, "Millimeters");
+
+        internal TitleBlockSelectionDrawable(TitleBlockChoice[] choices, int selectedIndex)
+            : base(true)
+        {
+            _choices = choices;
+            _selectedIndex = Math.Clamp(selectedIndex, 0, Math.Max(0, choices.Length - 1));
+            CanFocus = true;
+            Height = 78;
+            Size = new Size(220, 78);
+            BackgroundColor = FoundryTheme.CanvasSurface;
+            Paint += OnPaint;
+            MouseDown += OnMouseDown;
+            KeyDown += OnKeyDown;
+        }
+
+        internal event EventHandler? Activated;
+
+        internal void SetSelection(int selectedIndex, bool expanded)
+        {
+            _selectedIndex = Math.Clamp(selectedIndex, 0, Math.Max(0, _choices.Length - 1));
+            _expanded = expanded;
+            Invalidate();
+        }
+
+        internal void SetPaper(PaperRecipe paper)
+        {
+            _paper = paper;
+            Invalidate();
+        }
+
+        private void OnPaint(object? sender, PaintEventArgs eventArgs)
+        {
+            var graphics = eventArgs.Graphics;
+            graphics.AntiAlias = true;
+            var bounds = new RectangleF(0.5f, 0.5f, Math.Max(1, Width - 1), Math.Max(1, Height - 1));
+            graphics.FillRectangle(FoundryTheme.CanvasSurface, bounds);
+            graphics.DrawRectangle(new Pen(FoundryTheme.CanvasBorder, HasFocus ? 2 : 1), bounds);
+            var page = TitleBlockPreviewTray.PageBounds(_paper, new RectangleF(12, 10, 78, 56));
+            TitleBlockPreviewTray.DrawTitleBlock(graphics, _choices[_selectedIndex], page);
+            var parts = _choices[_selectedIndex].Label.Split([" — "], 2, StringSplitOptions.None);
+            var textWidth = Math.Max(20, Width - 132);
+            graphics.DrawText(_titleFont, FoundryTheme.PrimaryText, 106, 23,
+                LayoutPreviewTray.FitText(graphics, _titleFont, parts[0], textWidth));
+            if (parts.Length > 1)
+                graphics.DrawText(_subtitleFont, FoundryTheme.MutedText, 106, 43,
+                    LayoutPreviewTray.FitText(graphics, _subtitleFont, parts[1], textWidth));
+            graphics.DrawText(SystemFonts.Default(10), FoundryTheme.MutedText,
+                Math.Max(110, Width - 25), 30, _expanded ? "▴" : "▾");
+        }
+
+        private void OnMouseDown(object? sender, MouseEventArgs eventArgs)
+        {
+            if (!eventArgs.Buttons.HasFlag(MouseButtons.Primary)) return;
+            Focus();
+            Activated?.Invoke(this, EventArgs.Empty);
+            eventArgs.Handled = true;
+        }
+
+        private void OnKeyDown(object? sender, KeyEventArgs eventArgs)
+        {
+            if (eventArgs.Key is not (Keys.Enter or Keys.Space)) return;
+            Activated?.Invoke(this, EventArgs.Empty);
+            eventArgs.Handled = true;
+        }
+    }
+
+    private sealed class TitleBlockPreviewTray : Drawable
+    {
+        internal const int TrayHeight = 140;
+        private const int TileWidth = 156;
+        private const int TileHeight = 112;
+        private const int Gap = 8;
+        private const int TrayPadding = 4;
+        private readonly TitleBlockChoice[] _choices;
+        private readonly Font _titleFont = SystemFonts.Bold(8);
+        private readonly Font _subtitleFont = SystemFonts.Default(8);
+        private int _selectedIndex;
+        private PaperRecipe _paper = new(594, 420, "Millimeters");
+
+        internal TitleBlockPreviewTray(TitleBlockChoice[] choices, int selectedIndex)
+            : base(true)
+        {
+            _choices = choices;
+            _selectedIndex = Math.Clamp(selectedIndex, 0, Math.Max(0, choices.Length - 1));
+            CanFocus = true;
+            BackgroundColor = FoundryTheme.ContentBackground;
+            Size = new Size(
+                Math.Max(1, TrayPadding * 2 + choices.Length * TileWidth + Math.Max(0, choices.Length - 1) * Gap),
+                120);
+            Paint += OnPaint;
+            MouseDown += OnMouseDown;
+            KeyDown += OnKeyDown;
+        }
+
+        internal event EventHandler? SelectedIndexChanged;
+        internal event EventHandler? SelectionCommitted;
+        internal int ContentWidth => Size.Width;
+        internal int SelectedCenter => TrayPadding + _selectedIndex * (TileWidth + Gap) + TileWidth / 2;
+
+        internal int SelectedIndex
+        {
+            get => _selectedIndex;
+            set
+            {
+                var next = Math.Clamp(value, 0, Math.Max(0, _choices.Length - 1));
+                if (_selectedIndex == next) return;
+                _selectedIndex = next;
+                Invalidate();
+                SelectedIndexChanged?.Invoke(this, EventArgs.Empty);
+            }
+        }
+
+        internal void SetPaper(PaperRecipe paper)
+        {
+            _paper = paper;
+            Invalidate();
+        }
+
+        private void OnPaint(object? sender, PaintEventArgs eventArgs)
+        {
+            var graphics = eventArgs.Graphics;
+            graphics.AntiAlias = true;
+            graphics.FillRectangle(FoundryTheme.ContentBackground, eventArgs.ClipRectangle);
+            for (var index = 0; index < _choices.Length; index++)
+            {
+                var tile = TileBounds(index);
+                var selected = index == _selectedIndex;
+                graphics.FillRectangle(selected ? FoundryTheme.CanvasSubtleSurface : FoundryTheme.CanvasSurface, tile);
+                graphics.DrawRectangle(
+                    new Pen(selected ? FoundryTheme.SelectionAccent : FoundryTheme.CanvasBorder, selected ? 2 : 1),
+                    tile);
+                var page = PageBounds(_paper, new RectangleF(tile.X + 25, tile.Y + 8, tile.Width - 50, 56));
+                DrawTitleBlock(graphics, _choices[index], page);
+                var parts = _choices[index].Label.Split([" — "], 2, StringSplitOptions.None);
+                DrawCentered(graphics, _titleFont, FoundryTheme.PrimaryText, parts[0], tile, tile.Bottom - 31);
+                if (parts.Length > 1)
+                    DrawCentered(graphics, _subtitleFont, FoundryTheme.MutedText, parts[1], tile, tile.Bottom - 17);
+            }
+        }
+
+        internal static RectangleF PageBounds(PaperRecipe paper, RectangleF available)
+        {
+            var paperWidth = Math.Max(0.001, paper.Width);
+            var paperHeight = Math.Max(0.001, paper.Height);
+            var scale = Math.Min(available.Width / paperWidth, available.Height / paperHeight);
+            var width = (float)(paperWidth * scale);
+            var height = (float)(paperHeight * scale);
+            return new RectangleF(
+                available.X + (available.Width - width) / 2,
+                available.Y + (available.Height - height) / 2,
+                width,
+                height);
+        }
+
+        internal static void DrawTitleBlock(Graphics graphics, TitleBlockChoice choice, RectangleF page)
+        {
+            graphics.FillRectangle(Color.FromArgb(50, 0, 0, 0), page.X + 2, page.Y + 3, page.Width, page.Height);
+            graphics.FillRectangle(Colors.White, page);
+            graphics.DrawRectangle(new Pen(Color.FromArgb(160, 90, 90, 90), 1), page);
+            if (!choice.UseTemplate && choice.SourceInstanceObjectId is null)
+            {
+                graphics.DrawLine(new Pen(Color.FromArgb(180, 145, 145, 145), 2),
+                    page.X + page.Width * 0.28f, page.Y + page.Height * 0.72f,
+                    page.X + page.Width * 0.72f, page.Y + page.Height * 0.28f);
+                return;
+            }
+
+            var margin = Math.Max(2, page.Width * 0.035f);
+            graphics.DrawRectangle(new Pen(Color.FromArgb(180, 115, 115, 115), 1),
+                page.X + margin, page.Y + margin, page.Width - margin * 2, page.Height - margin * 2);
+            var blockWidth = page.Width * (choice.UseTemplate ? 0.42f : 0.48f);
+            var blockHeight = page.Height * 0.24f;
+            var block = new RectangleF(
+                page.Right - margin - blockWidth,
+                page.Bottom - margin - blockHeight,
+                blockWidth,
+                blockHeight);
+            graphics.FillRectangle(Color.FromArgb(255, 226, 228, 231), block);
+            graphics.DrawRectangle(new Pen(Color.FromArgb(190, 95, 98, 102), 1), block);
+            graphics.DrawLine(new Pen(Color.FromArgb(150, 95, 98, 102), 1),
+                block.X + block.Width * 0.62f, block.Y, block.X + block.Width * 0.62f, block.Bottom);
+            graphics.DrawLine(new Pen(Color.FromArgb(150, 95, 98, 102), 1),
+                block.X, block.Y + block.Height * 0.5f, block.Right, block.Y + block.Height * 0.5f);
+        }
+
+        private static void DrawCentered(
+            Graphics graphics,
+            Font font,
+            Color color,
+            string text,
+            RectangleF bounds,
+            float y)
+        {
+            var fitted = LayoutPreviewTray.FitText(graphics, font, text, bounds.Width - 8);
+            var size = graphics.MeasureString(font, fitted);
+            graphics.DrawText(font, color, bounds.X + Math.Max(4, (bounds.Width - size.Width) / 2), y, fitted);
+        }
+
+        private RectangleF TileBounds(int index) => new(
+            TrayPadding + index * (TileWidth + Gap),
+            TrayPadding,
+            TileWidth,
+            TileHeight);
+
+        private void OnMouseDown(object? sender, MouseEventArgs eventArgs)
+        {
+            if (!eventArgs.Buttons.HasFlag(MouseButtons.Primary)) return;
+            Focus();
+            var index = (int)Math.Floor((eventArgs.Location.X - TrayPadding) / (TileWidth + Gap));
+            if (index < 0 || index >= _choices.Length || !TileBounds(index).Contains(eventArgs.Location)) return;
+            SelectedIndex = index;
+            SelectionCommitted?.Invoke(this, EventArgs.Empty);
+            eventArgs.Handled = true;
+        }
+
+        private void OnKeyDown(object? sender, KeyEventArgs eventArgs)
+        {
+            if (eventArgs.Key is Keys.Enter or Keys.Space)
+            {
+                SelectionCommitted?.Invoke(this, EventArgs.Empty);
+                eventArgs.Handled = true;
+                return;
+            }
+            var next = eventArgs.Key switch
+            {
+                Keys.Left => _selectedIndex - 1,
+                Keys.Right => _selectedIndex + 1,
+                Keys.Home => 0,
+                Keys.End => _choices.Length - 1,
+                _ => _selectedIndex,
+            };
+            next = Math.Clamp(next, 0, Math.Max(0, _choices.Length - 1));
+            if (next == _selectedIndex) return;
+            SelectedIndex = next;
+            eventArgs.Handled = true;
+        }
+    }
+
+    private sealed class LayoutSelectionDrawable : Drawable
+    {
+        private readonly LayoutChoice[] _choices;
+        private readonly Font _titleFont = SystemFonts.Bold(9);
+        private readonly Font _subtitleFont = SystemFonts.Default(8);
+        private int _selectedIndex;
+        private bool _expanded;
+        private PaperRecipe _paper = new(594, 420, "Millimeters");
+
+        internal LayoutSelectionDrawable(LayoutChoice[] choices, int selectedIndex)
+            : base(true)
+        {
+            _choices = choices;
+            _selectedIndex = Math.Clamp(selectedIndex, 0, Math.Max(0, choices.Length - 1));
+            CanFocus = true;
+            Height = 78;
+            MinimumSize = new Size(220, 78);
+            BackgroundColor = FoundryTheme.CanvasSurface;
+            Paint += OnPaint;
+            MouseDown += OnMouseDown;
+            KeyDown += OnKeyDown;
+        }
+
+        internal event EventHandler? Activated;
+
+        internal void SetSelection(int selectedIndex, bool expanded)
+        {
+            _selectedIndex = Math.Clamp(selectedIndex, 0, Math.Max(0, _choices.Length - 1));
+            _expanded = expanded;
+            Invalidate();
+        }
+
+        internal void SetPaper(PaperRecipe paper)
+        {
+            _paper = paper;
+            Invalidate();
+        }
+
+        private void OnPaint(object? sender, PaintEventArgs eventArgs)
+        {
+            var graphics = eventArgs.Graphics;
+            graphics.AntiAlias = true;
+            var bounds = new RectangleF(0.5f, 0.5f, Math.Max(1, Width - 1), Math.Max(1, Height - 1));
+            graphics.FillRectangle(FoundryTheme.CanvasSurface, bounds);
+            graphics.DrawRectangle(new Pen(FoundryTheme.CanvasBorder, HasFocus ? 2 : 1), bounds);
+
+            var paperWidth = Math.Max(0.001, _paper.Width);
+            var paperHeight = Math.Max(0.001, _paper.Height);
+            const float availableWidth = 78;
+            const float availableHeight = 52;
+            var scale = Math.Min(availableWidth / paperWidth, availableHeight / paperHeight);
+            var page = new RectangleF(
+                12 + (availableWidth - (float)(paperWidth * scale)) / 2,
+                13 + (availableHeight - (float)(paperHeight * scale)) / 2,
+                (float)(paperWidth * scale),
+                (float)(paperHeight * scale));
+            graphics.FillRectangle(Color.FromArgb(50, 0, 0, 0), page.X + 2, page.Y + 3, page.Width, page.Height);
+            graphics.FillRectangle(Colors.White, page);
+            graphics.DrawRectangle(new Pen(Color.FromArgb(145, 95, 95, 95), 1), page);
+            foreach (var detail in LayoutPreviewTray.DetailBounds(_choices[_selectedIndex], page))
+            {
+                graphics.FillRectangle(Color.FromArgb(255, 220, 223, 226), detail);
+                graphics.DrawRectangle(new Pen(Color.FromArgb(180, 95, 98, 102), 1), detail);
+            }
+
+            var parts = _choices[_selectedIndex].Label.Split([" — "], 2, StringSplitOptions.None);
+            var textWidth = Math.Max(20, Width - 132);
+            var title = LayoutPreviewTray.FitText(graphics, _titleFont, parts[0], textWidth);
+            graphics.DrawText(_titleFont, FoundryTheme.PrimaryText, 106, 23, title);
+            if (parts.Length > 1)
+            {
+                var subtitle = LayoutPreviewTray.FitText(graphics, _subtitleFont, parts[1], textWidth);
+                graphics.DrawText(_subtitleFont, FoundryTheme.MutedText, 106, 43, subtitle);
+            }
+            graphics.DrawText(SystemFonts.Default(10), FoundryTheme.MutedText,
+                Math.Max(110, Width - 25), 30, _expanded ? "▴" : "▾");
+        }
+
+        private void OnMouseDown(object? sender, MouseEventArgs eventArgs)
+        {
+            if (!eventArgs.Buttons.HasFlag(MouseButtons.Primary)) return;
+            Focus();
+            Activated?.Invoke(this, EventArgs.Empty);
+            eventArgs.Handled = true;
+        }
+
+        private void OnKeyDown(object? sender, KeyEventArgs eventArgs)
+        {
+            if (eventArgs.Key is not (Keys.Enter or Keys.Space)) return;
+            Activated?.Invoke(this, EventArgs.Empty);
+            eventArgs.Handled = true;
+        }
+    }
 
     private sealed class LayoutPreviewTray : Drawable
     {
@@ -1011,7 +1585,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                 height);
         }
 
-        private static IReadOnlyList<RectangleF> DetailBounds(LayoutChoice choice, RectangleF page)
+        internal static IReadOnlyList<RectangleF> DetailBounds(LayoutChoice choice, RectangleF page)
         {
             if (choice.Template is { } template)
             {
@@ -1077,7 +1651,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             graphics.DrawText(font, color, bounds.X + Math.Max(4, (bounds.Width - size.Width) / 2), y, fitted);
         }
 
-        private static string FitText(Graphics graphics, Font font, string text, float maximumWidth)
+        internal static string FitText(Graphics graphics, Font font, string text, float maximumWidth)
         {
             if (graphics.MeasureString(font, text).Width <= maximumWidth) return text;
             const string ellipsis = "…";

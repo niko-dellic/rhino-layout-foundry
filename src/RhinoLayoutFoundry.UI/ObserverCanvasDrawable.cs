@@ -9,6 +9,11 @@ namespace RhinoLayoutFoundry.UI;
 internal sealed class ObserverCanvasDrawable : Drawable
 {
     internal const string NamedViewDragType = "application/x-layout-foundry-named-view";
+    private const double RightPanActivationDistance = 5;
+    private const int NavigatorWidth = 260;
+    private const int NavigatorTop = 38;
+    private const int NavigatorHeaderHeight = 28;
+    private const int NavigatorRowHeight = 24;
     private readonly Font _folderFont = SystemFonts.Bold(11);
     private readonly Font _sheetFont = SystemFonts.Bold(10);
     private readonly Font _smallFont = SystemFonts.Default(8);
@@ -29,6 +34,10 @@ internal sealed class ObserverCanvasDrawable : Drawable
     private ObserverRect? _lassoWorld;
     private ObserverPoint _contextWorld;
     private bool _spaceHeld;
+    private bool _navigatorVisible = true;
+    private CanvasNavigatorRow[] _navigatorRows = [];
+    private int _navigatorScrollRow;
+    private NavigatorFolderDraft? _navigatorFolderDraft;
 
     internal ObserverCanvasDrawable()
         : base(true)
@@ -44,6 +53,7 @@ internal sealed class ObserverCanvasDrawable : Drawable
         MouseWheel += OnMouseWheel;
         KeyDown += OnKeyDown;
         KeyUp += OnKeyUp;
+        TextInput += OnTextInput;
         DragOver += OnDragOver;
         DragDrop += OnDragDrop;
     }
@@ -60,6 +70,7 @@ internal sealed class ObserverCanvasDrawable : Drawable
     internal event EventHandler? DeleteRequested;
     internal event EventHandler? TidyRequested;
     internal event EventHandler? ExitWorkspaceRequested;
+    internal event EventHandler<ObserverFolderDraftRequestedEventArgs>? FolderDraftRequested;
 
     internal ObserverCamera Camera => _camera;
     internal ObserverBoardLayout BoardLayout => _layout;
@@ -71,6 +82,12 @@ internal sealed class ObserverCanvasDrawable : Drawable
         _snapshot = snapshot ?? ObserverSnapshot.NoDocument;
         _layout = new ObserverPlacementPlanner().Arrange(_snapshot);
         _spatialIndex = new ObserverSpatialIndex(_layout);
+        _navigatorRows = BuildNavigatorRows(_snapshot);
+        if (_navigatorFolderDraft is { } draft &&
+            (!_snapshot.Folders.Any(folder => folder.Id == draft.ParentFolderId) ||
+             _snapshot.Folders.Any(folder => folder.Id == draft.Id)))
+            _navigatorFolderDraft = null;
+        ClampNavigatorScroll();
         _selection.RemoveWhere(key => !ContainsKey(key));
         if (fit && !_layout.Bounds.IsEmpty)
         {
@@ -85,6 +102,32 @@ internal sealed class ObserverCanvasDrawable : Drawable
     internal void SetFilter(OverviewFilterProjection projection)
     {
         _filter = projection ?? throw new ArgumentNullException(nameof(projection));
+        Invalidate();
+    }
+
+    internal void SetNavigatorVisible(bool visible)
+    {
+        _navigatorVisible = visible;
+        Invalidate();
+    }
+
+    internal void BeginNavigatorFolderDraft(Guid parentFolderId)
+    {
+        if (!_snapshot.Folders.Any(folder => folder.Id == parentFolderId)) return;
+        _navigatorVisible = true;
+        _navigatorFolderDraft = new NavigatorFolderDraft(
+            Guid.NewGuid(),
+            parentFolderId,
+            "New Folder",
+            SelectAll: true);
+        EnsureNavigatorDraftVisible();
+        Focus();
+        Invalidate();
+    }
+
+    internal void CancelNavigatorFolderDraft()
+    {
+        _navigatorFolderDraft = null;
         Invalidate();
     }
 
@@ -201,6 +244,7 @@ internal sealed class ObserverCanvasDrawable : Drawable
         if (_snapshot.Sheets.Count == 0)
         {
             DrawEmpty(graphics, "Create a layout to begin arranging the board.");
+            DrawNavigator(graphics, ViewportSize());
             return;
         }
 
@@ -224,6 +268,8 @@ internal sealed class ObserverCanvasDrawable : Drawable
             graphics.FillRectangle(FoundryTheme.SelectionWindowFill(crossing), screen);
             graphics.DrawRectangle(new Pen(FoundryTheme.SelectionWindowStroke(crossing), 1), screen);
         }
+
+        DrawNavigator(graphics, viewport);
     }
 
     private void DrawGrid(Graphics graphics, ObserverSize viewport)
@@ -386,13 +432,189 @@ internal sealed class ObserverCanvasDrawable : Drawable
 
     private void DrawEmpty(Graphics graphics, string message)
     {
+        var x = _navigatorVisible ? NavigatorWidth + 32 : 32;
         graphics.DrawText(
             SystemFonts.Bold(13),
             FoundryTheme.PrimaryText,
-            32,
-            32,
+            x,
+            44,
             "Observer canvas");
-        graphics.DrawText(SystemFonts.Default(), FoundryTheme.MutedText, 32, 60, message);
+        graphics.DrawText(SystemFonts.Default(), FoundryTheme.MutedText, x, 72, message);
+    }
+
+    private void DrawNavigator(Graphics graphics, ObserverSize viewport)
+    {
+        if (!_navigatorVisible || !_snapshot.HasDocument) return;
+        var rows = NavigatorRowsForDisplay();
+        var visibleCount = NavigatorVisibleRowCount(viewport);
+        ClampNavigatorScroll(rows.Length, visibleCount);
+
+        graphics.DrawText(
+            _folderFont,
+            FoundryTheme.PrimaryText,
+            8,
+            NavigatorTop + 5,
+            "Navigator");
+        for (var visibleIndex = 0; visibleIndex < visibleCount; visibleIndex++)
+        {
+            var rowIndex = _navigatorScrollRow + visibleIndex;
+            if (rowIndex >= rows.Length) break;
+            var row = rows[rowIndex];
+            var y = NavigatorTop + NavigatorHeaderHeight + visibleIndex * NavigatorRowHeight;
+            var selected = _selection.Contains(row.Key);
+            if (selected || row.IsDraft)
+            {
+                graphics.FillRectangle(
+                    row.IsDraft
+                        ? FoundryTheme.WithAlpha(FoundryTheme.CanvasSubtleSurface, 135)
+                        : FoundryTheme.WithAlpha(FoundryTheme.CanvasSubtleSurface, 190),
+                    0,
+                    y,
+                    NavigatorWidth,
+                    NavigatorRowHeight);
+            }
+
+            var emphasized = row.IsDraft || !_filter.IsActive || _filter.Emphasizes(row.Key) || selected;
+            graphics.DrawText(
+                _sheetFont,
+                emphasized ? FoundryTheme.PrimaryText : FoundryTheme.WithAlpha(FoundryTheme.MutedText, 80),
+                8,
+                y + 5,
+                row.Label);
+            if (row.IsDraft)
+            {
+                graphics.DrawRectangle(
+                    new Pen(FoundryTheme.SelectionAccent, 1),
+                    4,
+                    y + 2,
+                    NavigatorWidth - 8,
+                    NavigatorRowHeight - 4);
+            }
+        }
+
+        if (rows.Length > visibleCount)
+        {
+            var trackHeight = visibleCount * NavigatorRowHeight;
+            var thumbHeight = Math.Max(18, trackHeight * visibleCount / rows.Length);
+            var maxScroll = Math.Max(1, rows.Length - visibleCount);
+            var thumbY = NavigatorTop + NavigatorHeaderHeight +
+                         (trackHeight - thumbHeight) * _navigatorScrollRow / maxScroll;
+            graphics.FillRectangle(
+                FoundryTheme.WithAlpha(FoundryTheme.MutedText, 90),
+                NavigatorWidth - 3,
+                thumbY,
+                2,
+                thumbHeight);
+        }
+    }
+
+    private CanvasNavigatorRow[] NavigatorRowsForDisplay()
+    {
+        if (_navigatorFolderDraft is not { } draft) return _navigatorRows;
+        var parentIndex = Array.FindIndex(_navigatorRows, row =>
+            row.Key.Kind == OverviewNodeKind.Folder && row.Key.Id == draft.ParentFolderId);
+        if (parentIndex < 0) return _navigatorRows;
+        var parentDepth = _navigatorRows[parentIndex].Depth;
+        var insertionIndex = parentIndex + 1;
+        while (insertionIndex < _navigatorRows.Length &&
+               _navigatorRows[insertionIndex].Depth > parentDepth)
+        {
+            if (_navigatorRows[insertionIndex].Depth == parentDepth + 1 &&
+                _navigatorRows[insertionIndex].Key.Kind == OverviewNodeKind.Sheet)
+                break;
+            insertionIndex++;
+        }
+
+        var result = _navigatorRows.ToList();
+        result.Insert(insertionIndex, new CanvasNavigatorRow(
+            new OverviewNodeKey(OverviewNodeKind.Folder, draft.Id),
+            $"{new string(' ', (parentDepth + 1) * 3)}📁  {draft.Name}",
+            parentDepth + 1,
+            IsDraft: true));
+        return result.ToArray();
+    }
+
+    private int NavigatorVisibleRowCount(ObserverSize viewport) => Math.Max(
+        1,
+        (int)Math.Floor((viewport.Height - NavigatorTop - NavigatorHeaderHeight - 8) /
+                        NavigatorRowHeight));
+
+    private void ClampNavigatorScroll()
+    {
+        var rows = NavigatorRowsForDisplay();
+        ClampNavigatorScroll(rows.Length, NavigatorVisibleRowCount(ViewportSize()));
+    }
+
+    private void ClampNavigatorScroll(int rowCount, int visibleCount)
+    {
+        _navigatorScrollRow = Math.Clamp(_navigatorScrollRow, 0, Math.Max(0, rowCount - visibleCount));
+    }
+
+    private void EnsureNavigatorDraftVisible()
+    {
+        var rows = NavigatorRowsForDisplay();
+        var index = Array.FindIndex(rows, row => row.IsDraft);
+        if (index < 0) return;
+        var visibleCount = NavigatorVisibleRowCount(ViewportSize());
+        if (index < _navigatorScrollRow) _navigatorScrollRow = index;
+        else if (index >= _navigatorScrollRow + visibleCount)
+            _navigatorScrollRow = Math.Max(0, index - visibleCount + 1);
+    }
+
+    private bool TryNavigatorRowAt(PointF point, out CanvasNavigatorRow row)
+    {
+        row = default!;
+        if (!_navigatorVisible || point.X < 0 || point.X > NavigatorWidth ||
+            point.Y < NavigatorTop + NavigatorHeaderHeight)
+            return false;
+        var visibleIndex = (int)((point.Y - NavigatorTop - NavigatorHeaderHeight) /
+                                 NavigatorRowHeight);
+        if (visibleIndex < 0 || visibleIndex >= NavigatorVisibleRowCount(ViewportSize()))
+            return false;
+        var rows = NavigatorRowsForDisplay();
+        var rowIndex = _navigatorScrollRow + visibleIndex;
+        if (rowIndex < 0 || rowIndex >= rows.Length) return false;
+        row = rows[rowIndex];
+        return true;
+    }
+
+    private static CanvasNavigatorRow[] BuildNavigatorRows(ObserverSnapshot snapshot)
+    {
+        if (!snapshot.HasDocument) return [];
+        var folders = snapshot.Folders.ToDictionary(folder => folder.Id);
+        if (!folders.TryGetValue(snapshot.RootFolderId, out var root)) return [];
+        var rows = new List<CanvasNavigatorRow>();
+        var visited = new HashSet<Guid>();
+
+        void AddFolder(ObserverFolderSnapshot folder, int depth)
+        {
+            if (!visited.Add(folder.Id)) return;
+            rows.Add(new CanvasNavigatorRow(
+                new OverviewNodeKey(OverviewNodeKind.Folder, folder.Id),
+                $"{new string(' ', depth * 3)}📁  {folder.Name}",
+                depth));
+            foreach (var child in folders.Values.Where(candidate => candidate.ParentId == folder.Id)
+                         .OrderBy(candidate => candidate.Order)
+                         .ThenBy(candidate => candidate.Name, StringComparer.OrdinalIgnoreCase))
+                AddFolder(child, depth + 1);
+            foreach (var sheet in snapshot.Sheets.Where(sheet => sheet.FolderId == folder.Id)
+                         .OrderBy(sheet => sheet.Order)
+                         .ThenBy(sheet => sheet.Name, StringComparer.OrdinalIgnoreCase))
+            {
+                rows.Add(new CanvasNavigatorRow(
+                    new OverviewNodeKey(OverviewNodeKind.Sheet, sheet.PageViewId),
+                    $"{new string(' ', (depth + 1) * 3)}▣  {sheet.Name}",
+                    depth + 1));
+                foreach (var detail in sheet.Details)
+                    rows.Add(new CanvasNavigatorRow(
+                        new OverviewNodeKey(OverviewNodeKind.Detail, detail.DetailViewportId),
+                        $"{new string(' ', (depth + 2) * 3)}⌗  {detail.Name}",
+                        depth + 2));
+            }
+        }
+
+        AddFolder(root, 0);
+        return rows.ToArray();
     }
 
     private void OnMouseDown(object? sender, MouseEventArgs eventArgs)
@@ -405,10 +627,7 @@ internal sealed class ObserverCanvasDrawable : Drawable
         _dragWorldDelta = new ObserverPoint();
         if (eventArgs.Buttons.HasFlag(MouseButtons.Alternate))
         {
-            SelectAt(_pressWorld, eventArgs.Modifiers, preserveExistingIfHit: true);
-            ContextRequested?.Invoke(this, new ObserverContextRequestedEventArgs(
-                _pressWorld,
-                eventArgs.Location));
+            _dragMode = DragMode.ContextOrPan;
             eventArgs.Handled = true;
             return;
         }
@@ -422,6 +641,15 @@ internal sealed class ObserverCanvasDrawable : Drawable
         }
 
         if (!eventArgs.Buttons.HasFlag(MouseButtons.Primary)) return;
+        if (TryNavigatorRowAt(eventArgs.Location, out var navigatorRow))
+        {
+            if (!navigatorRow.IsDraft)
+                SelectKey(navigatorRow.Key, eventArgs.Modifiers);
+            eventArgs.Handled = true;
+            Invalidate();
+            return;
+        }
+
         var card = _spatialIndex.HitSheet(_pressWorld);
         if (card is not null)
         {
@@ -465,6 +693,17 @@ internal sealed class ObserverCanvasDrawable : Drawable
     {
         var current = Point(eventArgs.Location);
         if (_dragMode == DragMode.None) return;
+        if (_dragMode == DragMode.ContextOrPan)
+        {
+            if (Distance(_pressScreen, current) <= RightPanActivationDistance)
+            {
+                eventArgs.Handled = true;
+                return;
+            }
+
+            _dragMode = DragMode.Pan;
+        }
+
         if (_dragMode == DragMode.Pan)
         {
             _camera = _camera.PanScreen(current.X - _lastScreen.X, current.Y - _lastScreen.Y);
@@ -492,7 +731,32 @@ internal sealed class ObserverCanvasDrawable : Drawable
 
     private void OnMouseUp(object? sender, MouseEventArgs eventArgs)
     {
-        var releaseWorld = _camera.ScreenToWorld(Point(eventArgs.Location), ViewportSize());
+        var releaseScreen = Point(eventArgs.Location);
+        var releaseWorld = _camera.ScreenToWorld(releaseScreen, ViewportSize());
+        if (_dragMode == DragMode.ContextOrPan)
+        {
+            if (Distance(_pressScreen, releaseScreen) <= RightPanActivationDistance)
+            {
+                SelectAt(_contextWorld, eventArgs.Modifiers, preserveExistingIfHit: true);
+                var contextPoint = new PointF((float)_pressScreen.X, (float)_pressScreen.Y);
+                ResetDrag();
+                ContextRequested?.Invoke(this, new ObserverContextRequestedEventArgs(
+                    _contextWorld,
+                    contextPoint));
+            }
+            else
+            {
+                _camera = _camera.PanScreen(
+                    releaseScreen.X - _lastScreen.X,
+                    releaseScreen.Y - _lastScreen.Y);
+                ResetDrag();
+                NotifyViewChanged();
+            }
+
+            eventArgs.Handled = true;
+            return;
+        }
+
         if (_dragMode == DragMode.Sheets && Distance(_pressScreen, Point(eventArgs.Location)) > 4)
         {
             var selectedSheetIds = SelectedSheetIds();
@@ -556,6 +820,18 @@ internal sealed class ObserverCanvasDrawable : Drawable
 
     private void OnMouseDoubleClick(object? sender, MouseEventArgs eventArgs)
     {
+        if (TryNavigatorRowAt(eventArgs.Location, out var navigatorRow))
+        {
+            if (!navigatorRow.IsDraft)
+            {
+                SelectKey(navigatorRow.Key, eventArgs.Modifiers);
+                Application.Instance.AsyncInvoke(FocusSelection);
+            }
+
+            eventArgs.Handled = true;
+            return;
+        }
+
         var world = _camera.ScreenToWorld(Point(eventArgs.Location), ViewportSize());
         var card = _spatialIndex.HitSheet(world);
         if (card is null) return;
@@ -571,6 +847,21 @@ internal sealed class ObserverCanvasDrawable : Drawable
     {
         var delta = eventArgs.Delta.Height;
         if (Math.Abs(delta) < float.Epsilon) return;
+        if (_navigatorVisible && eventArgs.Location.X >= 0 && eventArgs.Location.X <= NavigatorWidth &&
+            eventArgs.Location.Y >= NavigatorTop)
+        {
+            var rows = NavigatorRowsForDisplay();
+            var visibleCount = NavigatorVisibleRowCount(ViewportSize());
+            if (rows.Length > visibleCount)
+            {
+                _navigatorScrollRow += delta > 0 ? -1 : 1;
+                ClampNavigatorScroll(rows.Length, visibleCount);
+                Invalidate();
+                eventArgs.Handled = true;
+                return;
+            }
+        }
+
         _camera = _camera.ZoomAt(
             Point(eventArgs.Location),
             delta > 0 ? 1.12 : 1 / 1.12,
@@ -581,6 +872,46 @@ internal sealed class ObserverCanvasDrawable : Drawable
 
     private void OnKeyDown(object? sender, KeyEventArgs eventArgs)
     {
+        if (_navigatorFolderDraft is { } draft)
+        {
+            if (eventArgs.Key == Keys.Enter)
+            {
+                var name = draft.Name.Trim();
+                if (name.Length > 0)
+                {
+                    FolderDraftRequested?.Invoke(this, new ObserverFolderDraftRequestedEventArgs(
+                        draft.Id,
+                        draft.ParentFolderId,
+                        name));
+                }
+
+                eventArgs.Handled = true;
+                return;
+            }
+
+            if (eventArgs.Key == Keys.Escape)
+            {
+                CancelNavigatorFolderDraft();
+                eventArgs.Handled = true;
+                return;
+            }
+
+            if (eventArgs.Key == Keys.Backspace)
+            {
+                var name = draft.SelectAll
+                    ? string.Empty
+                    : draft.Name.Length > 0
+                        ? draft.Name[..^1]
+                        : string.Empty;
+                _navigatorFolderDraft = draft with { Name = name, SelectAll = false };
+                Invalidate();
+                eventArgs.Handled = true;
+                return;
+            }
+
+            return;
+        }
+
         if (eventArgs.Key == Keys.Space)
         {
             _spaceHeld = true;
@@ -667,6 +998,15 @@ internal sealed class ObserverCanvasDrawable : Drawable
             NotifyViewChanged();
             eventArgs.Handled = true;
         }
+    }
+
+    private void OnTextInput(object? sender, TextInputEventArgs eventArgs)
+    {
+        if (_navigatorFolderDraft is not { } draft || string.IsNullOrEmpty(eventArgs.Text)) return;
+        var name = draft.SelectAll ? eventArgs.Text : draft.Name + eventArgs.Text;
+        _navigatorFolderDraft = draft with { Name = name, SelectAll = false };
+        EnsureNavigatorDraftVisible();
+        Invalidate();
     }
 
     private void OnKeyUp(object? sender, KeyEventArgs eventArgs)
@@ -933,15 +1273,42 @@ internal sealed class ObserverCanvasDrawable : Drawable
 
     private sealed record PreviewEntry(OverviewThumbnailKey Key, Bitmap Bitmap);
 
+    private sealed record CanvasNavigatorRow(
+        OverviewNodeKey Key,
+        string Label,
+        int Depth,
+        bool IsDraft = false);
+
+    private sealed record NavigatorFolderDraft(
+        Guid Id,
+        Guid ParentFolderId,
+        string Name,
+        bool SelectAll);
+
     private enum DragMode
     {
         None,
+        ContextOrPan,
         Pan,
         Sheets,
         Folder,
         Reorder,
         Lasso,
     }
+}
+
+internal sealed class ObserverFolderDraftRequestedEventArgs : EventArgs
+{
+    internal ObserverFolderDraftRequestedEventArgs(Guid folderId, Guid parentFolderId, string name)
+    {
+        FolderId = folderId;
+        ParentFolderId = parentFolderId;
+        Name = name;
+    }
+
+    internal Guid FolderId { get; }
+    internal Guid ParentFolderId { get; }
+    internal string Name { get; }
 }
 
 internal sealed class ObserverBoardStateRequestedEventArgs : EventArgs

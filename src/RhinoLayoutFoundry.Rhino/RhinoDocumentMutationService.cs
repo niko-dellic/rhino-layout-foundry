@@ -1390,30 +1390,54 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
             new Point2d(slot.Right * pageScale, slot.Top * pageScale),
             projection) ?? throw new InvalidOperationException($"Rhino did not create detail '{slot.Name}'.");
 
+        var geometryChanged = false;
+        if (slot.PageToModelRatio is { } ratio && ratio > 0 && detail.DetailGeometry.IsParallelProjection)
+        {
+            if (!detail.DetailGeometry.SetScale(ratio, recipePageUnit, 1, document.ModelUnitSystem))
+                throw new InvalidOperationException($"Rhino did not set the scale for detail '{slot.Name}'.");
+            geometryChanged = true;
+        }
+        if (detail.DetailGeometry.IsProjectionLocked != slot.ProjectionLocked)
+        {
+            detail.DetailGeometry.IsProjectionLocked = slot.ProjectionLocked;
+            geometryChanged = true;
+        }
+        if (geometryChanged)
+        {
+            if (!detail.CommitChanges())
+                throw new InvalidOperationException($"Rhino did not commit detail geometry '{slot.Name}'.");
+            detail = document.Objects.FindId(detail.Id) as DetailViewObject
+                ?? throw new InvalidOperationException($"Rhino could not find detail '{slot.Name}' after committing it.");
+        }
+
+        var viewportChanged = false;
         var namedView = assignedNamedView ?? slot.DefaultNamedView;
         if (!string.IsNullOrWhiteSpace(namedView))
         {
             var index = document.NamedViews.FindByName(namedView);
             if (index >= 0)
+            {
                 document.NamedViews.Restore(index, detail.Viewport);
+                viewportChanged = true;
+            }
         }
         else if (slot.CameraLocation is [var lx, var ly, var lz] &&
                  slot.CameraTarget is [var tx, var ty, var tz])
         {
             detail.Viewport.SetCameraLocations(new Point3d(tx, ty, tz), new Point3d(lx, ly, lz));
+            viewportChanged = true;
         }
-
-        if (slot.PageToModelRatio is { } ratio && ratio > 0 && detail.DetailGeometry.IsParallelProjection)
-            detail.DetailGeometry.SetScale(ratio, recipePageUnit, 1, document.ModelUnitSystem);
-        detail.DetailGeometry.IsProjectionLocked = slot.ProjectionLocked;
         if (slot.DisplayModeId is { } modeId)
         {
             using var mode = DisplayModeDescription.GetDisplayMode(modeId);
             if (mode is not null)
+            {
                 detail.Viewport.DisplayMode = mode;
+                viewportChanged = true;
+            }
         }
-        if (!detail.CommitViewportChanges())
-            throw new InvalidOperationException($"Rhino did not commit detail '{slot.Name}'.");
+        if (viewportChanged && !detail.CommitViewportChanges())
+            throw new InvalidOperationException($"Rhino did not commit viewport settings for detail '{slot.Name}'.");
     }
 
     private static Guid? CreateTitleBlock(

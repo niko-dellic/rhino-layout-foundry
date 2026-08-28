@@ -732,7 +732,7 @@ public static class LayoutFoundryUiHost
                     OverviewInvalidationKind.All));
             return result;
         }
-        catch (InvalidOperationException exception)
+        catch (Exception exception)
         {
             return UnavailableResult(exception.Message);
         }

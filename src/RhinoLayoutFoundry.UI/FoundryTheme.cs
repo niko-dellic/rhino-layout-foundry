@@ -45,6 +45,14 @@ internal static class FoundryTheme
         ? Color.FromArgb(82, 82, 91, 255)
         : Color.FromArgb(212, 212, 216, 255);
 
+    internal static Color HierarchyFolderBackground => IsDarkMode
+        ? Color.FromArgb(34, 34, 37, 255)
+        : Color.FromArgb(250, 250, 250, 255);
+
+    internal static Color HierarchyDocumentBackground => IsDarkMode
+        ? Color.FromArgb(39, 39, 42, 255)
+        : Color.FromArgb(244, 244, 245, 255);
+
     internal static Color CanvasGrid => IsDarkMode
         ? Color.FromArgb(161, 161, 170, 30)
         : Color.FromArgb(113, 113, 122, 26);

@@ -24,7 +24,7 @@ public static class DocumentStateSerializer
         var state = JsonSerializer.Deserialize<DocumentState>(payload, Options)
             ?? throw new JsonException("The document state payload was empty.");
 
-        if (state.SchemaVersion is 1 or 2 or 3 or 4)
+        if (state.SchemaVersion is 1 or 2 or 3 or 4 or 5)
         {
             return state with
             {
@@ -37,6 +37,7 @@ public static class DocumentStateSerializer
                     : state.Sheets,
                 ObserverCanvas = state.SchemaVersion < 4 ? ObserverCanvasState.Empty : state.Canvas,
                 ImportRecovery = [],
+                DedicatedDetailLayerId = null,
             };
         }
 

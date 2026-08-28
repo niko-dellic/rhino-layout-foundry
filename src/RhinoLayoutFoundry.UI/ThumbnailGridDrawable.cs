@@ -28,14 +28,19 @@ internal sealed class ThumbnailGridDrawable : Drawable
 
     internal event EventHandler<ThumbnailGridSelectionEventArgs>? SelectionRequested;
     internal event EventHandler<ThumbnailGridNavigationEventArgs>? NavigationRequested;
+    internal event EventHandler<ThumbnailGridContextEventArgs>? ContextRequested;
 
     internal ThumbnailGridLayout GridLayout => _layout;
     internal ObserverSnapshot Snapshot => _snapshot;
 
-    internal void SetSnapshot(ObserverSnapshot snapshot, double availableWidth, double requestedCardWidth)
+    internal void SetSnapshot(
+        ObserverSnapshot snapshot,
+        double availableWidth,
+        double requestedCardWidth,
+        double minimumHeight = 0)
     {
         _snapshot = snapshot ?? ObserverSnapshot.NoDocument;
-        SetGridSize(availableWidth, requestedCardWidth);
+        SetGridSize(availableWidth, requestedCardWidth, minimumHeight);
         var currentIds = _snapshot.Sheets.Select(sheet => sheet.PageViewId).ToHashSet();
         foreach (var stale in _previews.Keys.Where(id => !currentIds.Contains(id)).ToArray())
         {
@@ -45,12 +50,12 @@ internal sealed class ThumbnailGridDrawable : Drawable
         Invalidate();
     }
 
-    internal void SetGridSize(double availableWidth, double requestedCardWidth)
+    internal void SetGridSize(double availableWidth, double requestedCardWidth, double minimumHeight = 0)
     {
         _layout = ThumbnailGridLayout.Create(_snapshot.Sheets.Count, availableWidth, requestedCardWidth);
         Size = new Size(
             Math.Max(1, (int)Math.Ceiling(availableWidth)),
-            Math.Max(1, (int)Math.Ceiling(_layout.ContentHeight)));
+            Math.Max(1, (int)Math.Ceiling(Math.Max(_layout.ContentHeight, minimumHeight))));
         Invalidate();
     }
 
@@ -211,6 +216,27 @@ internal sealed class ThumbnailGridDrawable : Drawable
 
     private void OnMouseDown(object? sender, MouseEventArgs eventArgs)
     {
+        if (eventArgs.Buttons.HasFlag(MouseButtons.Alternate))
+        {
+            Focus();
+            var contextIndex = HitIndex(eventArgs.Location);
+            if (contextIndex is null) return;
+
+            var contextSheet = _snapshot.Sheets[contextIndex.Value];
+            var contextKey = new OverviewNodeKey(OverviewNodeKind.Sheet, contextSheet.PageViewId);
+            if (!_selection.Contains(contextKey))
+            {
+                _selectionAnchor = contextSheet.PageViewId;
+                SelectionRequested?.Invoke(
+                    this,
+                    new ThumbnailGridSelectionEventArgs([contextKey], contextKey));
+            }
+
+            ContextRequested?.Invoke(this, new ThumbnailGridContextEventArgs(eventArgs.Location));
+            eventArgs.Handled = true;
+            return;
+        }
+
         if (!eventArgs.Buttons.HasFlag(MouseButtons.Primary)) return;
         Focus();
         var index = HitIndex(eventArgs.Location);
@@ -315,4 +341,9 @@ internal sealed class ThumbnailGridSelectionEventArgs(
 internal sealed class ThumbnailGridNavigationEventArgs(OverviewNavigationTarget target) : EventArgs
 {
     internal OverviewNavigationTarget Target { get; } = target;
+}
+
+internal sealed class ThumbnailGridContextEventArgs(PointF controlPoint) : EventArgs
+{
+    internal PointF ControlPoint { get; } = controlPoint;
 }

@@ -731,19 +731,44 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
             new Point2d(recipe.Left * pageScale, recipe.Bottom * pageScale),
             new Point2d(recipe.Right * pageScale, recipe.Top * pageScale),
             projection) ?? throw new InvalidOperationException($"Rhino did not create detail '{recipe.Name}'.");
+        var geometryChanged = false;
+        if (recipe.PageToModelRatio is { } ratio && ratio > 0 && detail.DetailGeometry.IsParallelProjection)
+        {
+            if (!detail.DetailGeometry.SetScale(ratio, recipeUnit, 1, document.ModelUnitSystem))
+                throw new InvalidOperationException($"Rhino did not set the scale for detail '{recipe.Name}'.");
+            geometryChanged = true;
+        }
+        if (detail.DetailGeometry.IsProjectionLocked != recipe.ProjectionLocked)
+        {
+            detail.DetailGeometry.IsProjectionLocked = recipe.ProjectionLocked;
+            geometryChanged = true;
+        }
+        if (geometryChanged)
+        {
+            if (!detail.CommitChanges())
+                throw new InvalidOperationException($"Rhino did not commit detail geometry '{recipe.Name}'.");
+            detail = document.Objects.FindId(detail.Id) as DetailViewObject
+                ?? throw new InvalidOperationException($"Rhino could not find detail '{recipe.Name}' after committing it.");
+        }
+
+        var viewportChanged = false;
         if (recipe.CameraLocation is [var lx, var ly, var lz] &&
             recipe.CameraTarget is [var tx, var ty, var tz])
+        {
             detail.Viewport.SetCameraLocations(new Point3d(tx, ty, tz), new Point3d(lx, ly, lz));
-        if (recipe.PageToModelRatio is { } ratio && ratio > 0 && detail.DetailGeometry.IsParallelProjection)
-            detail.DetailGeometry.SetScale(ratio, recipeUnit, 1, document.ModelUnitSystem);
-        detail.DetailGeometry.IsProjectionLocked = recipe.ProjectionLocked;
+            viewportChanged = true;
+        }
         if (recipe.DisplayModeId is { } modeId)
         {
             using var mode = DisplayModeDescription.GetDisplayMode(modeId);
-            if (mode is not null) detail.Viewport.DisplayMode = mode;
+            if (mode is not null)
+            {
+                detail.Viewport.DisplayMode = mode;
+                viewportChanged = true;
+            }
         }
-        if (!detail.CommitViewportChanges())
-            throw new InvalidOperationException($"Rhino did not commit detail '{recipe.Name}'.");
+        if (viewportChanged && !detail.CommitViewportChanges())
+            throw new InvalidOperationException($"Rhino did not commit viewport settings for detail '{recipe.Name}'.");
         return detail;
     }
 
@@ -1093,7 +1118,8 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
             metadata,
             templates,
             canvas,
-            recovery);
+            recovery,
+            before.DedicatedDetailLayerId);
     }
 
     private static ObserverCanvasState RemapCanvas(

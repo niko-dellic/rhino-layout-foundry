@@ -106,7 +106,8 @@ public sealed record CreateSheetFromTemplateChange(
     string Name,
     int Order,
     SheetTemplateRecipe Template,
-    IReadOnlyDictionary<Guid, string> NamedViewAssignments) : OperationChange;
+    IReadOnlyDictionary<Guid, string> NamedViewAssignments,
+    bool UseDedicatedDetailLayer = true) : OperationChange;
 
 public sealed record BatchUpdateSheetsChange(
     IReadOnlyList<Guid> SheetPageViewIds,

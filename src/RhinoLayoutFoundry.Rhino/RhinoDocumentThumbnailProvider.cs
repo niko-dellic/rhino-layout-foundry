@@ -69,17 +69,28 @@ internal sealed class RhinoDocumentThumbnailProvider : IDocumentThumbnailProvide
             return new OverviewThumbnailResult(request.Key, null, "The layout sheet no longer exists.");
         }
 
-        var capture = new ViewCapture
+        // Capturing the RhinoPageView directly captures its on-screen viewport,
+        // including the gray area surrounding the paper. Build print-preview
+        // settings from the page instead so the bitmap media is the sheet itself.
+        using var pageSettings = new ViewCaptureSettings(page, 72.0)
         {
-            Width = request.Key.Width,
-            Height = request.Key.Height,
+            DrawBackground = true,
             DrawGrid = false,
-            DrawAxes = false,
-            DrawGridAxes = false,
-            ScaleScreenItems = false,
-            TransparentBackground = false,
+            DrawAxis = false,
+            RasterMode = true,
+            UsePrintWidths = false,
         };
-        using var bitmap = capture.CaptureToBitmap(page);
+        using var previewSettings = pageSettings.CreatePreviewSettings(
+            new System.Drawing.Size(request.Key.Width, request.Key.Height));
+        if (previewSettings is null)
+        {
+            return new OverviewThumbnailResult(
+                request.Key,
+                null,
+                "Rhino could not create page-only preview settings.");
+        }
+
+        using var bitmap = ViewCapture.CaptureToBitmap(previewSettings);
         if (bitmap is null)
         {
             return new OverviewThumbnailResult(request.Key, null, "Rhino did not return a page preview.");

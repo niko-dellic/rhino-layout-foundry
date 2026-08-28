@@ -11,6 +11,7 @@ public sealed class DocumentStateSerializerTests
     {
         var folder = new FolderRecord(Guid.NewGuid(), WellKnownIds.UnorganizedFolderId, "Plans", 1);
         var sheetId = Guid.NewGuid();
+        var detailLayerId = Guid.NewGuid();
         var titleBlock = new TitleBlockRole(Guid.NewGuid(), Guid.NewGuid(), "LowerRight");
         var sheet = new SheetRecord(
             sheetId,
@@ -61,7 +62,8 @@ public sealed class DocumentStateSerializerTests
                 new Dictionary<Guid, ObserverPointRecord>
                 {
                     [sheetId] = new(240, 80),
-                }));
+                }),
+            DedicatedDetailLayerId: detailLayerId);
 
         var restored = DocumentStateSerializer.Deserialize(DocumentStateSerializer.Serialize(state));
 
@@ -79,6 +81,7 @@ public sealed class DocumentStateSerializerTests
         Assert.Equal(sheetId, restored.Templates.Single().SourcePageViewId);
         Assert.Equal(new ObserverPointRecord(12.5, -4), restored.Canvas.FolderOrigins[folder.Id]);
         Assert.Equal(new ObserverPointRecord(240, 80), restored.Canvas.SheetPlacements[sheetId]);
+        Assert.Equal(detailLayerId, restored.DedicatedDetailLayerId);
     }
 
     [Fact]
@@ -154,6 +157,23 @@ public sealed class DocumentStateSerializerTests
 
         Assert.Equal(DocumentState.CurrentSchemaVersion, restored.SchemaVersion);
         Assert.Empty(restored.Recovery);
+    }
+
+    [Fact]
+    public void VersionFiveStateMigratesWithoutADedicatedDetailLayer()
+    {
+        var detailLayerId = Guid.NewGuid();
+        var payload = DocumentStateSerializer.Serialize(DocumentState.Empty() with
+            {
+                DedicatedDetailLayerId = detailLayerId,
+            })
+            .Replace($"\"SchemaVersion\":{DocumentState.CurrentSchemaVersion}", "\"SchemaVersion\":5", StringComparison.Ordinal)
+            .Replace($",\"DedicatedDetailLayerId\":\"{detailLayerId}\"", string.Empty, StringComparison.Ordinal);
+
+        var restored = DocumentStateSerializer.Deserialize(payload);
+
+        Assert.Equal(DocumentState.CurrentSchemaVersion, restored.SchemaVersion);
+        Assert.Null(restored.DedicatedDetailLayerId);
     }
 
     [Fact]

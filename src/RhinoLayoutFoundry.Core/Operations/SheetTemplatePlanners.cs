@@ -81,7 +81,8 @@ public sealed record LayoutCreationSpec(
     Guid? DetailDisplayModeId = null,
     bool UseTemplateTitleBlock = true,
     Guid? TitleBlockSourceInstanceObjectId = null,
-    string? NamedView = null);
+    string? NamedView = null,
+    bool UseDedicatedDetailLayer = true);
 
 public sealed record BatchCreateSheetsRequest(
     uint DocumentRuntimeSerialNumber,
@@ -112,7 +113,7 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
             diagnostics.Add(CaptureSheetTemplatePlanner.Error("batch.step_zero", "The naming step cannot be zero."));
 
         var templates = snapshot.Templates.ToDictionary(item => item.Id);
-        var expanded = new List<(Guid DraftId, SheetTemplateRecipe Template)>();
+        var expanded = new List<(Guid DraftId, SheetTemplateRecipe Template, bool UseDedicatedDetailLayer)>();
         if (hasCreationSpecs)
         {
             foreach (var spec in request.CreationSpecs!)
@@ -132,7 +133,7 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
 
                 ValidateTemplate(template, snapshot, request.NamedViewAssignments, diagnostics);
                 for (var index = 0; index < spec.Quantity; index++)
-                    expanded.Add((Guid.NewGuid(), template));
+                    expanded.Add((Guid.NewGuid(), template, spec.UseDedicatedDetailLayer));
             }
         }
         else foreach (var item in request.TemplateQuantities)
@@ -149,7 +150,7 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
             }
             ValidateTemplate(template, snapshot, request.NamedViewAssignments, diagnostics);
             for (var index = 0; index < item.Quantity; index++)
-                expanded.Add((Guid.NewGuid(), template));
+                expanded.Add((Guid.NewGuid(), template, true));
         }
 
         var pattern = request.NamingPattern?.Trim() ?? string.Empty;
@@ -187,7 +188,8 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
                     naming.Entries[index].ProposedName,
                     nextOrder + index,
                     expanded[index].Template,
-                    request.NamedViewAssignments ?? new Dictionary<Guid, string>()));
+                    request.NamedViewAssignments ?? new Dictionary<Guid, string>(),
+                    expanded[index].UseDedicatedDetailLayer));
             }
             diagnostics.Add(new Diagnostic("batch.undo_unavailable", DiagnosticSeverity.Warning,
                 "Rhino does not expose native Undo for layout creation. Foundry will roll back the entire batch if any sheet fails."));

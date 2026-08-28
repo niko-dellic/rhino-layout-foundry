@@ -16,11 +16,11 @@ public sealed class ObserverFoundryPanel : Panel
     private readonly ListBox _namedViews;
     private readonly Label _status;
     private readonly Label _zoomLabel;
-    private readonly ToggleButton _navigatorButton;
-    private readonly ToggleButton _namedViewsButton;
-    private readonly Control _navigatorSidebar;
+    private readonly CanvasToolbarIconButton _navigatorButton;
+    private readonly CanvasToolbarIconButton _namedViewsButton;
     private readonly Control _namedViewsSidebar;
     private readonly PixelLayout _canvasOverlay;
+    private readonly Control _canvasToolbar;
     private readonly UITimer _overlayLayoutTimer;
     private readonly UITimer _thumbnailTimer;
     private readonly UITimer _invalidationTimer;
@@ -60,6 +60,7 @@ public sealed class ObserverFoundryPanel : Panel
         var zoomOutButton = ToolbarButton(FoundryViewIcons.ZoomOut(), "Zoom out");
         var zoomInButton = ToolbarButton(FoundryViewIcons.ZoomIn(), "Zoom in");
         _navigatorButton = ToolbarToggleButton(FoundryViewIcons.Navigator(), "Show or hide the Navigator");
+        _navigatorButton.Checked = true;
         _namedViewsButton = ToolbarToggleButton(FoundryViewIcons.NamedViews(), "Show or hide Named views");
         var openButton = ToolbarButton(FoundryViewIcons.OpenSelection(), "Open the selected layout or detail in Rhino");
         var assignNamedViewButton = ToolbarButton("Assign to selection", "Assign the selected named view to every selected detail, layout, or folder");
@@ -93,14 +94,15 @@ public sealed class ObserverFoundryPanel : Panel
             },
         };
 
-        var toolbar = new StackLayout
+        _canvasToolbar = new StackLayout
         {
             Orientation = Orientation.Horizontal,
             Spacing = FoundryTheme.Space1,
             VerticalContentAlignment = VerticalAlignment.Center,
             Items =
             {
-                new StackLayoutItem(null, true),
+                _navigatorButton,
+                ToolbarSeparator(),
                 fitButton,
                 focusButton,
                 tidyButton,
@@ -108,23 +110,12 @@ public sealed class ObserverFoundryPanel : Panel
                 zoomOutButton,
                 zoomInButton,
                 _zoomLabel,
-                ToolbarSeparator(),
-                _navigatorButton,
+                new StackLayoutItem(null, true),
                 _namedViewsButton,
                 openButton,
             },
         };
 
-        _navigatorSidebar = Sidebar(
-            "Navigator",
-            _navigator,
-            "‹",
-            "Collapse Navigator",
-            () =>
-            {
-                _navigatorButton.Checked = false;
-                ApplySidebarVisibility();
-            });
         _namedViewsSidebar = Sidebar(
             "Named views",
             namedViewTools,
@@ -146,7 +137,7 @@ public sealed class ObserverFoundryPanel : Panel
             UpdateCanvasOverlayLayout();
         };
         _canvasOverlay.Add(_canvas, 0, 0);
-        _canvasOverlay.Add(_navigatorSidebar, FoundryTheme.Space3, FoundryTheme.Space3);
+        _canvasOverlay.Add(_canvasToolbar, 0, 0);
         _canvasOverlay.SizeChanged += (_, _) => QueueCanvasOverlayLayout();
         ApplySidebarVisibility();
         var board = new TableLayout
@@ -161,12 +152,11 @@ public sealed class ObserverFoundryPanel : Panel
         };
         Content = new StackLayout
         {
-            Padding = new Padding(FoundryTheme.Space3),
+            Padding = new Padding(0),
             Spacing = FoundryTheme.Space2,
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Items =
             {
-                toolbar,
                 new StackLayoutItem(board, true),
                 _status,
             },
@@ -200,6 +190,8 @@ public sealed class ObserverFoundryPanel : Panel
         _canvas.DeleteRequested += async (_, _) => await DeleteSelectionAsync();
         _canvas.TidyRequested += async (_, _) => await TidyAsync();
         _canvas.ExitWorkspaceRequested += (_, _) => ExitFullscreenRequested?.Invoke(this, EventArgs.Empty);
+        _canvas.FolderDraftRequested += async (_, eventArgs) =>
+            await CommitNavigatorFolderDraftAsync(eventArgs);
 
         _navigator.SelectedRowsChanged += OnNavigatorSelectionChanged;
         _navigator.CellFormatting += (_, eventArgs) =>
@@ -249,6 +241,43 @@ public sealed class ObserverFoundryPanel : Panel
         _canvas.Invalidate();
     }
 
+    internal void BeginInlineFolderCreation(Guid? preferredParentFolderId)
+    {
+        if (!_snapshot.HasDocument) return;
+        var parentFolderId = preferredParentFolderId is { } preferred &&
+                             _snapshot.Folders.Any(folder => folder.Id == preferred)
+            ? preferred
+            : _snapshot.RootFolderId;
+        _navigatorButton.Checked = true;
+        ApplySidebarVisibility();
+        _canvas.BeginNavigatorFolderDraft(parentFolderId);
+        _status.Text = "Name the new folder, then press Return.";
+    }
+
+    private async Task CommitNavigatorFolderDraftAsync(ObserverFolderDraftRequestedEventArgs eventArgs)
+    {
+        _status.Text = "Creating folder…";
+        var result = await LayoutFoundryUiHost.CreateFolderAsync(
+            eventArgs.FolderId,
+            eventArgs.ParentFolderId,
+            eventArgs.Name);
+        if (!result.Succeeded)
+        {
+            _status.Text = ResultMessage(result, string.Empty);
+            return;
+        }
+
+        _canvas.CancelNavigatorFolderDraft();
+        var key = new OverviewNodeKey(OverviewNodeKind.Folder, eventArgs.FolderId);
+        LayoutFoundryUiHost.Selection.Replace(
+            _snapshot.DocumentRuntimeSerialNumber,
+            [key],
+            key,
+            this);
+        _status.Text = $"Created folder '{eventArgs.Name}'.";
+        RefreshSnapshot(fit: false);
+    }
+
     internal void SetFilter(OverviewFilterProjection projection)
     {
         _filter = projection ?? throw new ArgumentNullException(nameof(projection));
@@ -259,7 +288,7 @@ public sealed class ObserverFoundryPanel : Panel
 
     private void ApplySidebarVisibility()
     {
-        _navigatorSidebar.Visible = _navigatorButton.Checked == true;
+        _canvas.SetNavigatorVisible(_navigatorButton.Checked);
         _namedViewsSidebar.Visible = _namedViewsButton.Checked == true;
         UpdateCanvasOverlayLayout();
     }
@@ -271,14 +300,8 @@ public sealed class ObserverFoundryPanel : Panel
             return;
 
         _canvas.Size = clientSize;
-
-        var margin = FoundryTheme.Space3;
-        var availableWidth = Math.Max(0, clientSize.Width - margin * 2);
-        var availableHeight = Math.Max(0, clientSize.Height - margin * 2);
-        _navigatorSidebar.Size = new Size(
-            Math.Min(260, availableWidth),
-            Math.Min(520, availableHeight));
-        _canvasOverlay.Move(_navigatorSidebar, margin, margin);
+        _canvasToolbar.Size = new Size(clientSize.Width, 28);
+        _canvasOverlay.Move(_canvasToolbar, 0, 0);
     }
 
     private void QueueCanvasOverlayLayout()
@@ -299,15 +322,11 @@ public sealed class ObserverFoundryPanel : Panel
         return button;
     }
 
-    private static Button ToolbarButton(Bitmap image, string toolTip) =>
-        FoundryTheme.ConfigureToolbarButton(new Button { Image = image, ToolTip = toolTip });
+    private static CanvasToolbarIconButton ToolbarButton(Bitmap image, string toolTip) =>
+        new(image, toolTip, isToggle: false);
 
-    private static ToggleButton ToolbarToggleButton(Bitmap image, string toolTip)
-    {
-        var button = new ToggleButton { Image = image, ToolTip = toolTip };
-        FoundryTheme.ConfigureToolbarButton(button);
-        return button;
-    }
+    private static CanvasToolbarIconButton ToolbarToggleButton(Bitmap image, string toolTip) =>
+        new(image, toolTip, isToggle: true);
 
     private static Control ToolbarSeparator() => new Panel
     {
@@ -374,6 +393,7 @@ public sealed class ObserverFoundryPanel : Panel
             AllowEmptySelection = true,
             ShowHeader = false,
             Border = BorderType.None,
+            BackgroundColor = Colors.Transparent,
             ToolTip = "Select folders, layouts, or details; double-click or press F to frame them on the Canvas",
         };
         grid.Columns.Add(new GridColumn
@@ -513,6 +533,8 @@ public sealed class ObserverFoundryPanel : Panel
         {
             _updatingNavigatorSelection = false;
         }
+
+        QueueCanvasOverlayLayout();
     }
 
     private void OnNavigatorSelectionChanged(object? sender, EventArgs eventArgs)
@@ -1093,4 +1115,105 @@ public sealed class ObserverFoundryPanel : Panel
     }
 
     private sealed record NavigatorRow(OverviewNodeKey Key, string Label);
+}
+
+internal sealed class CanvasToolbarIconButton : Drawable
+{
+    private readonly Bitmap _image;
+    private readonly bool _isToggle;
+    private bool _checked;
+    private bool _hovered;
+    private bool _pressed;
+
+    internal CanvasToolbarIconButton(Bitmap image, string toolTip, bool isToggle)
+        : base(true)
+    {
+        _image = image;
+        _isToggle = isToggle;
+        Size = new Size(28, 28);
+        BackgroundColor = Colors.Transparent;
+        CanFocus = true;
+        ToolTip = toolTip;
+        Paint += OnPaint;
+        MouseEnter += (_, _) =>
+        {
+            _hovered = true;
+            Invalidate();
+        };
+        MouseLeave += (_, _) =>
+        {
+            _hovered = false;
+            _pressed = false;
+            Invalidate();
+        };
+        MouseDown += (_, eventArgs) =>
+        {
+            if (!eventArgs.Buttons.HasFlag(MouseButtons.Primary)) return;
+            Focus();
+            _pressed = true;
+            eventArgs.Handled = true;
+            Invalidate();
+        };
+        MouseUp += (_, eventArgs) =>
+        {
+            if (!_pressed) return;
+            _pressed = false;
+            Activate();
+            eventArgs.Handled = true;
+        };
+        KeyDown += (_, eventArgs) =>
+        {
+            if (eventArgs.Key is not (Keys.Enter or Keys.Space)) return;
+            Activate();
+            eventArgs.Handled = true;
+        };
+    }
+
+    internal event EventHandler? Click;
+
+    internal bool Checked
+    {
+        get => _checked;
+        set
+        {
+            if (_checked == value) return;
+            _checked = value;
+            Invalidate();
+        }
+    }
+
+    private void Activate()
+    {
+        if (_isToggle) Checked = !Checked;
+        Click?.Invoke(this, EventArgs.Empty);
+        Invalidate();
+    }
+
+    private void OnPaint(object? sender, PaintEventArgs eventArgs)
+    {
+        if (_hovered || _pressed)
+        {
+            eventArgs.Graphics.FillRectangle(
+                FoundryTheme.WithAlpha(FoundryTheme.CanvasSubtleSurface, _pressed ? 150 : 90),
+                1,
+                1,
+                Math.Max(0, Width - 2),
+                Math.Max(0, Height - 2));
+        }
+
+        var imageSize = _image.Size;
+        eventArgs.Graphics.DrawImage(
+            _image,
+            (Width - imageSize.Width) / 2f,
+            (Height - imageSize.Height) / 2f);
+        if (Checked)
+        {
+            eventArgs.Graphics.FillRectangle(
+                FoundryTheme.SelectionAccent,
+                5,
+                Height - 2,
+                Math.Max(0, Width - 10),
+                2);
+        }
+    }
 }

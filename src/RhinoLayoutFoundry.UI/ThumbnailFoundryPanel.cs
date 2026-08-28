@@ -1,6 +1,7 @@
 using Eto.Drawing;
 using Eto.Forms;
 using RhinoLayoutFoundry.Core.Observer;
+using RhinoLayoutFoundry.Core.Operations;
 using RhinoLayoutFoundry.Core.Overview;
 
 namespace RhinoLayoutFoundry.UI;
@@ -35,7 +36,7 @@ internal sealed class ThumbnailFoundryPanel : Panel
         {
             Border = BorderType.None,
             ExpandContentWidth = true,
-            ExpandContentHeight = false,
+            ExpandContentHeight = true,
             Content = _grid,
         };
         _sizeSlider = new Slider
@@ -76,6 +77,7 @@ internal sealed class ThumbnailFoundryPanel : Panel
             var result = LayoutFoundryUiHost.Navigate(eventArgs.Target);
             _status.Text = result.Succeeded ? string.Empty : result.Message;
         };
+        _grid.ContextRequested += (_, eventArgs) => ShowContextMenu(eventArgs.ControlPoint);
 
         Content = new StackLayout
         {
@@ -233,13 +235,15 @@ internal sealed class ThumbnailFoundryPanel : Panel
 
     private void ApplyGridSize()
     {
-        _grid.SetGridSize(GridWidth(), _sizeSlider.Value);
+        _grid.SetGridSize(GridWidth(), _sizeSlider.Value, GridMinimumHeight());
         _scrollable.UpdateScrollSizes();
         UpdateStatus();
         QueueVisiblePreviews();
     }
 
     private double GridWidth() => Math.Max(240, _scrollable.Size.Width - 2);
+
+    private double GridMinimumHeight() => Math.Max(1, _scrollable.Size.Height - 2);
 
     private void ApplyFilteredSnapshot()
     {
@@ -251,9 +255,124 @@ internal sealed class ThumbnailFoundryPanel : Panel
                     .Where(sheet => _filter.MatchesSheet(sheet.PageViewId))
                     .ToArray(),
             };
-        _grid.SetSnapshot(visible, GridWidth(), _sizeSlider.Value);
+        _grid.SetSnapshot(visible, GridWidth(), _sizeSlider.Value, GridMinimumHeight());
         _scrollable.UpdateScrollSizes();
     }
+
+    private void ShowContextMenu(PointF location)
+    {
+        var selection = SelectedSheets();
+        if (selection.Length == 0) return;
+
+        var open = new ButtonMenuItem { Text = "Open in Rhino", Enabled = selection.Length == 1 };
+        var properties = new ButtonMenuItem
+        {
+            Text = selection.Length == 1 ? "Edit Properties…" : "Edit Properties for Selected…",
+        };
+        var duplicate = new ButtonMenuItem
+        {
+            Text = selection.Length == 1 ? "Duplicate Layout" : $"Duplicate {selection.Length} Layouts",
+        };
+        var delete = new ButtonMenuItem
+        {
+            Text = selection.Length == 1 ? "Delete Layout…" : $"Delete {selection.Length} Layouts…",
+        };
+        var include = new ButtonMenuItem { Text = "Enable for Printing" };
+        var exclude = new ButtonMenuItem { Text = "Disable from Printing" };
+
+        open.Click += (_, _) => OpenSelectedSheet();
+        properties.Click += (_, _) => OpenBatchProperties();
+        duplicate.Click += async (_, _) => await DuplicateSelectionAsync();
+        delete.Click += async (_, _) => await DeleteSelectionAsync();
+        include.Click += async (_, _) => await SetPrintInclusionAsync(true);
+        exclude.Click += async (_, _) => await SetPrintInclusionAsync(false);
+
+        new ContextMenu(
+            open,
+            properties,
+            new SeparatorMenuItem(),
+            duplicate,
+            delete,
+            new SeparatorMenuItem(),
+            include,
+            exclude).Show(_grid, location);
+    }
+
+    private OverviewNodeKey[] SelectedSheets() =>
+        LayoutFoundryUiHost.Selection.Selected
+            .Where(key => key.Kind == OverviewNodeKind.Sheet)
+            .ToArray();
+
+    private void OpenSelectedSheet()
+    {
+        var selection = SelectedSheets();
+        if (selection.Length != 1) return;
+        var result = LayoutFoundryUiHost.Navigate(new OverviewNavigationTarget(selection[0].Id));
+        _status.Text = result.Succeeded ? string.Empty : result.Message;
+    }
+
+    private void OpenBatchProperties()
+    {
+        var snapshot = LayoutFoundryUiHost.CaptureSnapshot();
+        if (snapshot is null) return;
+        var targets = BatchTargetResolver.Resolve(snapshot, SelectedSheets());
+        if (targets.Count == 0)
+        {
+            _status.Text = "The selection does not contain any layouts.";
+            return;
+        }
+
+        var dialog = new BatchPropertiesDialog(snapshot, targets);
+        dialog.ShowModal(this);
+        if (dialog.Succeeded) RefreshSnapshot();
+    }
+
+    private async Task DuplicateSelectionAsync()
+    {
+        var selection = SelectedSheets();
+        if (selection.Length == 0) return;
+        var result = await LayoutFoundryUiHost.DuplicateSelectionAsync(selection);
+        _status.Text = ResultMessage(
+            result,
+            $"Duplicated {selection.Length} layout{(selection.Length == 1 ? string.Empty : "s")}.");
+        if (result.Succeeded) RefreshSnapshot();
+    }
+
+    private async Task DeleteSelectionAsync()
+    {
+        var selection = SelectedSheets();
+        if (selection.Length == 0) return;
+        var response = MessageBox.Show(
+            this,
+            $"Permanently delete {selection.Length} Rhino layout{(selection.Length == 1 ? string.Empty : "s")}?\n\nLayout deletion cannot be undone.",
+            selection.Length == 1 ? "Delete layout" : "Delete layouts",
+            MessageBoxButtons.YesNo,
+            MessageBoxType.Warning,
+            MessageBoxDefaultButton.No);
+        if (response != DialogResult.Yes) return;
+
+        var result = await LayoutFoundryUiHost.DeleteSelectionAsync(selection);
+        _status.Text = ResultMessage(result, "Selection deleted.");
+        if (!result.Succeeded) return;
+        LayoutFoundryUiHost.Selection.Clear(_snapshot.DocumentRuntimeSerialNumber, this);
+        RefreshSnapshot();
+    }
+
+    private async Task SetPrintInclusionAsync(bool include)
+    {
+        var selection = SelectedSheets();
+        if (selection.Length == 0) return;
+        var result = await LayoutFoundryUiHost.SetPrintInclusionAsync(selection, include);
+        _status.Text = ResultMessage(
+            result,
+            include ? "Enabled for printing." : "Disabled from printing.");
+        if (result.Succeeded) RefreshSnapshot();
+    }
+
+    private static string ResultMessage(OperationResult result, string success) =>
+        result.Succeeded
+            ? success
+            : string.Join(" ", result.Diagnostics.Select(diagnostic => diagnostic.Message));
 
     private void UpdateStatus()
     {
