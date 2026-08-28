@@ -30,6 +30,7 @@ internal sealed class ThumbnailGridDrawable : Drawable
     internal event EventHandler<ThumbnailGridNavigationEventArgs>? NavigationRequested;
 
     internal ThumbnailGridLayout GridLayout => _layout;
+    internal ObserverSnapshot Snapshot => _snapshot;
 
     internal void SetSnapshot(ObserverSnapshot snapshot, double availableWidth, double requestedCardWidth)
     {

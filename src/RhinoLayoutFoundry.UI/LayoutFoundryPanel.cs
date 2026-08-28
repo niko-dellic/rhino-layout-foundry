@@ -4,6 +4,7 @@ using Eto.Forms;
 using RhinoLayoutFoundry.Core.Operations;
 using RhinoLayoutFoundry.Core.Observer;
 using RhinoLayoutFoundry.Core.Overview;
+using RhinoLayoutFoundry.Core.Persistence;
 
 namespace RhinoLayoutFoundry.UI;
 
@@ -20,12 +21,21 @@ public sealed class LayoutFoundryPanel : Panel
     private readonly Button _clearFilterButton;
     private readonly TextBox _renameTextBox;
     private readonly Button _renameButton;
+    private readonly Label _folderDraftDestinationLabel;
+    private readonly TextBox _folderDraftTextBox;
+    private readonly Button _folderDraftCreateButton;
+    private readonly Button _folderDraftCancelButton;
+    private readonly Panel _folderDraftStrip;
     private readonly Button _manageButton;
     private readonly Button _addFolderButton;
     private readonly Button _batchCreateButton;
+    private readonly Button _deleteButton;
+    private readonly Button _importButton;
+    private readonly Button _exportButton;
     private readonly ToggleButton _listViewButton;
     private readonly ToggleButton _thumbnailViewButton;
     private readonly ToggleButton _canvasViewButton;
+    private readonly Button _fullscreenButton;
     private readonly bool _usesMacSafeHierarchy = OperatingSystem.IsMacOS();
     private readonly TreeGridView _treeGrid;
     private readonly GridColumn _layoutsColumn;
@@ -43,6 +53,7 @@ public sealed class LayoutFoundryPanel : Panel
     private readonly ThumbnailFoundryPanel _thumbnailView;
     private readonly ObserverFoundryPanel _observerView;
     private readonly Panel _viewHost;
+    private readonly Control _panelShell;
     private ButtonMenuItem _setCurrentMenuItem = null!;
     private ButtonMenuItem _newFolderMenuItem = null!;
     private ButtonMenuItem _newPageMenuItem = null!;
@@ -54,9 +65,6 @@ public sealed class LayoutFoundryPanel : Panel
     private ButtonMenuItem _printScopeMenuItem = null!;
     private ButtonMenuItem _propertiesPageMenuItem = null!;
     private ButtonMenuItem _renameFolderMenuItem = null!;
-    private readonly ContextMenu _creationMenu;
-    private readonly ButtonMenuItem _creationFolderMenuItem;
-    private readonly ButtonMenuItem _creationPageMenuItem;
     private readonly UITimer _layoutPollTimer;
     private readonly UITimer _invalidationTimer;
     private readonly UITimer _responsiveTimer;
@@ -70,6 +78,10 @@ public sealed class LayoutFoundryPanel : Panel
     private IReadOnlyList<HierarchyTreeItem> _renderedTreeItems = [];
     private readonly object _invalidationSyncRoot = new();
     private DocumentOverview _overview = DocumentOverview.NoDocument;
+    private OverviewFilterProjection _filterProjection = new(
+        false,
+        new HashSet<OverviewNodeKey>(),
+        new HashSet<Guid>());
     private OverviewInvalidation? _pendingInvalidation;
     private CancellationTokenSource _thumbnailCancellation = new();
     private FoundryResponsiveLayout _responsiveLayout = FoundryResponsiveLayout.ForWidth(420);
@@ -87,7 +99,9 @@ public sealed class LayoutFoundryPanel : Panel
     private InlineDraft? _inlineDraft;
     private Guid? _contextDestinationFolderId;
     private Guid? _contextPrintFolderId;
-    private Form? _fullscreenCanvasWindow;
+    private Guid? _folderDraftId;
+    private Guid? _folderDraftParentId;
+    private Form? _fullscreenWindow;
     private FoundryPanelViewMode _viewMode = FoundryPanelViewMode.List;
 
     public LayoutFoundryPanel()
@@ -132,22 +146,48 @@ public sealed class LayoutFoundryPanel : Panel
         {
             Text = "Rename",
         });
+        _folderDraftDestinationLabel = FoundryTheme.MutedLabel();
+        _folderDraftTextBox = new TextBox { PlaceholderText = "Folder name" };
+        _folderDraftCreateButton = FoundryTheme.ConfigureButton(new Button { Text = "Create" });
+        _folderDraftCancelButton = FoundryTheme.ConfigureButton(new Button { Text = "Cancel" });
+        _folderDraftStrip = FoundryTheme.Surface(
+            CreateFolderDraftContent(),
+            new Padding(FoundryTheme.Space2));
+        _folderDraftStrip.Visible = false;
         _addFolderButton = FoundryTheme.ConfigureToolbarButton(new Button
         {
-            Text = "+",
-            ToolTip = "Create a folder or layout",
+            Image = FoundryViewIcons.NewFolder(),
+            ToolTip = "New folder",
             Enabled = false,
         });
         _batchCreateButton = FoundryTheme.ConfigureToolbarButton(new Button
         {
-            Text = "⊞",
-            ToolTip = "Batch create layouts from templates",
+            Image = FoundryViewIcons.NewLayout(),
+            ToolTip = "New layout",
             Enabled = false,
         });
         _manageButton = FoundryTheme.ConfigureToolbarButton(new Button
         {
-            Text = "⋯",
-            ToolTip = "Manage selected layouts",
+            Image = FoundryViewIcons.Properties(),
+            ToolTip = "Edit selected properties",
+            Enabled = false,
+        });
+        _deleteButton = FoundryTheme.ConfigureToolbarButton(new Button
+        {
+            Image = FoundryViewIcons.Delete(),
+            ToolTip = "Delete selected items",
+            Enabled = false,
+        });
+        _importButton = FoundryTheme.ConfigureToolbarButton(new Button
+        {
+            Image = FoundryViewIcons.ImportPackage(),
+            ToolTip = "Import layout package",
+            Enabled = false,
+        });
+        _exportButton = FoundryTheme.ConfigureToolbarButton(new Button
+        {
+            Image = FoundryViewIcons.ExportPackage(),
+            ToolTip = "Export layout package",
             Enabled = false,
         });
         _listViewButton = new ToggleButton
@@ -168,12 +208,11 @@ public sealed class LayoutFoundryPanel : Panel
         FoundryTheme.ConfigureToolbarButton(_listViewButton);
         FoundryTheme.ConfigureToolbarButton(_thumbnailViewButton);
         FoundryTheme.ConfigureToolbarButton(_canvasViewButton);
-        _creationFolderMenuItem = new ButtonMenuItem { Text = "New Folder" };
-        _creationPageMenuItem = new ButtonMenuItem { Text = "New Layout" };
-        _creationFolderMenuItem.Click += (_, _) => BeginInlineCreation(InlineDraftKind.Folder);
-        _creationPageMenuItem.Click += (_, _) => QueueOpenCreateLayouts(ResolveCreationDestinationFolderId());
-        _creationMenu = new ContextMenu(_creationFolderMenuItem, _creationPageMenuItem);
-
+        _fullscreenButton = FoundryTheme.ConfigureToolbarButton(new Button
+        {
+            Text = "⛶",
+            ToolTip = "Expand the current view to a maximized workspace",
+        });
         _paperCell = new ComboBoxCell(nameof(HierarchyTreeItem.PaperText))
         {
             DataStore = PaperSizeChoices.Select(choice => choice.Label).ToArray(),
@@ -197,26 +236,30 @@ public sealed class LayoutFoundryPanel : Panel
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Items =
             {
-                _toolbarSurface,
                 new StackLayoutItem(_contentHost, expand: true),
                 CreateFooter(),
             },
         };
         _thumbnailView = new ThumbnailFoundryPanel();
         _observerView = new ObserverFoundryPanel();
-        _observerView.FullscreenRequested += (_, _) => ToggleCanvasFullscreen();
+        _observerView.ExitFullscreenRequested += (_, _) => ExitFullscreen();
         _viewHost = new Panel { Content = _managementView };
-        Content = new StackLayout
+        _panelShell = new StackLayout
         {
+            BackgroundColor = FoundryTheme.PanelBackground,
             Padding = new Padding(FoundryTheme.Space4),
             Spacing = FoundryTheme.Space3,
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Items =
             {
                 CreateHeader(),
+                _toolbarSurface,
+                _folderDraftStrip,
                 new StackLayoutItem(_viewHost, expand: true),
+                _statusLabel,
             },
         };
+        Content = _panelShell;
         UpdateViewModeButtons(FoundryPanelViewMode.List);
 
         _treeGrid.SelectedItemChanged += OnSelectionChanged;
@@ -241,13 +284,32 @@ public sealed class LayoutFoundryPanel : Panel
         _filterTextBox.TextChanged += (_, _) => OnFilterChanged();
         _filterKindDropDown.SelectedIndexChanged += (_, _) => OnFilterChanged();
         _clearFilterButton.Click += (_, _) => ClearFilter();
-        _addFolderButton.Click += (_, _) => ShowCreationMenu();
+        _addFolderButton.Click += (_, _) => BeginFolderCreation(ResolveCreationDestinationFolderId());
         _batchCreateButton.Click += (_, _) => OpenCreateLayouts(ResolveCreationDestinationFolderId());
         _manageButton.Click += (_, _) => OpenBatchProperties();
+        _deleteButton.Click += async (_, _) => await DeleteSelectionAsync();
+        _importButton.Click += async (_, _) => await ImportLayoutPackageAsync();
+        _exportButton.Click += async (_, _) => await ExportLayoutPackageAsync();
         _listViewButton.Click += (_, _) => ShowListView();
         _thumbnailViewButton.Click += (_, _) => ShowThumbnailView();
         _canvasViewButton.Click += (_, _) => ShowCanvasView();
+        _fullscreenButton.Click += (_, _) => ToggleFullscreen();
         _renameButton.Click += async (_, _) => await RenameSelectedSheetAsync();
+        _folderDraftCreateButton.Click += async (_, _) => await CommitFolderCreationAsync();
+        _folderDraftCancelButton.Click += (_, _) => CancelFolderCreation();
+        _folderDraftTextBox.KeyDown += async (_, eventArgs) =>
+        {
+            if (eventArgs.Key == Keys.Enter)
+            {
+                eventArgs.Handled = true;
+                await CommitFolderCreationAsync();
+            }
+            else if (eventArgs.Key == Keys.Escape)
+            {
+                eventArgs.Handled = true;
+                CancelFolderCreation();
+            }
+        };
 
         _layoutPollTimer = new UITimer { Interval = 0.5 };
         _layoutPollTimer.Elapsed += OnLayoutPoll;
@@ -400,7 +462,27 @@ public sealed class LayoutFoundryPanel : Panel
                         Orientation = Orientation.Horizontal,
                         Spacing = FoundryTheme.Space1,
                         VerticalContentAlignment = VerticalAlignment.Center,
-                        Items = { _listViewButton, _thumbnailViewButton, _canvasViewButton },
+                        Items =
+                        {
+                            _importButton,
+                            _exportButton,
+                            new Panel
+                            {
+                                Width = 1,
+                                Height = 20,
+                                BackgroundColor = FoundryTheme.CanvasBorder,
+                            },
+                            _listViewButton,
+                            _thumbnailViewButton,
+                            _canvasViewButton,
+                            new Panel
+                            {
+                                Width = 1,
+                                Height = 20,
+                                BackgroundColor = FoundryTheme.CanvasBorder,
+                            },
+                            _fullscreenButton,
+                        },
                     }),
             },
         };
@@ -412,11 +494,87 @@ public sealed class LayoutFoundryPanel : Panel
 
     public void ShowCanvasView() => SetViewMode(FoundryPanelViewMode.Canvas);
 
+    private async Task ExportLayoutPackageAsync()
+    {
+        var context = LayoutFoundryUiHost.CaptureDocumentContext();
+        if (context is null)
+        {
+            _statusLabel.Text = "Open a Rhino document before exporting a layout package.";
+            return;
+        }
+        var safeName = string.Concat(_overview.DocumentName.Select(character =>
+            Path.GetInvalidFileNameChars().Contains(character) ? '-' : character)).Trim();
+        if (safeName.Length == 0) safeName = "Layouts";
+        var dialog = new SaveFileDialog
+        {
+            Title = "Export Layout Package",
+            FileName = $"{safeName}.rlf",
+        };
+        dialog.Filters.Add(new FileFilter("Layout Foundry package", ".rlf"));
+        if (dialog.ShowDialog(this) != DialogResult.Ok) return;
+        var filePath = dialog.FileName.EndsWith(".rlf", StringComparison.OrdinalIgnoreCase)
+            ? dialog.FileName
+            : $"{dialog.FileName}.rlf";
+        _statusLabel.Text = "Exporting layout package…";
+        var result = await LayoutFoundryUiHost.ExportLayoutPackageAsync(new LayoutPackageExportRequest(
+            context.Value.DocumentRuntimeSerialNumber,
+            context.Value.Revision,
+            filePath));
+        _statusLabel.Text = result.Succeeded
+            ? $"Exported {result.LayoutCount} layout{(result.LayoutCount == 1 ? string.Empty : "s")} to {Path.GetFileName(filePath)}."
+            : result.ErrorMessage ?? "Layout package export failed.";
+    }
+
+    private async Task ImportLayoutPackageAsync()
+    {
+        var context = LayoutFoundryUiHost.CaptureDocumentContext();
+        if (context is null)
+        {
+            _statusLabel.Text = "Open a Rhino document before importing a layout package.";
+            return;
+        }
+        var dialog = new OpenFileDialog
+        {
+            Title = "Import Layout Package",
+            MultiSelect = false,
+        };
+        dialog.Filters.Add(new FileFilter("Layout Foundry package", ".rlf"));
+        if (dialog.ShowDialog(this) != DialogResult.Ok) return;
+        _statusLabel.Text = "Validating layout package…";
+        var preflight = await LayoutFoundryUiHost.PreflightLayoutPackageAsync(dialog.FileName);
+        if (!preflight.IsValid || preflight.Manifest is null)
+        {
+            _statusLabel.Text = preflight.ErrorMessage ?? "The layout package is invalid.";
+            MessageBox.Show(this, _statusLabel.Text, "Import Layout Package", MessageBoxType.Error);
+            return;
+        }
+        var review = new LayoutPackageImportDialog(preflight);
+        review.ShowModal(this);
+        if (!review.Accepted) return;
+
+        context = LayoutFoundryUiHost.CaptureDocumentContext();
+        if (context is null)
+        {
+            _statusLabel.Text = "The active Rhino document changed before import.";
+            return;
+        }
+        _statusLabel.Text = $"Importing {preflight.Manifest.Sheets.Count} layout(s)…";
+        var result = await LayoutFoundryUiHost.ImportLayoutPackageAsync(new LayoutPackageImportRequest(
+            context.Value.DocumentRuntimeSerialNumber,
+            context.Value.Revision,
+            dialog.FileName,
+            review.ImportMode,
+            review.ConflictResolutions));
+        _statusLabel.Text = result.Succeeded
+            ? $"Imported {result.LayoutCount} layout{(result.LayoutCount == 1 ? string.Empty : "s")}."
+            : result.ErrorMessage ?? "Layout package import failed.";
+        if (!result.Succeeded && result.RecoveryPackagePath is not null)
+            _statusLabel.Text += $" Recovery package: {result.RecoveryPackagePath}";
+        if (result.Succeeded) RefreshOverview();
+    }
+
     private void SetViewMode(FoundryPanelViewMode mode)
     {
-        if (mode != FoundryPanelViewMode.Canvas && _fullscreenCanvasWindow is not null)
-            _fullscreenCanvasWindow.Close();
-
         _viewMode = mode;
         var next = mode switch
         {
@@ -427,6 +585,8 @@ public sealed class LayoutFoundryPanel : Panel
         if (!ReferenceEquals(_viewHost.Content, next))
             _viewHost.Content = next;
         UpdateViewModeButtons(mode);
+        if (_fullscreenWindow is not null)
+            _fullscreenWindow.Title = $"Layout Foundry — {ViewModeLabel(mode)}";
     }
 
     private void UpdateViewModeButtons(FoundryPanelViewMode mode)
@@ -434,29 +594,32 @@ public sealed class LayoutFoundryPanel : Panel
         _listViewButton.Checked = mode == FoundryPanelViewMode.List;
         _thumbnailViewButton.Checked = mode == FoundryPanelViewMode.Thumbnail;
         _canvasViewButton.Checked = mode == FoundryPanelViewMode.Canvas;
+        _fullscreenButton.ToolTip = _fullscreenWindow is null
+            ? $"Expand {ViewModeLabel(mode)} to a maximized workspace"
+            : "Return Layout Foundry to the Rhino panel (Esc)";
     }
 
-    private void ToggleCanvasFullscreen()
+    private void ToggleFullscreen()
     {
-        if (_fullscreenCanvasWindow is not null)
+        if (_fullscreenWindow is not null)
         {
-            _fullscreenCanvasWindow.Close();
+            _fullscreenWindow.Close();
             return;
         }
 
-        if (_viewMode != FoundryPanelViewMode.Canvas)
-            SetViewMode(FoundryPanelViewMode.Canvas);
-
-        _viewHost.Content = null;
+        Content = null;
         var window = new Form
         {
-            Title = "Layout Foundry — Canvas",
+            Title = $"Layout Foundry — {ViewModeLabel(_viewMode)}",
+            BackgroundColor = FoundryTheme.PanelBackground,
             MinimumSize = new Size(720, 480),
             WindowState = WindowState.Maximized,
-            Content = _observerView,
+            Content = _panelShell,
         };
-        _fullscreenCanvasWindow = window;
+        _fullscreenWindow = window;
+        _fullscreenButton.Text = "⤡";
         _observerView.SetFullscreenState(true);
+        UpdateViewModeButtons(_viewMode);
         window.KeyDown += (_, eventArgs) =>
         {
             if (eventArgs.Key != Keys.Escape)
@@ -465,21 +628,34 @@ public sealed class LayoutFoundryPanel : Panel
             eventArgs.Handled = true;
             window.Close();
         };
-        window.Closing += (_, _) => RestoreCanvasFromFullscreen(window);
+        window.Closing += (_, _) => RestoreFromFullscreen(window);
         window.Show();
     }
 
-    private void RestoreCanvasFromFullscreen(Form window)
+    private void ExitFullscreen()
     {
-        if (!ReferenceEquals(_fullscreenCanvasWindow, window))
+        _fullscreenWindow?.Close();
+    }
+
+    private void RestoreFromFullscreen(Form window)
+    {
+        if (!ReferenceEquals(_fullscreenWindow, window))
             return;
 
         window.Content = null;
-        _fullscreenCanvasWindow = null;
+        _fullscreenWindow = null;
+        _fullscreenButton.Text = "⛶";
         _observerView.SetFullscreenState(false);
-        if (_viewMode == FoundryPanelViewMode.Canvas)
-            _viewHost.Content = _observerView;
+        Content = _panelShell;
+        UpdateViewModeButtons(_viewMode);
     }
+
+    private static string ViewModeLabel(FoundryPanelViewMode mode) => mode switch
+    {
+        FoundryPanelViewMode.Thumbnail => "Thumbnails",
+        FoundryPanelViewMode.Canvas => "Canvas",
+        _ => "Hierarchy",
+    };
 
     private Control CreateToolbarContent()
     {
@@ -499,6 +675,7 @@ public sealed class LayoutFoundryPanel : Panel
                         _addFolderButton,
                         _batchCreateButton,
                         _manageButton,
+                        _deleteButton,
                         new StackLayoutItem(null, expand: true),
                     },
                 },
@@ -533,9 +710,7 @@ public sealed class LayoutFoundryPanel : Panel
         _renameFolderMenuItem = new ButtonMenuItem { Text = "Rename Folder…" };
 
         _setCurrentMenuItem.Click += (_, _) => NavigateSelected();
-        _newFolderMenuItem.Click += (_, _) => BeginInlineCreation(
-            InlineDraftKind.Folder,
-            _contextDestinationFolderId);
+        _newFolderMenuItem.Click += (_, _) => BeginFolderCreation(_contextDestinationFolderId);
         _newPageMenuItem.Click += (_, _) => QueueOpenCreateLayouts(_contextDestinationFolderId);
         _duplicateSelectionMenuItem.Click += async (_, _) => await DuplicateSelectionAsync();
         _deleteSelectionMenuItem.Click += async (_, _) => await DeleteSelectionAsync();
@@ -600,6 +775,47 @@ public sealed class LayoutFoundryPanel : Panel
         };
     }
 
+    private Control CreateFolderDraftContent()
+    {
+        if (_responsiveLayout.StackToolbar)
+        {
+            return new StackLayout
+            {
+                Spacing = FoundryTheme.Space1,
+                Items =
+                {
+                    _folderDraftDestinationLabel,
+                    _folderDraftTextBox,
+                    new StackLayout
+                    {
+                        Orientation = Orientation.Horizontal,
+                        Spacing = FoundryTheme.Space1,
+                        Items =
+                        {
+                            new StackLayoutItem(null, expand: true),
+                            _folderDraftCancelButton,
+                            _folderDraftCreateButton,
+                        },
+                    },
+                },
+            };
+        }
+
+        return new StackLayout
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = FoundryTheme.Space2,
+            VerticalContentAlignment = VerticalAlignment.Center,
+            Items =
+            {
+                _folderDraftDestinationLabel,
+                new StackLayoutItem(_folderDraftTextBox, expand: true),
+                _folderDraftCancelButton,
+                _folderDraftCreateButton,
+            },
+        };
+    }
+
     private Control CreateFooter()
     {
         return new StackLayout
@@ -613,9 +829,7 @@ public sealed class LayoutFoundryPanel : Panel
                 {
                     Rows =
                     {
-                        new TableRow(
-                            new TableCell(_summaryLabel, scaleWidth: true),
-                            new TableCell(_statusLabel)),
+                        new TableRow(new TableCell(_summaryLabel, scaleWidth: true)),
                     },
                 },
             },
@@ -799,13 +1013,12 @@ public sealed class LayoutFoundryPanel : Panel
 
     private async Task DuplicateSelectionAsync()
     {
-        var selected = SelectedItems();
-        if (selected.Any(item => item.Node.IsDocumentRoot))
+        var keys = SelectedKeys();
+        if (keys.Any(IsDocumentRootKey))
         {
             _statusLabel.Text = "The project root cannot be duplicated.";
             return;
         }
-        var keys = selected.Select(item => item.Node.Key).Distinct().ToArray();
         if (keys.Length == 0) return;
         _statusLabel.Text = $"Duplicating {keys.Length} selected item{(keys.Length == 1 ? string.Empty : "s")}…";
         var result = await LayoutFoundryUiHost.DuplicateSelectionAsync(keys);
@@ -821,13 +1034,12 @@ public sealed class LayoutFoundryPanel : Panel
 
     private async Task DeleteSelectionAsync()
     {
-        var selected = SelectedItems();
-        if (selected.Any(item => item.Node.IsDocumentRoot))
+        var keys = SelectedKeys();
+        if (keys.Any(IsDocumentRootKey))
         {
             _statusLabel.Text = "The project root cannot be deleted.";
             return;
         }
-        var keys = selected.Select(item => item.Node.Key).Distinct().ToArray();
         var snapshot = LayoutFoundryUiHost.CaptureSnapshot();
         if (keys.Length == 0 || snapshot is null) return;
         var resolved = HierarchySelectionResolver.Resolve(snapshot, keys);
@@ -844,16 +1056,17 @@ public sealed class LayoutFoundryPanel : Panel
             : folderCount > 0
                 ? $"{folderCount} folder{(folderCount == 1 ? string.Empty : "s")}"
                 : $"{sheetCount} Rhino layout{(sheetCount == 1 ? string.Empty : "s")}";
-        var response = MessageBox.Show(
-            this,
-            sheetCount == 0
-                ? $"Delete {summary}?\n\nThis metadata-only deletion can be undone in Rhino."
-                : $"Permanently delete {summary}?\n\nLayout deletion cannot be undone.",
-            keys.Length == 1 ? "Delete selected item" : "Delete selected items",
-            MessageBoxButtons.YesNo,
-            sheetCount == 0 ? MessageBoxType.Question : MessageBoxType.Warning,
-            MessageBoxDefaultButton.No);
-        if (response != DialogResult.Yes) return;
+        if (sheetCount > 0)
+        {
+            var response = MessageBox.Show(
+                this,
+                $"Permanently delete {summary}?\n\nLayout deletion cannot be undone.",
+                keys.Length == 1 ? "Delete selected item" : "Delete selected items",
+                MessageBoxButtons.YesNo,
+                MessageBoxType.Warning,
+                MessageBoxDefaultButton.No);
+            if (response != DialogResult.Yes) return;
+        }
 
         _statusLabel.Text = $"Deleting {summary}…";
         var result = await LayoutFoundryUiHost.DeleteSelectionAsync(keys);
@@ -1002,11 +1215,7 @@ public sealed class LayoutFoundryPanel : Panel
 
     private void OnPanelUnloaded(object? sender, EventArgs eventArgs)
     {
-        if (_fullscreenCanvasWindow is not null)
-        {
-            _viewMode = FoundryPanelViewMode.List;
-            _fullscreenCanvasWindow.Close();
-        }
+        _fullscreenWindow?.Close();
 
         if (!_isLoaded)
         {
@@ -1025,8 +1234,7 @@ public sealed class LayoutFoundryPanel : Panel
     private void OnLayoutPoll(object? sender, EventArgs eventArgs)
     {
         var identity = LayoutFoundryUiHost.CaptureOverviewIdentity();
-        if (identity.DocumentRuntimeSerialNumber != _overview.DocumentRuntimeSerialNumber ||
-            identity.SheetCount != _overview.Sheets.Count)
+        if (!identity.Matches(_overview))
         {
             RefreshOverview();
         }
@@ -1148,6 +1356,22 @@ public sealed class LayoutFoundryPanel : Panel
 
         UpdatePresentation();
         QueueThumbnails();
+        ApplyFilterProjection();
+    }
+
+    private void ApplyFilterProjection()
+    {
+        var projection = OverviewFilterProjector.Resolve(_overview, CurrentFilter);
+        if (!projection.IsActive && !_filterProjection.IsActive)
+            return;
+        if (projection.IsActive == _filterProjection.IsActive &&
+            projection.EmphasizedKeys.SetEquals(_filterProjection.EmphasizedKeys) &&
+            projection.MatchingSheetIds.SetEquals(_filterProjection.MatchingSheetIds))
+            return;
+
+        _filterProjection = projection;
+        _thumbnailView.SetFilter(projection);
+        _observerView.SetFilter(projection);
     }
 
     private void OnSharedSelectionChanged(
@@ -1287,26 +1511,29 @@ public sealed class LayoutFoundryPanel : Panel
         OverviewPanelPresentation presentation,
         IReadOnlyList<HierarchyTreeItem> selectedItems)
     {
-        var selectedSheets = selectedItems
-            .Select(item => item.Node.Sheet)
+        var selectedKeys = SelectedKeys();
+        var selectedSheets = selectedKeys
+            .Where(key => key.Kind == OverviewNodeKind.Sheet)
+            .Select(key => _overview.Sheets.FirstOrDefault(sheet => sheet.PageViewId == key.Id))
             .Where(sheet => sheet is not null)
             .Cast<SheetOverview>()
             .Take(2)
             .ToArray();
-        var selectionCount = selectedItems.Count;
+        var selectionCount = selectedKeys.Length;
         var canRename = selectedSheets.Length == 1 && selectionCount == 1;
         var capabilities = LayoutFoundryUiHost.CaptureMutationCapabilities();
 
         _addFolderButton.Enabled = _overview.DocumentRuntimeSerialNumber is not null;
+        _importButton.Enabled = _overview.DocumentRuntimeSerialNumber is not null;
+        _exportButton.Enabled = _overview.DocumentRuntimeSerialNumber is not null;
         _batchCreateButton.Enabled = _overview.DocumentRuntimeSerialNumber is not null;
-        var folderDestination = FolderCreationDestination.Resolve(
-            _overview,
-            selectedItems.Select(item => item.Node.Key));
-        _addFolderButton.ToolTip = folderDestination is not null &&
-                                   folderDestination.ParentFolderId != _overview.RootFolderId
-            ? $"Create a folder or layout inside {folderDestination.DisplayName}"
-            : "Create a folder or layout at the hierarchy root";
+        var destinationId = ResolveCreationDestinationFolderId();
+        var destinationName = destinationId is { } id ? FolderDestinationName(id) : "Layouts";
+        _addFolderButton.ToolTip = $"Create a folder in {destinationName}";
+        _batchCreateButton.ToolTip = $"Create layouts in {destinationName}";
         _manageButton.Enabled = selectionCount > 0;
+        _deleteButton.Enabled = selectionCount > 0 &&
+                                selectedKeys.All(key => !IsDocumentRootKey(key));
         var renameAvailable = canRename && capabilities.PageRenameUndo.IsSupported;
         _renameActions.Visible = renameAvailable;
         _renameTextBox.Enabled = renameAvailable;
@@ -1320,6 +1547,114 @@ public sealed class LayoutFoundryPanel : Panel
         {
             _statusLabel.Text = string.Empty;
         }
+    }
+
+    private void BeginFolderCreation(Guid? explicitParentFolderId = null)
+    {
+        if (_overview.RootFolderId is not { } rootFolderId)
+        {
+            _statusLabel.Text = "Open a Rhino document before creating folders.";
+            return;
+        }
+
+        var destination = explicitParentFolderId ?? ResolveCreationDestinationFolderId() ?? rootFolderId;
+        if (_overview.Folders.All(folder => folder.Id != destination))
+            destination = rootFolderId;
+
+        _folderDraftId = Guid.NewGuid();
+        _folderDraftParentId = destination;
+        _folderDraftDestinationLabel.Text = $"New folder in {FolderDestinationName(destination)}";
+        _folderDraftTextBox.Text = "New Folder";
+        _folderDraftStrip.Visible = true;
+        _statusLabel.Text = "Name the new folder, then press Return.";
+        Application.Instance.AsyncInvoke(() =>
+        {
+            _folderDraftTextBox.Focus();
+            _folderDraftTextBox.SelectAll();
+        });
+    }
+
+    private async Task CommitFolderCreationAsync()
+    {
+        if (_folderDraftId is not { } folderId ||
+            _folderDraftParentId is not { } parentFolderId)
+            return;
+
+        var name = _folderDraftTextBox.Text.Trim();
+        if (name.Length == 0)
+        {
+            _statusLabel.Text = "A folder name is required.";
+            _folderDraftTextBox.Focus();
+            return;
+        }
+
+        _overview = LayoutFoundryUiHost.CaptureOverview();
+        if (_overview.Folders.All(folder => folder.Id != parentFolderId))
+        {
+            _statusLabel.Text = "The destination folder no longer exists. Cancel and try again.";
+            return;
+        }
+
+        if (_overview.Folders.Any(folder =>
+                folder.ParentId == parentFolderId &&
+                string.Equals(folder.Name, name, StringComparison.OrdinalIgnoreCase)))
+        {
+            _statusLabel.Text = $"A folder named '{name}' already exists there.";
+            _folderDraftTextBox.Focus();
+            _folderDraftTextBox.SelectAll();
+            return;
+        }
+
+        _folderDraftCreateButton.Enabled = false;
+        _folderDraftCancelButton.Enabled = false;
+        _statusLabel.Text = "Creating folder…";
+        var result = await LayoutFoundryUiHost.CreateFolderAsync(folderId, parentFolderId, name);
+        _folderDraftCreateButton.Enabled = true;
+        _folderDraftCancelButton.Enabled = true;
+        if (!result.Succeeded)
+        {
+            _statusLabel.Text = DiagnosticMessage(result);
+            _folderDraftTextBox.Focus();
+            return;
+        }
+
+        CloseFolderDraft();
+        _overview = LayoutFoundryUiHost.CaptureOverview();
+        var key = new OverviewNodeKey(OverviewNodeKind.Folder, folderId);
+        _selection.Replace([key], key);
+        LayoutFoundryUiHost.Selection.Replace(
+            _overview.DocumentRuntimeSerialNumber,
+            [key],
+            key,
+            this);
+        _statusLabel.Text = $"Created folder '{name}'.";
+        PopulateTree();
+    }
+
+    private void CancelFolderCreation()
+    {
+        if (_folderDraftId is null) return;
+        CloseFolderDraft();
+        _statusLabel.Text = string.Empty;
+    }
+
+    private void CloseFolderDraft()
+    {
+        _folderDraftId = null;
+        _folderDraftParentId = null;
+        _folderDraftTextBox.Text = string.Empty;
+        _folderDraftStrip.Visible = false;
+    }
+
+    private string FolderDestinationName(Guid folderId)
+    {
+        if (_overview.RootFolderId == folderId)
+        {
+            var documentName = Path.GetFileNameWithoutExtension(_overview.DocumentName);
+            return string.IsNullOrWhiteSpace(documentName) ? "Layouts" : documentName;
+        }
+
+        return _overview.Folders.FirstOrDefault(folder => folder.Id == folderId)?.Name ?? "Layouts";
     }
 
     private void BeginInlineCreation(InlineDraftKind kind, Guid? explicitParentFolderId = null)
@@ -1692,19 +2027,6 @@ public sealed class LayoutFoundryPanel : Panel
     }
 
 
-    private void ShowCreationMenu()
-    {
-        var destination = ResolveCreationDestinationFolderId();
-        var folderName = _overview.Folders.FirstOrDefault(folder => folder.Id == destination)?.Name;
-        _creationFolderMenuItem.Text = destination == _overview.RootFolderId || folderName is null
-            ? "New Folder"
-            : $"New Folder in {folderName}";
-        _creationPageMenuItem.Text = destination == _overview.RootFolderId || folderName is null
-            ? "New Layout"
-            : $"New Layout in {folderName}";
-        _creationMenu.Show(_addFolderButton, new PointF(0, _addFolderButton.Height));
-    }
-
     private void OnTreeMouseDown(object? sender, MouseEventArgs eventArgs)
     {
         var item = _treeGrid.GetCellAt(eventArgs.Location).Item as HierarchyTreeItem;
@@ -1905,27 +2227,7 @@ public sealed class LayoutFoundryPanel : Panel
 
     private Guid? ResolveCreationDestinationFolderId()
     {
-        if (_overview.RootFolderId is not { } rootFolderId)
-        {
-            return null;
-        }
-
-        var selected = SelectedItems().Take(2).ToArray();
-        if (selected.Length != 1)
-        {
-            return rootFolderId;
-        }
-
-        var item = selected[0];
-        if (item.Node.Key.Kind == OverviewNodeKind.Folder)
-        {
-            return item.Node.Key.Id;
-        }
-
-        var sheetId = ResolveSheetPageViewId(item);
-        return sheetId is { } id
-            ? _overview.Sheets.FirstOrDefault(sheet => sheet.PageViewId == id)?.FolderId ?? rootFolderId
-            : rootFolderId;
+        return FolderCreationDestination.Resolve(_overview, SelectedKeys())?.ParentFolderId;
     }
 
     private void ResetPendingDrag()
@@ -1949,7 +2251,7 @@ public sealed class LayoutFoundryPanel : Panel
             _statusLabel.Text = "The active Rhino document is unavailable.";
             return;
         }
-        var targets = BatchTargetResolver.Resolve(snapshot, SelectedItems().Select(item => item.Node.Key));
+        var targets = BatchTargetResolver.Resolve(snapshot, SelectedKeys());
         if (targets.Count == 0)
         {
             _statusLabel.Text = "The selection does not contain any layouts.";
@@ -2019,6 +2321,7 @@ public sealed class LayoutFoundryPanel : Panel
                 _detailsColumn.Visible = next.ShowSecondaryColumn;
             }
             _toolbarSurface.Content = CreateToolbarContent();
+            _folderDraftStrip.Content = CreateFolderDraftContent();
             if (dimensionsChanged && _overview.DocumentRuntimeSerialNumber is { } serial)
             {
                 InvalidateThumbnails(serial, null);
@@ -2209,6 +2512,11 @@ public sealed class LayoutFoundryPanel : Panel
     {
         return _treeGrid.SelectedItems.OfType<HierarchyTreeItem>().ToArray();
     }
+
+    private OverviewNodeKey[] SelectedKeys() => _selection.Selected.Distinct().ToArray();
+
+    private bool IsDocumentRootKey(OverviewNodeKey key) =>
+        key.Kind == OverviewNodeKind.Folder && key.Id == _overview.RootFolderId;
 
     private IEnumerable<SheetOverview> SelectedSheets()
     {

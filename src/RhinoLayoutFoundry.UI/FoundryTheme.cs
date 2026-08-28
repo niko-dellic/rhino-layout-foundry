@@ -29,11 +29,9 @@ internal static class FoundryTheme
         }
     }
 
-    // Zinc-like neutral tokens keep the custom canvas aligned with the rest of
-    // Rhino while avoiding a second, saturated application palette.
-    internal static Color CanvasBackground => IsDarkMode
-        ? Color.FromArgb(24, 24, 27, 255)
-        : Color.FromArgb(250, 250, 250, 255);
+    // The infinite board is part of the same workspace, so its base follows
+    // Rhino's panel background. Grid and card tokens provide the spatial depth.
+    internal static Color CanvasBackground => PanelBackground;
 
     internal static Color CanvasSurface => IsDarkMode
         ? Color.FromArgb(39, 39, 42, 255)

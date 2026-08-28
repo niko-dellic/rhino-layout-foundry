@@ -213,9 +213,7 @@ public static class OverviewTreeBuilder
         }
 
         var showDetails = filter.Kind != OverviewFilterKind.Sheets;
-        var sheetMatchesText = includeAllTextMatches ||
-                               Matches(sheet.Name, filter.Query) ||
-                               sheet.Tags.Any(tag => Matches(tag, filter.Query));
+        var sheetMatchesText = includeAllTextMatches || Matches(sheet.Name, filter.Query);
         var details = showDetails
             ? sheet.Details
                 .OrderBy(detail => detail.Order)

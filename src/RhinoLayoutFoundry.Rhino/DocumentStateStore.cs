@@ -40,6 +40,12 @@ internal sealed class DocumentStateStore
         _states[serial] = state;
     }
 
+    public void SetCurrentSchema(RhinoDoc document, DocumentState state)
+    {
+        Set(document, state with { SchemaVersion = DocumentState.CurrentSchemaVersion });
+        _writeSchemaVersions[document.RuntimeSerialNumber] = DocumentState.CurrentSchemaVersion;
+    }
+
     public void Remove(RhinoDoc document)
     {
         _states.Remove(document.RuntimeSerialNumber);
@@ -52,9 +58,12 @@ internal sealed class DocumentStateStore
         var writeVersion = _writeSchemaVersions.GetValueOrDefault(
             document.RuntimeSerialNumber,
             DocumentState.CurrentSchemaVersion);
-        var persistedState = writeVersion >= 4
-            ? state with { SchemaVersion = DocumentState.CurrentSchemaVersion, ObserverCanvas = state.Canvas }
-            : state with { SchemaVersion = writeVersion, ObserverCanvas = null };
+        var persistedState = state with
+        {
+            SchemaVersion = writeVersion,
+            ObserverCanvas = writeVersion >= 4 ? state.Canvas : null,
+            ImportRecovery = writeVersion >= 5 ? state.Recovery : null,
+        };
         var envelope = new ArchivableDictionary(1, "RhinoLayoutFoundry.DocumentState");
         envelope.Set(SchemaVersionKey, writeVersion);
         envelope.Set(PayloadKey, DocumentStateSerializer.Serialize(persistedState));

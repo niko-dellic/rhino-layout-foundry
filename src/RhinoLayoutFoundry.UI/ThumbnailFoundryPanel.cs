@@ -20,6 +20,7 @@ internal sealed class ThumbnailFoundryPanel : Panel
     private readonly Dictionary<Guid, long> _previewContentVersions = [];
     private readonly object _invalidationSyncRoot = new();
     private ObserverSnapshot _snapshot = ObserverSnapshot.NoDocument;
+    private OverviewFilterProjection _filter = new(false, new HashSet<OverviewNodeKey>(), new HashSet<Guid>());
     private OverviewInvalidation? _pendingInvalidation;
     private CancellationTokenSource _thumbnailCancellation = new();
     private bool _thumbnailCaptureInProgress;
@@ -123,6 +124,15 @@ internal sealed class ThumbnailFoundryPanel : Panel
     private static Button ToolbarButton(string text, string toolTip) =>
         FoundryTheme.ConfigureToolbarButton(new Button { Text = text, ToolTip = toolTip });
 
+    internal void SetFilter(OverviewFilterProjection projection)
+    {
+        _filter = projection ?? throw new ArgumentNullException(nameof(projection));
+        ApplyFilteredSnapshot();
+        _scrollable.ScrollPosition = Point.Empty;
+        UpdateStatus();
+        QueueVisiblePreviews();
+    }
+
     private void OnLoaded(object? sender, EventArgs eventArgs)
     {
         if (_isLoaded) return;
@@ -205,7 +215,7 @@ internal sealed class ThumbnailFoundryPanel : Panel
                 PreviewContentVersion = _previewContentVersions[sheet.PageViewId],
             }).ToArray(),
         };
-        _grid.SetSnapshot(_snapshot, GridWidth(), _sizeSlider.Value);
+        ApplyFilteredSnapshot();
         _grid.SetSelection(LayoutFoundryUiHost.Selection.DocumentRuntimeSerialNumber ==
                            (_snapshot.HasDocument ? _snapshot.DocumentRuntimeSerialNumber : null)
             ? LayoutFoundryUiHost.Selection.Selected
@@ -231,6 +241,20 @@ internal sealed class ThumbnailFoundryPanel : Panel
 
     private double GridWidth() => Math.Max(240, _scrollable.Size.Width - 2);
 
+    private void ApplyFilteredSnapshot()
+    {
+        var visible = !_filter.IsActive
+            ? _snapshot
+            : _snapshot with
+            {
+                Sheets = _snapshot.Sheets
+                    .Where(sheet => _filter.MatchesSheet(sheet.PageViewId))
+                    .ToArray(),
+            };
+        _grid.SetSnapshot(visible, GridWidth(), _sizeSlider.Value);
+        _scrollable.UpdateScrollSizes();
+    }
+
     private void UpdateStatus()
     {
         _densityLabel.Text = _grid.GridLayout.Columns == 1
@@ -238,7 +262,9 @@ internal sealed class ThumbnailFoundryPanel : Panel
             : $"{_grid.GridLayout.Columns} per row";
         _status.Text = !_snapshot.HasDocument
             ? "No active Rhino document"
-            : $"{_snapshot.Sheets.Count} layouts  ·  {_snapshot.Sheets.Sum(sheet => sheet.Details.Count)} details";
+            : _filter.IsActive
+                ? $"{_grid.Snapshot.Sheets.Count} of {_snapshot.Sheets.Count} layouts"
+                : $"{_snapshot.Sheets.Count} layouts  ·  {_snapshot.Sheets.Sum(sheet => sheet.Details.Count)} details";
     }
 
     private void QueueVisiblePreviews()

@@ -16,11 +16,12 @@ public sealed class ObserverFoundryPanel : Panel
     private readonly ListBox _namedViews;
     private readonly Label _status;
     private readonly Label _zoomLabel;
-    private readonly Button _fullscreenButton;
     private readonly ToggleButton _navigatorButton;
     private readonly ToggleButton _namedViewsButton;
     private readonly Control _navigatorSidebar;
     private readonly Control _namedViewsSidebar;
+    private readonly PixelLayout _canvasOverlay;
+    private readonly UITimer _overlayLayoutTimer;
     private readonly UITimer _thumbnailTimer;
     private readonly UITimer _invalidationTimer;
     private readonly OverviewThumbnailCache _thumbnailCache = new(128, 64 * 1024 * 1024);
@@ -29,6 +30,7 @@ public sealed class ObserverFoundryPanel : Panel
     private readonly Dictionary<uint, ObserverCamera> _documentCameras = [];
     private readonly object _invalidationSyncRoot = new();
     private ObserverSnapshot _snapshot = ObserverSnapshot.NoDocument;
+    private OverviewFilterProjection _filter = new(false, new HashSet<OverviewNodeKey>(), new HashSet<Guid>());
     private NavigatorRow[] _navigatorRows = [];
     private OverviewInvalidation? _pendingInvalidation;
     private CancellationTokenSource _thumbnailCancellation = new();
@@ -39,7 +41,7 @@ public sealed class ObserverFoundryPanel : Panel
     private string? _namedViewDragName;
     private long _previewContentSequence;
 
-    internal event EventHandler? FullscreenRequested;
+    internal event EventHandler? ExitFullscreenRequested;
 
     public ObserverFoundryPanel()
     {
@@ -52,23 +54,20 @@ public sealed class ObserverFoundryPanel : Panel
         _zoomLabel.Width = 54;
         _zoomLabel.TextAlignment = TextAlignment.Right;
 
-        var fitButton = ToolbarButton("Fit", "Fit all layouts in the observer canvas");
-        var focusButton = ToolbarButton("Focus", "Focus the current selection");
-        var tidyButton = ToolbarButton("Tidy", "Tidy the selected layouts/folders, or the whole board");
-        var zoomOutButton = ToolbarButton("−", "Zoom out");
-        var zoomInButton = ToolbarButton("+", "Zoom in");
-        _fullscreenButton = ToolbarButton("⛶", "Expand Canvas to a maximized workspace");
-        _navigatorButton = ToolbarToggleButton("Nav", "Show or hide the Navigator");
-        _namedViewsButton = ToolbarToggleButton("Views", "Show or hide Named views");
-        var openButton = ToolbarButton("↗", "Open the selected layout or detail in Rhino");
-        var manageButton = ToolbarButton("⋯", "Open batch properties for the selected layouts");
+        var fitButton = ToolbarButton(FoundryViewIcons.FitAll(), "Fit all layouts in the canvas");
+        var focusButton = ToolbarButton(FoundryViewIcons.FocusSelection(), "Focus the current selection");
+        var tidyButton = ToolbarButton(FoundryViewIcons.Tidy(), "Tidy the selected layouts or folders, or the whole board");
+        var zoomOutButton = ToolbarButton(FoundryViewIcons.ZoomOut(), "Zoom out");
+        var zoomInButton = ToolbarButton(FoundryViewIcons.ZoomIn(), "Zoom in");
+        _navigatorButton = ToolbarToggleButton(FoundryViewIcons.Navigator(), "Show or hide the Navigator");
+        _namedViewsButton = ToolbarToggleButton(FoundryViewIcons.NamedViews(), "Show or hide Named views");
+        var openButton = ToolbarButton(FoundryViewIcons.OpenSelection(), "Open the selected layout or detail in Rhino");
         var assignNamedViewButton = ToolbarButton("Assign to selection", "Assign the selected named view to every selected detail, layout, or folder");
         fitButton.Click += (_, _) => _canvas.FitAll();
         focusButton.Click += (_, _) => _canvas.FocusSelection();
         tidyButton.Click += async (_, _) => await TidyAsync();
         zoomOutButton.Click += (_, _) => _canvas.Zoom(1 / 1.2);
         zoomInButton.Click += (_, _) => _canvas.Zoom(1.2);
-        _fullscreenButton.Click += (_, _) => FullscreenRequested?.Invoke(this, EventArgs.Empty);
         _navigatorButton.Click += (_, _) =>
         {
             if (_navigatorButton.Checked == true)
@@ -82,7 +81,6 @@ public sealed class ObserverFoundryPanel : Panel
             ApplySidebarVisibility();
         };
         openButton.Click += (_, _) => NavigateSelection();
-        manageButton.Click += (_, _) => OpenBatchProperties();
         assignNamedViewButton.Click += async (_, _) => await AssignSelectedNamedViewAsync();
 
         var namedViewTools = new StackLayout
@@ -102,18 +100,18 @@ public sealed class ObserverFoundryPanel : Panel
             VerticalContentAlignment = VerticalAlignment.Center,
             Items =
             {
+                new StackLayoutItem(null, true),
                 fitButton,
                 focusButton,
                 tidyButton,
+                ToolbarSeparator(),
                 zoomOutButton,
                 zoomInButton,
                 _zoomLabel,
-                _fullscreenButton,
-                new StackLayoutItem(null, true),
+                ToolbarSeparator(),
                 _navigatorButton,
                 _namedViewsButton,
                 openButton,
-                manageButton,
             },
         };
 
@@ -137,6 +135,19 @@ public sealed class ObserverFoundryPanel : Panel
                 _namedViewsButton.Checked = false;
                 ApplySidebarVisibility();
             });
+        _canvasOverlay = new PixelLayout
+        {
+            BackgroundColor = FoundryTheme.CanvasBackground,
+        };
+        _overlayLayoutTimer = new UITimer { Interval = 0.04 };
+        _overlayLayoutTimer.Elapsed += (_, _) =>
+        {
+            _overlayLayoutTimer.Stop();
+            UpdateCanvasOverlayLayout();
+        };
+        _canvasOverlay.Add(_canvas, 0, 0);
+        _canvasOverlay.Add(_navigatorSidebar, FoundryTheme.Space3, FoundryTheme.Space3);
+        _canvasOverlay.SizeChanged += (_, _) => QueueCanvasOverlayLayout();
         ApplySidebarVisibility();
         var board = new TableLayout
         {
@@ -144,8 +155,7 @@ public sealed class ObserverFoundryPanel : Panel
             Rows =
             {
                 new TableRow(
-                    new TableCell(_navigatorSidebar, false),
-                    new TableCell(_canvas, true),
+                    new TableCell(_canvasOverlay, true),
                     new TableCell(_namedViewsSidebar, false)),
             },
         };
@@ -189,9 +199,19 @@ public sealed class ObserverFoundryPanel : Panel
         _canvas.ContextRequested += (_, eventArgs) => ShowContextMenu(eventArgs.ControlPoint);
         _canvas.DeleteRequested += async (_, _) => await DeleteSelectionAsync();
         _canvas.TidyRequested += async (_, _) => await TidyAsync();
-        _canvas.ExitWorkspaceRequested += (_, _) => FullscreenRequested?.Invoke(this, EventArgs.Empty);
+        _canvas.ExitWorkspaceRequested += (_, _) => ExitFullscreenRequested?.Invoke(this, EventArgs.Empty);
 
         _navigator.SelectedRowsChanged += OnNavigatorSelectionChanged;
+        _navigator.CellFormatting += (_, eventArgs) =>
+        {
+            if (eventArgs.Item is not NavigatorRow row ||
+                !_filter.IsActive ||
+                _filter.Emphasizes(row.Key) ||
+                LayoutFoundryUiHost.Selection.Selected.Contains(row.Key))
+                return;
+
+            eventArgs.ForegroundColor = FoundryTheme.WithAlpha(FoundryTheme.MutedText, 72);
+        };
         _navigator.CellDoubleClick += (_, _) => _canvas.FocusSelection();
         _navigator.KeyDown += (_, eventArgs) =>
         {
@@ -224,19 +244,47 @@ public sealed class ObserverFoundryPanel : Panel
 
     internal void SetFullscreenState(bool fullscreen)
     {
-        _fullscreenButton.Text = fullscreen ? "⤡" : "⛶";
-        _fullscreenButton.ToolTip = fullscreen
-            ? "Return Canvas to the Layout Foundry panel (Esc)"
-            : "Expand Canvas to a maximized workspace";
         ApplySidebarVisibility();
         _canvas.ExitWorkspaceOnEscape = fullscreen;
         _canvas.Invalidate();
+    }
+
+    internal void SetFilter(OverviewFilterProjection projection)
+    {
+        _filter = projection ?? throw new ArgumentNullException(nameof(projection));
+        _canvas.SetFilter(_filter);
+        _navigator.ReloadData(Enumerable.Range(0, _navigatorRows.Length));
+        QueueVisiblePreviews();
     }
 
     private void ApplySidebarVisibility()
     {
         _navigatorSidebar.Visible = _navigatorButton.Checked == true;
         _namedViewsSidebar.Visible = _namedViewsButton.Checked == true;
+        UpdateCanvasOverlayLayout();
+    }
+
+    private void UpdateCanvasOverlayLayout()
+    {
+        var clientSize = _canvasOverlay.ClientSize;
+        if (clientSize.Width <= 0 || clientSize.Height <= 0)
+            return;
+
+        _canvas.Size = clientSize;
+
+        var margin = FoundryTheme.Space3;
+        var availableWidth = Math.Max(0, clientSize.Width - margin * 2);
+        var availableHeight = Math.Max(0, clientSize.Height - margin * 2);
+        _navigatorSidebar.Size = new Size(
+            Math.Min(260, availableWidth),
+            Math.Min(520, availableHeight));
+        _canvasOverlay.Move(_navigatorSidebar, margin, margin);
+    }
+
+    private void QueueCanvasOverlayLayout()
+    {
+        _overlayLayoutTimer.Stop();
+        _overlayLayoutTimer.Start();
     }
 
     private static Button ToolbarButton(string text, string toolTip)
@@ -251,14 +299,22 @@ public sealed class ObserverFoundryPanel : Panel
         return button;
     }
 
-    private static ToggleButton ToolbarToggleButton(string text, string toolTip)
+    private static Button ToolbarButton(Bitmap image, string toolTip) =>
+        FoundryTheme.ConfigureToolbarButton(new Button { Image = image, ToolTip = toolTip });
+
+    private static ToggleButton ToolbarToggleButton(Bitmap image, string toolTip)
     {
-        var button = new ToggleButton { Text = text, ToolTip = toolTip };
+        var button = new ToggleButton { Image = image, ToolTip = toolTip };
         FoundryTheme.ConfigureToolbarButton(button);
-        button.Width = -1;
-        button.MinimumSize = new Size(44, 24);
         return button;
     }
+
+    private static Control ToolbarSeparator() => new Panel
+    {
+        Width = 1,
+        Height = 18,
+        BackgroundColor = FoundryTheme.CanvasBorder,
+    };
 
     private static Control Sidebar(
         string title,
@@ -273,9 +329,8 @@ public sealed class ObserverFoundryPanel : Panel
             ToolTip = collapseToolTip,
         });
         collapseButton.Click += (_, _) => collapse();
-        return new Panel
+        var surface = new Panel
         {
-            Width = 210,
             Padding = new Padding(FoundryTheme.Space2),
             BackgroundColor = FoundryTheme.ContentBackground,
             Content = new StackLayout
@@ -301,6 +356,13 @@ public sealed class ObserverFoundryPanel : Panel
                     new StackLayoutItem(content, true),
                 },
             },
+        };
+        return new Panel
+        {
+            Width = 210,
+            Padding = new Padding(1),
+            BackgroundColor = FoundryTheme.CanvasBorder,
+            Content = surface,
         };
     }
 
@@ -331,6 +393,7 @@ public sealed class ObserverFoundryPanel : Panel
         _isLoaded = true;
         LayoutFoundryUiHost.OverviewChanged += OnOverviewChanged;
         LayoutFoundryUiHost.Selection.Changed += OnSharedSelectionChanged;
+        QueueCanvasOverlayLayout();
         RefreshSnapshot(fit: true);
     }
 
@@ -340,6 +403,7 @@ public sealed class ObserverFoundryPanel : Panel
         _isLoaded = false;
         LayoutFoundryUiHost.OverviewChanged -= OnOverviewChanged;
         LayoutFoundryUiHost.Selection.Changed -= OnSharedSelectionChanged;
+        _overlayLayoutTimer.Stop();
         _invalidationTimer.Stop();
         ResetThumbnailCapture();
         _canvas.ReleasePreviews();
@@ -522,7 +586,17 @@ public sealed class ObserverFoundryPanel : Panel
 
             var selected = LayoutFoundryUiHost.Selection.Selected.Contains(
                 new OverviewNodeKey(OverviewNodeKind.Sheet, card.Sheet.PageViewId));
-            var priority = selected ? 0 : card.Bounds.Intersects(visibleWorld) ? 10 : 20;
+            var matched = _filter.MatchesSheet(card.Sheet.PageViewId);
+            var visible = card.Bounds.Intersects(visibleWorld);
+            var priority = selected
+                ? 0
+                : matched && visible
+                    ? 5
+                    : visible
+                        ? 10
+                        : matched
+                            ? 15
+                            : 20;
             _thumbnailQueue.Enqueue(new OverviewThumbnailRequest(key, priority));
         }
 
@@ -865,13 +939,25 @@ public sealed class ObserverFoundryPanel : Panel
                           !(key.Kind == OverviewNodeKind.Folder && key.Id == _snapshot.RootFolderId))
             .ToArray();
         if (selection.Length == 0) return;
-        var answer = MessageBox.Show(
-            this,
-            $"Delete {selection.Length} selected item{(selection.Length == 1 ? string.Empty : "s")} and every layout contained by selected folders?",
-            "Delete layouts and folders",
-            MessageBoxButtons.YesNo,
-            MessageBoxType.Warning);
-        if (answer != DialogResult.Yes) return;
+        var document = LayoutFoundryUiHost.CaptureSnapshot();
+        if (document is null) return;
+        var resolved = HierarchySelectionResolver.Resolve(document, selection);
+        var sheetCount = resolved.AllSheetPageViewIds.Count;
+        if (sheetCount > 0)
+        {
+            var folderCount = resolved.ExpandedFolderIds.Count;
+            var summary = folderCount > 0
+                ? $"{folderCount} folder{(folderCount == 1 ? string.Empty : "s")} and {sheetCount} Rhino layout{(sheetCount == 1 ? string.Empty : "s")}"
+                : $"{sheetCount} Rhino layout{(sheetCount == 1 ? string.Empty : "s")}";
+            var answer = MessageBox.Show(
+                this,
+                $"Permanently delete {summary}?\n\nLayout deletion cannot be undone.",
+                "Delete layouts and folders",
+                MessageBoxButtons.YesNo,
+                MessageBoxType.Warning,
+                MessageBoxDefaultButton.No);
+            if (answer != DialogResult.Yes) return;
+        }
         var result = await LayoutFoundryUiHost.DeleteSelectionAsync(selection);
         _status.Text = ResultMessage(result, "Selection deleted.");
         if (result.Succeeded)

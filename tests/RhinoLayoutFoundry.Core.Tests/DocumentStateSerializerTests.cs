@@ -85,7 +85,7 @@ public sealed class DocumentStateSerializerTests
     public void VersionOneStateMigratesWithAnEmptyTemplateLibrary()
     {
         var payload = DocumentStateSerializer.Serialize(DocumentState.Empty())
-            .Replace("\"SchemaVersion\":4", "\"SchemaVersion\":1", StringComparison.Ordinal)
+            .Replace($"\"SchemaVersion\":{DocumentState.CurrentSchemaVersion}", "\"SchemaVersion\":1", StringComparison.Ordinal)
             .Replace(",\"SheetTemplates\":[]", string.Empty, StringComparison.Ordinal)
             .Replace(",\"ObserverCanvas\":{\"LayoutAlgorithmVersion\":1,\"FolderOrigins\":{},\"SheetPlacements\":{}}", string.Empty, StringComparison.Ordinal);
 
@@ -108,7 +108,7 @@ public sealed class DocumentStateSerializerTests
             },
         };
         var payload = DocumentStateSerializer.Serialize(state)
-            .Replace("\"SchemaVersion\":4", "\"SchemaVersion\":2", StringComparison.Ordinal)
+            .Replace($"\"SchemaVersion\":{DocumentState.CurrentSchemaVersion}", "\"SchemaVersion\":2", StringComparison.Ordinal)
             .Replace(",\"IncludeInPrintAll\":true", string.Empty, StringComparison.Ordinal);
 
         var restored = DocumentStateSerializer.Deserialize(payload);
@@ -127,7 +127,7 @@ public sealed class DocumentStateSerializerTests
                     new Dictionary<Guid, ObserverPointRecord> { [Guid.NewGuid()] = new(1, 2) },
                     new Dictionary<Guid, ObserverPointRecord>()),
             })
-            .Replace("\"SchemaVersion\":4", "\"SchemaVersion\":3", StringComparison.Ordinal)
+            .Replace($"\"SchemaVersion\":{DocumentState.CurrentSchemaVersion}", "\"SchemaVersion\":3", StringComparison.Ordinal)
             .Replace(",\"ObserverCanvas\":{\"LayoutAlgorithmVersion\":1,\"FolderOrigins\":{", ",\"ObserverCanvas\":{\"LayoutAlgorithmVersion\":1,\"FolderOrigins\":{", StringComparison.Ordinal);
 
         var restored = DocumentStateSerializer.Deserialize(payload);
@@ -135,6 +135,25 @@ public sealed class DocumentStateSerializerTests
         Assert.Equal(DocumentState.CurrentSchemaVersion, restored.SchemaVersion);
         Assert.Empty(restored.Canvas.FolderOrigins);
         Assert.Empty(restored.Canvas.SheetPlacements);
+    }
+
+    [Fact]
+    public void VersionFourStateMigratesWithEmptyImportRecovery()
+    {
+        var payload = DocumentStateSerializer.Serialize(DocumentState.Empty() with
+            {
+                ImportRecovery =
+                [
+                    new ImportRecoveryRecord("layer", "A-Wall", "Missing source layer"),
+                ],
+            })
+            .Replace($"\"SchemaVersion\":{DocumentState.CurrentSchemaVersion}", "\"SchemaVersion\":4", StringComparison.Ordinal)
+            .Replace(",\"ImportRecovery\":[{\"Kind\":\"layer\",\"Name\":\"A-Wall\",\"Message\":\"Missing source layer\",\"EntityId\":null,\"Data\":null}]", string.Empty, StringComparison.Ordinal);
+
+        var restored = DocumentStateSerializer.Deserialize(payload);
+
+        Assert.Equal(DocumentState.CurrentSchemaVersion, restored.SchemaVersion);
+        Assert.Empty(restored.Recovery);
     }
 
     [Fact]
@@ -158,7 +177,7 @@ public sealed class DocumentStateSerializerTests
     public void UnsupportedSchemaIsRejected()
     {
         var payload = DocumentStateSerializer.Serialize(DocumentState.Empty())
-            .Replace("\"SchemaVersion\":4", "\"SchemaVersion\":99", StringComparison.Ordinal);
+            .Replace($"\"SchemaVersion\":{DocumentState.CurrentSchemaVersion}", "\"SchemaVersion\":99", StringComparison.Ordinal);
 
         Assert.Throws<NotSupportedException>(() => DocumentStateSerializer.Deserialize(payload));
     }

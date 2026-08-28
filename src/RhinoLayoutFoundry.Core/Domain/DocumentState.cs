@@ -15,15 +15,19 @@ public sealed record DocumentState(
     IReadOnlyList<DisplayRule> DisplayRules,
     IReadOnlyDictionary<string, string> Metadata,
     IReadOnlyList<SheetTemplateRecipe>? SheetTemplates = null,
-    ObserverCanvasState? ObserverCanvas = null)
+    ObserverCanvasState? ObserverCanvas = null,
+    IReadOnlyList<ImportRecoveryRecord>? ImportRecovery = null)
 {
-    public const int CurrentSchemaVersion = 4;
+    public const int CurrentSchemaVersion = 5;
 
     [JsonIgnore]
     public IReadOnlyList<SheetTemplateRecipe> Templates => SheetTemplates ?? [];
 
     [JsonIgnore]
     public ObserverCanvasState Canvas => ObserverCanvas ?? ObserverCanvasState.Empty;
+
+    [JsonIgnore]
+    public IReadOnlyList<ImportRecoveryRecord> Recovery => ImportRecovery ?? [];
 
     public static DocumentState Empty()
     {
@@ -37,9 +41,17 @@ public sealed record DocumentState(
             [],
             new Dictionary<string, string>(StringComparer.Ordinal),
             [],
-            ObserverCanvasState.Empty);
+            ObserverCanvasState.Empty,
+            []);
     }
 }
+
+public sealed record ImportRecoveryRecord(
+    string Kind,
+    string Name,
+    string Message,
+    Guid? EntityId = null,
+    IReadOnlyDictionary<string, string>? Data = null);
 
 /// <summary>
 /// Document-shared observer-board organization. Camera, selection, hover, and

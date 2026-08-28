@@ -4,6 +4,7 @@ using RhinoLayoutFoundry.Core.Domain;
 using RhinoLayoutFoundry.Core.Operations;
 using RhinoLayoutFoundry.Core.Observer;
 using RhinoLayoutFoundry.Core.Overview;
+using RhinoLayoutFoundry.Core.Persistence;
 
 namespace RhinoLayoutFoundry.UI;
 
@@ -14,6 +15,7 @@ public static class LayoutFoundryUiHost
     private static IDocumentMutationService? _mutationService;
     private static IDocumentOverviewNavigationService? _navigationService;
     private static ILayoutPdfExportService? _pdfExportService;
+    private static ILayoutPackageService? _layoutPackageService;
     private static IDocumentThumbnailProvider? _thumbnailProvider;
     private static IMutationCapabilityProvider? _capabilityProvider;
     private static ITemplateCaptureContextProvider? _templateCaptureContextProvider;
@@ -34,6 +36,7 @@ public static class LayoutFoundryUiHost
         IDocumentMutationService mutationService,
         IDocumentOverviewNavigationService navigationService,
         ILayoutPdfExportService pdfExportService,
+        ILayoutPackageService layoutPackageService,
         IDocumentThumbnailProvider thumbnailProvider,
         IMutationCapabilityProvider capabilityProvider,
         ITemplateCaptureContextProvider templateCaptureContextProvider,
@@ -45,6 +48,7 @@ public static class LayoutFoundryUiHost
         _mutationService = mutationService ?? throw new ArgumentNullException(nameof(mutationService));
         _navigationService = navigationService ?? throw new ArgumentNullException(nameof(navigationService));
         _pdfExportService = pdfExportService ?? throw new ArgumentNullException(nameof(pdfExportService));
+        _layoutPackageService = layoutPackageService ?? throw new ArgumentNullException(nameof(layoutPackageService));
         _thumbnailProvider = thumbnailProvider ?? throw new ArgumentNullException(nameof(thumbnailProvider));
         _capabilityProvider = capabilityProvider ?? throw new ArgumentNullException(nameof(capabilityProvider));
         _templateCaptureContextProvider = templateCaptureContextProvider ??
@@ -79,7 +83,8 @@ public static class LayoutFoundryUiHost
 
     public static DocumentOverviewIdentity CaptureOverviewIdentity()
     {
-        return _overviewProvider?.CaptureIdentity() ?? new DocumentOverviewIdentity(null, 0);
+        return _overviewProvider?.CaptureIdentity() ??
+               new DocumentOverviewIdentity(null, 0, DocumentOverview.NoDocument.DocumentName);
     }
 
     public static (uint DocumentRuntimeSerialNumber, long Revision)? CaptureDocumentContext()
@@ -189,6 +194,27 @@ public static class LayoutFoundryUiHost
                    0,
                    "Foundry is not connected to a PDF export service."));
     }
+
+    public static Task<LayoutPackageExportResult> ExportLayoutPackageAsync(
+        LayoutPackageExportRequest request,
+        CancellationToken cancellationToken = default) =>
+        _layoutPackageService?.ExportAsync(request, cancellationToken) ??
+        Task.FromResult(new LayoutPackageExportResult(
+            false, 0, "Foundry is not connected to a layout package service."));
+
+    public static Task<LayoutPackagePreflight> PreflightLayoutPackageAsync(
+        string filePath,
+        CancellationToken cancellationToken = default) =>
+        _layoutPackageService?.PreflightAsync(filePath, cancellationToken) ??
+        Task.FromResult(new LayoutPackagePreflight(
+            false, filePath, null, [], [], "Foundry is not connected to a layout package service."));
+
+    public static Task<LayoutPackageImportResult> ImportLayoutPackageAsync(
+        LayoutPackageImportRequest request,
+        CancellationToken cancellationToken = default) =>
+        _layoutPackageService?.ImportAsync(request, cancellationToken) ??
+        Task.FromResult(new LayoutPackageImportResult(
+            false, 0, [], "Foundry is not connected to a layout package service."));
 
     public static Task<OverviewThumbnailResult> CaptureThumbnailAsync(
         OverviewThumbnailRequest request,
@@ -948,6 +974,7 @@ public static class LayoutFoundryUiHost
         _mutationService = null;
         _navigationService = null;
         _pdfExportService = null;
+        _layoutPackageService = null;
         _thumbnailProvider = null;
         _capabilityProvider = null;
         _templateCaptureContextProvider = null;

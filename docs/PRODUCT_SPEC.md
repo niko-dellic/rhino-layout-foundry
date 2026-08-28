@@ -91,7 +91,7 @@ Supported properties grow by milestone and include page name, order, paper dimen
 
 The hierarchy table is also an immediate property editor. A folder-row paper or display-mode edit applies to all descendant layouts/details, a sheet-row edit applies to that layout, and a detail-row display-mode edit applies only to that viewport. Each sheet stores a print-enabled flag; folder rows summarize and toggle all descendant flags, and mixed folder values remain visible. Folder PDF and Print Enabled scopes omit disabled layouts while an explicit single-layout Print command remains available.
 
-Each open 3DM is represented by an explicit, collapsible project-root row above its Foundry folders and Rhino layouts. The root is an aggregate property target but cannot be renamed, dragged, duplicated, or deleted from the hierarchy. Column headers toggle ascending/descending sort within every parent without flattening the tree; name sorting uses natural numeric order. This root boundary is intentionally compatible with a later multi-document overview.
+Each open 3DM is represented by an explicit, collapsible project-root row above its Foundry folders and Rhino layouts. Its label follows Rhino's current document filename immediately after Save or Save As without requiring a panel reopen or document switch. The root is an aggregate property target but cannot be renamed, dragged, duplicated, or deleted from the hierarchy. Column headers toggle ascending/descending sort within every parent without flattening the tree; name sorting uses natural numeric order. This root boundary is intentionally compatible with a later multi-document overview.
 
 ### 4.3 Organize sheets
 
@@ -162,6 +162,12 @@ Dropping or assigning a named view always applies its camera and projection. An 
 - The export UI shows page count, order, output path, validation, progress, and cancellation.
 - Cancelling or failing an export must not leave a misleading final file.
 - Direct physical printing is deferred until after v1.
+
+### 4.9.1 Portable layout packages
+
+The persistent header exposes Import and Export actions for a versioned `.rlf` package. A package contains the complete Foundry hierarchy/state, layout and detail recipes, page-space objects and block dependencies, referenced custom display modes, named views, named layer states, and per-detail layer visibility. Model-space geometry is never included.
+
+Import performs a read-only checksum/schema/dependency preflight before mutation. Merge creates a uniquely named wrapper folder and retains destination document metadata on conflicts; Replace stages imported layouts and creates a recovery package before removing existing layouts. Same-name dependencies are reviewed individually. Layers map only by exact full path, unresolved layer settings remain diagnosable, and rules with missing source model-object IDs are imported disabled rather than silently discarded.
 
 ### 4.10 Templates and batch creation
 

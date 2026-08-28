@@ -15,13 +15,24 @@ public sealed record FolderCreationDestination(Guid ParentFolderId, string Displ
         }
 
         var selected = selectedKeys.Distinct().Take(2).ToArray();
-        if (selected is [{ Kind: OverviewNodeKind.Folder } folderKey])
+        if (selected.Length == 1)
         {
-            var folder = overview.Folders.FirstOrDefault(item => item.Id == folderKey.Id);
-            if (folder is not null && folder.Id != rootFolderId)
+            var key = selected[0];
+            var destinationId = key.Kind switch
             {
+                OverviewNodeKind.Folder => key.Id,
+                OverviewNodeKind.Sheet => overview.Sheets
+                    .FirstOrDefault(sheet => sheet.PageViewId == key.Id)?.FolderId,
+                OverviewNodeKind.Detail => overview.Sheets
+                    .FirstOrDefault(sheet => sheet.Details.Any(detail =>
+                        detail.DetailViewportId == key.Id))?.FolderId,
+                _ => null,
+            };
+            var folder = destinationId is { } id
+                ? overview.Folders.FirstOrDefault(item => item.Id == id)
+                : null;
+            if (folder is not null)
                 return new FolderCreationDestination(folder.Id, folder.Name);
-            }
         }
 
         return new FolderCreationDestination(rootFolderId, "Root");

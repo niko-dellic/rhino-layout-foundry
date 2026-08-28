@@ -85,25 +85,34 @@ internal sealed class RhinoDocumentOverviewProvider : IDocumentOverviewProvider
             })
             .ToArray();
 
-        var documentName = string.IsNullOrWhiteSpace(document.Name)
-            ? "Untitled Rhino document"
-            : Path.GetFileNameWithoutExtension(document.Name);
+        var documentName = DisplayName(document);
 
         return new DocumentOverview(
             document.RuntimeSerialNumber,
             documentName,
             state.RootFolderId,
             folders,
-            sheets);
+            sheets,
+            state.Recovery.Select(item => new OverviewIssue(
+                $"import.{item.Kind}",
+                OverviewIssueSeverity.Warning,
+                item.Message,
+                item.EntityId)).ToArray());
     }
 
     public DocumentOverviewIdentity CaptureIdentity()
     {
         var document = RhinoDoc.ActiveDoc;
         return document is null
-            ? new DocumentOverviewIdentity(null, 0)
+            ? new DocumentOverviewIdentity(null, 0, DocumentOverview.NoDocument.DocumentName)
             : new DocumentOverviewIdentity(
                 document.RuntimeSerialNumber,
-                document.Views.GetPageViews().Length);
+                document.Views.GetPageViews().Length,
+                DisplayName(document));
     }
+
+    private static string DisplayName(RhinoDoc document) =>
+        string.IsNullOrWhiteSpace(document.Name)
+            ? "Untitled Rhino document"
+            : Path.GetFileNameWithoutExtension(document.Name);
 }

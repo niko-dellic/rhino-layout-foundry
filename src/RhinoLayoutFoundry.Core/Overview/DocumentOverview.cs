@@ -55,7 +55,14 @@ public sealed record DetailOverview(
 
 public readonly record struct DocumentOverviewIdentity(
     uint? DocumentRuntimeSerialNumber,
-    int SheetCount);
+    int SheetCount,
+    string DocumentName)
+{
+    public bool Matches(DocumentOverview overview) =>
+        DocumentRuntimeSerialNumber == overview.DocumentRuntimeSerialNumber &&
+        SheetCount == overview.Sheets.Count &&
+        string.Equals(DocumentName, overview.DocumentName, StringComparison.Ordinal);
+}
 
 public interface IDocumentOverviewProvider
 {

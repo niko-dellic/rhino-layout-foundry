@@ -40,14 +40,11 @@ public sealed class OverviewTreeBuilderTests
     }
 
     [Fact]
-    public void TagMatchKeepsAncestorsAndSheetDetails()
+    public void TextSearchDoesNotMatchLegacyTags()
     {
         var roots = OverviewTreeBuilder.Build(CreateOverview(), "issue-a");
 
-        Assert.Single(roots);
-        var sheet = Flatten(roots).Single(node => node.Key.Kind == OverviewNodeKind.Sheet);
-        Assert.Equal("A-001", sheet.Label);
-        Assert.Equal(2, sheet.Children.Count);
+        Assert.Empty(roots);
     }
 
     [Fact]

@@ -14,6 +14,7 @@ internal sealed class ObserverCanvasDrawable : Drawable
     private readonly Font _smallFont = SystemFonts.Default(8);
     private readonly Dictionary<Guid, PreviewEntry> _previews = [];
     private ObserverSnapshot _snapshot = ObserverSnapshot.NoDocument;
+    private OverviewFilterProjection _filter = new(false, new HashSet<OverviewNodeKey>(), new HashSet<Guid>());
     private ObserverBoardLayout _layout = ObserverBoardLayout.Empty;
     private ObserverSpatialIndex _spatialIndex = new(ObserverBoardLayout.Empty);
     private ObserverCamera _camera = ObserverCamera.Default;
@@ -79,6 +80,12 @@ internal sealed class ObserverCanvasDrawable : Drawable
         {
             Invalidate();
         }
+    }
+
+    internal void SetFilter(OverviewFilterProjection projection)
+    {
+        _filter = projection ?? throw new ArgumentNullException(nameof(projection));
+        Invalidate();
     }
 
     internal void SetSelection(IEnumerable<OverviewNodeKey> selection)
@@ -239,18 +246,26 @@ internal sealed class ObserverCanvasDrawable : Drawable
     {
         var bounds = ScreenRect(PreviewBounds(frame.Bounds, frame.Folder.Id), viewport);
         if (bounds.Width < 8 || bounds.Height < 8) return;
-        var selected = _selection.Contains(new OverviewNodeKey(OverviewNodeKind.Folder, frame.Folder.Id));
+        var key = new OverviewNodeKey(OverviewNodeKind.Folder, frame.Folder.Id);
+        var selected = _selection.Contains(key);
+        var emphasized = _filter.Emphasizes(key);
         var outline = selected
             ? FoundryTheme.SelectionAccent
-            : FoundryTheme.CanvasBorder;
-        graphics.FillRectangle(FoundryTheme.WithAlpha(FoundryTheme.CanvasSurface, 118), bounds);
+            : emphasized
+                ? FoundryTheme.CanvasBorder
+                : FoundryTheme.WithAlpha(FoundryTheme.CanvasBorder, 64);
+        graphics.FillRectangle(
+            FoundryTheme.WithAlpha(FoundryTheme.CanvasSurface, emphasized ? 118 : 30),
+            bounds);
         graphics.DrawRectangle(new Pen(outline, selected ? 2 : 1), bounds);
         var headerHeight = Math.Max(22, ObserverPlacementPlanner.FolderHeaderHeight * _camera.Zoom);
-        graphics.FillRectangle(FoundryTheme.WithAlpha(FoundryTheme.CanvasSubtleSurface, 220),
+        graphics.FillRectangle(FoundryTheme.WithAlpha(
+                FoundryTheme.CanvasSubtleSurface,
+                emphasized ? 220 : 55),
             bounds.X, bounds.Y, bounds.Width, (float)Math.Min(bounds.Height, headerHeight));
         graphics.DrawText(
             _folderFont,
-            FoundryTheme.PrimaryText,
+            emphasized ? FoundryTheme.PrimaryText : FoundryTheme.WithAlpha(FoundryTheme.PrimaryText, 64),
             bounds.X + 10,
             bounds.Y + 6,
             $"▾  {frame.Folder.Name}   ·   {frame.DirectSheetCount} layout{(frame.DirectSheetCount == 1 ? string.Empty : "s")}");
@@ -263,9 +278,10 @@ internal sealed class ObserverCanvasDrawable : Drawable
         if (bounds.Width < 3 || bounds.Height < 3) return;
         var key = new OverviewNodeKey(OverviewNodeKind.Sheet, card.Sheet.PageViewId);
         var selected = _selection.Contains(key);
+        var emphasized = _filter.Emphasizes(key);
         var hasSelectedDetail = card.Sheet.Details.Any(detail =>
             _selection.Contains(new OverviewNodeKey(OverviewNodeKind.Detail, detail.DetailViewportId)));
-        graphics.FillRectangle(Color.FromArgb(0, 0, 0, 45),
+        graphics.FillRectangle(Color.FromArgb(0, 0, 0, emphasized ? 45 : 12),
             bounds.X + 4, bounds.Y + 5, bounds.Width, bounds.Height);
         graphics.FillRectangle(Colors.White, bounds);
         if (_previews.TryGetValue(card.Sheet.PageViewId, out var preview) &&
@@ -278,31 +294,49 @@ internal sealed class ObserverCanvasDrawable : Drawable
             DrawPlaceholder(graphics, card, bounds);
         }
 
+        if (!emphasized)
+        {
+            graphics.FillRectangle(FoundryTheme.WithAlpha(FoundryTheme.CanvasBackground, 190), bounds);
+        }
+
         var border = selected || hasSelectedDetail
             ? FoundryTheme.SelectionAccent
-            : FoundryTheme.CanvasBorder;
+            : emphasized
+                ? FoundryTheme.CanvasBorder
+                : FoundryTheme.WithAlpha(FoundryTheme.CanvasBorder, 64);
         graphics.DrawRectangle(new Pen(border, selected ? 3 : hasSelectedDetail ? 2 : 1), bounds);
         if (bounds.Width >= 70 && bounds.Height >= 50)
         {
             DrawDetailOverlays(graphics, card, bounds, selected);
             graphics.FillRectangle(
                 card.Sheet.IncludeInPrintAll
-                    ? FoundryTheme.PrimaryText
-                    : FoundryTheme.MutedText,
+                    ? emphasized
+                        ? FoundryTheme.PrimaryText
+                        : FoundryTheme.WithAlpha(FoundryTheme.PrimaryText, 64)
+                    : emphasized
+                        ? FoundryTheme.MutedText
+                        : FoundryTheme.WithAlpha(FoundryTheme.MutedText, 64),
                 bounds.Right - 18,
                 bounds.Top + 6,
                 10,
                 10);
             graphics.DrawRectangle(FoundryTheme.CanvasBorder,
                 bounds.Right - 18, bounds.Top + 6, 10, 10);
-            graphics.FillRectangle(FoundryTheme.WithAlpha(FoundryTheme.CanvasSubtleSurface, 230),
+            graphics.FillRectangle(FoundryTheme.WithAlpha(
+                    FoundryTheme.CanvasSubtleSurface,
+                    emphasized ? 230 : 58),
                 bounds.Left + 6, bounds.Top + 6, 12, 12);
-            graphics.DrawText(_smallFont, Colors.White, bounds.Left + 8, bounds.Top + 5, "↕");
+            graphics.DrawText(
+                _smallFont,
+                emphasized ? Colors.White : FoundryTheme.WithAlpha(Colors.White, 64),
+                bounds.Left + 8,
+                bounds.Top + 5,
+                "↕");
         }
 
         graphics.DrawText(
             _sheetFont,
-            FoundryTheme.PrimaryText,
+            emphasized ? FoundryTheme.PrimaryText : FoundryTheme.WithAlpha(FoundryTheme.PrimaryText, 64),
             bounds.Left,
             bounds.Bottom + 5,
             card.Sheet.Name);

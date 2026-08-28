@@ -36,6 +36,7 @@ internal sealed class RhinoDocumentEventBridge : IDisposable
         RhinoPageView.PageViewPropertiesChange += OnPageViewPropertiesChanged;
         Command.EndCommand += OnCommandEnded;
         Command.UndoRedo += OnUndoRedo;
+        RhinoDoc.EndSaveDocument += OnDocumentSaved;
         RhinoDoc.DocumentPropertiesChanged += OnDocumentChanged;
         RhinoDoc.AddRhinoObject += OnObjectChanged;
         RhinoDoc.ReplaceRhinoObject += OnObjectReplaced;
@@ -64,6 +65,7 @@ internal sealed class RhinoDocumentEventBridge : IDisposable
         RhinoPageView.PageViewPropertiesChange -= OnPageViewPropertiesChanged;
         Command.EndCommand -= OnCommandEnded;
         Command.UndoRedo -= OnUndoRedo;
+        RhinoDoc.EndSaveDocument -= OnDocumentSaved;
         RhinoDoc.DocumentPropertiesChanged -= OnDocumentChanged;
         RhinoDoc.AddRhinoObject -= OnObjectChanged;
         RhinoDoc.ReplaceRhinoObject -= OnObjectReplaced;
@@ -118,10 +120,19 @@ internal sealed class RhinoDocumentEventBridge : IDisposable
         Track(RhinoDoc.ActiveDoc, OverviewInvalidationKind.All);
     }
 
+    private void OnDocumentSaved(object? sender, DocumentSaveEventArgs eventArgs)
+    {
+        Track(
+            eventArgs.Document,
+            OverviewInvalidationKind.DocumentIdentity |
+            OverviewInvalidationKind.Metadata);
+    }
+
     private void OnDocumentChanged(object? sender, DocumentEventArgs eventArgs)
     {
         Track(
             eventArgs.Document,
+            OverviewInvalidationKind.DocumentIdentity |
             OverviewInvalidationKind.Metadata |
             OverviewInvalidationKind.Diagnostics |
             OverviewInvalidationKind.Thumbnails);

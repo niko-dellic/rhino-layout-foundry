@@ -66,6 +66,7 @@ No mutation feature is complete until its success, validation failure, unexpecte
 - Reject invalid page dimensions and detail rectangles before Rhino mutation.
 - Inject failure after each generated page and confirm the adapter removes the complete partial batch.
 - Compare captured/recreated detail camera, projection, scale, lock, and display mode in millimeter and inch documents.
+- Round-trip `.rlf` archives deterministically; reject future schemas, corrupt checksums, missing assets, unsafe archive paths, and stale-document commits. Cover merge wrapper placement, replace recovery, dependency decisions, ID remapping, unresolved object rules, and exact full-path layer-state mapping.
 - Verify explicit page-space title-block selection, same-document definition reuse, missing-definition warnings, and zero unintended block deletion.
 - Reject unsupported newer major schemas without mutation.
 - Retain readable data and diagnostics from corrupt/partial fixtures.
@@ -207,6 +208,7 @@ Performance regressions above the agreed tolerance block release unless the budg
 ### 7.3 Soak and fault tests
 
 - Repeatedly open/switch/close fixture documents.
+- Save an untitled document, then Save As under a second name; verify the project-root label follows each filename change while the document serial and sheet count remain unchanged.
 - Scroll and filter the full benchmark while thumbnails render.
 - Traverse, zoom, lasso, resize, tidy, and reopen the complete observer board while recording frame latency, decoded/encoded preview memory, capture concurrency, and memory after close.
 - Reapply, reorder, enable, and disable display rules.

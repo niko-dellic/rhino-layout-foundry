@@ -34,6 +34,10 @@ public sealed class LayoutFoundryPlugin : PlugIn
             mutationService,
             new RhinoDocumentOverviewNavigationService(_stateStore, _revisionTracker),
             new RhinoLayoutPdfExportService(),
+            new RhinoLayoutPackageService(
+                _stateStore,
+                _revisionTracker,
+                () => LayoutFoundryUiHost.NotifyOverviewChanged(OverviewInvalidation.All)),
             new RhinoDocumentThumbnailProvider(),
             new RhinoMutationCapabilityProvider(),
             new RhinoTemplateCaptureContextProvider(),

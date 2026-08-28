@@ -11,6 +11,11 @@ public sealed class FolderCreationDestinationTests
             new FolderOverview(TestSnapshots.RootFolderId, null, "Root", 0),
             new FolderOverview(TestSnapshots.ChildFolderId, TestSnapshots.RootFolderId, "Plans", 0),
         ],
+        Sheets = TestSnapshots.Overview(2, 1).Sheets
+            .Select((sheet, index) => index == 0
+                ? sheet with { FolderId = TestSnapshots.ChildFolderId }
+                : sheet)
+            .ToArray(),
     };
 
     [Fact]
@@ -34,11 +39,23 @@ public sealed class FolderCreationDestinationTests
     }
 
     [Fact]
-    public void SheetOrMultipleSelectionCreatesAtRoot()
+    public void SheetAndDetailCreateBesideContainingLayout()
     {
         var sheet = FolderCreationDestination.Resolve(
             _overview,
             [new OverviewNodeKey(OverviewNodeKind.Sheet, TestSnapshots.SheetOneId)]);
+        var detail = FolderCreationDestination.Resolve(
+            _overview,
+            [new OverviewNodeKey(OverviewNodeKind.Detail, _overview.Sheets[0].Details[0].DetailViewportId)]);
+
+        Assert.Equal(TestSnapshots.ChildFolderId, sheet!.ParentFolderId);
+        Assert.Equal(TestSnapshots.ChildFolderId, detail!.ParentFolderId);
+        Assert.Equal("Plans", sheet.DisplayName);
+    }
+
+    [Fact]
+    public void MultipleSelectionCreatesAtRoot()
+    {
         var multiple = FolderCreationDestination.Resolve(
             _overview,
             [
@@ -46,7 +63,6 @@ public sealed class FolderCreationDestinationTests
                 new OverviewNodeKey(OverviewNodeKind.Sheet, TestSnapshots.SheetOneId),
             ]);
 
-        Assert.Equal(TestSnapshots.RootFolderId, sheet!.ParentFolderId);
         Assert.Equal(TestSnapshots.RootFolderId, multiple!.ParentFolderId);
     }
 }
