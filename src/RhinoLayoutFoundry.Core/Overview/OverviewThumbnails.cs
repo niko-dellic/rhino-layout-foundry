@@ -57,6 +57,30 @@ public interface IDocumentThumbnailProvider
         CancellationToken cancellationToken);
 }
 
+public readonly record struct NamedViewThumbnailKey(
+    uint DocumentRuntimeSerialNumber,
+    string NamedViewName,
+    int Width,
+    int Height,
+    long ContentVersion = 0);
+
+public sealed record NamedViewThumbnailRequest(NamedViewThumbnailKey Key);
+
+public sealed record NamedViewThumbnailResult(
+    NamedViewThumbnailKey Key,
+    byte[]? PngBytes,
+    string? Error = null)
+{
+    public bool Succeeded => PngBytes is { Length: > 0 } && Error is null;
+}
+
+public interface INamedViewThumbnailProvider
+{
+    Task<NamedViewThumbnailResult> CaptureAsync(
+        NamedViewThumbnailRequest request,
+        CancellationToken cancellationToken);
+}
+
 public sealed class OverviewThumbnailRequestQueue
 {
     private readonly Dictionary<OverviewThumbnailKey, OverviewThumbnailRequest> _pending = [];

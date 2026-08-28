@@ -12,6 +12,7 @@ namespace RhinoLayoutFoundry.Rhino;
 
 internal sealed class RhinoDocumentMutationService : IDocumentMutationService
 {
+    private const string DedicatedDetailLayerName = ".details";
     private readonly DocumentRevisionTracker _revisionTracker;
     private readonly DocumentStateStore _stateStore;
     private readonly Action<OverviewInvalidation> _overviewChanged;
@@ -1303,8 +1304,12 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
             return Failure("batch.duplicate_name", "One or more layout names now conflict with the document.");
 
         var createdPages = new List<RhinoPageView>();
+        DetailLayerResolution? detailLayer = null;
         try
         {
+            if (creates.Any(create => create.UseDedicatedDetailLayer && create.Template.DetailSlots.Count > 0))
+                detailLayer = ResolveDedicatedDetailLayer(document, beforeState.DedicatedDetailLayerId);
+
             var sheets = beforeState.Sheets.ToDictionary(pair => pair.Key, pair => pair.Value);
             foreach (var create in creates)
             {
@@ -1319,7 +1324,8 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
 
                 foreach (var slot in create.Template.DetailSlots)
                     CreateDetail(document, page, slot, recipeUnit, pageScale,
-                        create.NamedViewAssignments.GetValueOrDefault(slot.Id));
+                        create.NamedViewAssignments.GetValueOrDefault(slot.Id),
+                        create.UseDedicatedDetailLayer ? detailLayer?.LayerIndex : null);
 
                 Guid? titleBlockId = null;
                 if (create.Template.TitleBlock is { } titleBlock)
@@ -1336,7 +1342,11 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
                         : null);
             }
 
-            _stateStore.Set(document, beforeState with { Sheets = sheets });
+            _stateStore.Set(document, beforeState with
+            {
+                Sheets = sheets,
+                DedicatedDetailLayerId = detailLayer?.LayerId ?? beforeState.DedicatedDetailLayerId,
+            });
             document.Modified = true;
             _revisionTracker.Bump(document);
             document.Views.Redraw();
@@ -1347,9 +1357,39 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
             _stateStore.Set(document, beforeState);
             foreach (var page in createdPages.AsEnumerable().Reverse())
                 page.Close();
+            if (detailLayer is { Created: true })
+                document.Layers.Delete(detailLayer.LayerId, quiet: true);
             return Failure("batch.apply_failed",
                 $"Batch creation failed; every layout created by this batch was removed: {exception.Message}");
         }
+    }
+
+    private static DetailLayerResolution ResolveDedicatedDetailLayer(
+        RhinoDoc document,
+        Guid? trackedLayerId)
+    {
+        if (trackedLayerId is { } layerId)
+        {
+            var tracked = document.Layers.FirstOrDefault(layer =>
+                layer.Id == layerId && !layer.IsDeleted && !layer.IsReference);
+            if (tracked is not null)
+                return new DetailLayerResolution(tracked.Index, tracked.Id, false);
+        }
+
+        var existing = document.Layers.FirstOrDefault(layer =>
+            !layer.IsDeleted &&
+            !layer.IsReference &&
+            layer.ParentLayerId == Guid.Empty &&
+            string.Equals(layer.Name, DedicatedDetailLayerName, StringComparison.OrdinalIgnoreCase));
+        if (existing is not null)
+            return new DetailLayerResolution(existing.Index, existing.Id, false);
+
+        var definition = new Layer { Name = DedicatedDetailLayerName };
+        var index = document.Layers.Add(definition);
+        if (index < 0)
+            throw new InvalidOperationException($"Rhino did not create the '{DedicatedDetailLayerName}' layer.");
+        var created = document.Layers[index];
+        return new DetailLayerResolution(created.Index, created.Id, true);
     }
 
     private static DetailSlotRecipe CaptureDetail(DetailViewObject detail)
@@ -1379,7 +1419,8 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
         DetailSlotRecipe slot,
         UnitSystem recipePageUnit,
         double pageScale,
-        string? assignedNamedView)
+        string? assignedNamedView,
+        int? detailLayerIndex)
     {
         var projection = Enum.TryParse<DefinedViewportProjection>(slot.Projection, true, out var parsed)
             ? parsed
@@ -1390,22 +1431,27 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
             new Point2d(slot.Right * pageScale, slot.Top * pageScale),
             projection) ?? throw new InvalidOperationException($"Rhino did not create detail '{slot.Name}'.");
 
-        var geometryChanged = false;
+        var objectChanged = false;
         if (slot.PageToModelRatio is { } ratio && ratio > 0 && detail.DetailGeometry.IsParallelProjection)
         {
             if (!detail.DetailGeometry.SetScale(ratio, recipePageUnit, 1, document.ModelUnitSystem))
                 throw new InvalidOperationException($"Rhino did not set the scale for detail '{slot.Name}'.");
-            geometryChanged = true;
+            objectChanged = true;
         }
         if (detail.DetailGeometry.IsProjectionLocked != slot.ProjectionLocked)
         {
             detail.DetailGeometry.IsProjectionLocked = slot.ProjectionLocked;
-            geometryChanged = true;
+            objectChanged = true;
         }
-        if (geometryChanged)
+        if (detailLayerIndex is { } layerIndex && detail.Attributes.LayerIndex != layerIndex)
+        {
+            detail.Attributes.LayerIndex = layerIndex;
+            objectChanged = true;
+        }
+        if (objectChanged)
         {
             if (!detail.CommitChanges())
-                throw new InvalidOperationException($"Rhino did not commit detail geometry '{slot.Name}'.");
+                throw new InvalidOperationException($"Rhino did not commit detail properties for '{slot.Name}'.");
             detail = document.Objects.FindId(detail.Id) as DetailViewObject
                 ?? throw new InvalidOperationException($"Rhino could not find detail '{slot.Name}' after committing it.");
         }
@@ -1547,6 +1593,8 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
     }
 
     private sealed record DocumentStateUndoTag(string Description, DocumentState State);
+
+    private sealed record DetailLayerResolution(int LayerIndex, Guid LayerId, bool Created);
 
     private sealed record PagePropertiesBefore(
         RhinoPageView Page,

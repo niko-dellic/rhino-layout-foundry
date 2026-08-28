@@ -13,12 +13,10 @@ public sealed class ObserverFoundryPanel : Panel
 {
     private readonly ObserverCanvasDrawable _canvas;
     private readonly GridView _navigator;
-    private readonly ListBox _namedViews;
     private readonly Label _status;
     private readonly Label _zoomLabel;
-    private readonly CanvasToolbarIconButton _navigatorButton;
-    private readonly CanvasToolbarIconButton _namedViewsButton;
-    private readonly Control _namedViewsSidebar;
+    private readonly FoundryToolbarIconButton _navigatorButton;
+    private readonly FoundryToolbarIconButton _namedViewsButton;
     private readonly PixelLayout _canvasOverlay;
     private readonly Control _canvasToolbar;
     private readonly UITimer _overlayLayoutTimer;
@@ -26,6 +24,8 @@ public sealed class ObserverFoundryPanel : Panel
     private readonly UITimer _invalidationTimer;
     private readonly OverviewThumbnailCache _thumbnailCache = new(128, 64 * 1024 * 1024);
     private readonly OverviewThumbnailRequestQueue _thumbnailQueue = new();
+    private readonly Queue<NamedViewThumbnailRequest> _namedViewThumbnailQueue = new();
+    private readonly HashSet<NamedViewThumbnailKey> _pendingNamedViewThumbnails = [];
     private readonly Dictionary<Guid, long> _previewContentVersions = [];
     private readonly Dictionary<uint, ObserverCamera> _documentCameras = [];
     private readonly object _invalidationSyncRoot = new();
@@ -37,18 +37,21 @@ public sealed class ObserverFoundryPanel : Panel
     private bool _thumbnailCaptureInProgress;
     private bool _isLoaded;
     private bool _updatingNavigatorSelection;
-    private PointF? _namedViewDragStart;
-    private string? _namedViewDragName;
+    private uint? _pendingInitialFitDocumentSerial;
     private long _previewContentSequence;
+    private long _namedViewPreviewContentVersion;
+
+    private const int MinimumInitialFitViewportDimension = 96;
 
     internal event EventHandler? ExitFullscreenRequested;
+
+    internal event EventHandler<DeleteSelectionRequestedEventArgs>? DeleteSelectionRequested;
 
     public ObserverFoundryPanel()
     {
         BackgroundColor = FoundryTheme.PanelBackground;
         _canvas = new ObserverCanvasDrawable();
         _navigator = CreateNavigator();
-        _namedViews = new ListBox { ToolTip = "Drag a named view onto a detail viewport" };
         _status = FoundryTheme.MutedLabel();
         _zoomLabel = FoundryTheme.MutedLabel("100%");
         _zoomLabel.Width = 54;
@@ -63,36 +66,14 @@ public sealed class ObserverFoundryPanel : Panel
         _navigatorButton.Checked = true;
         _namedViewsButton = ToolbarToggleButton(FoundryViewIcons.NamedViews(), "Show or hide Named views");
         var openButton = ToolbarButton(FoundryViewIcons.OpenSelection(), "Open the selected layout or detail in Rhino");
-        var assignNamedViewButton = ToolbarButton("Assign to selection", "Assign the selected named view to every selected detail, layout, or folder");
         fitButton.Click += (_, _) => _canvas.FitAll();
         focusButton.Click += (_, _) => _canvas.FocusSelection();
         tidyButton.Click += async (_, _) => await TidyAsync();
         zoomOutButton.Click += (_, _) => _canvas.Zoom(1 / 1.2);
         zoomInButton.Click += (_, _) => _canvas.Zoom(1.2);
-        _navigatorButton.Click += (_, _) =>
-        {
-            if (_navigatorButton.Checked == true)
-                _namedViewsButton.Checked = false;
-            ApplySidebarVisibility();
-        };
-        _namedViewsButton.Click += (_, _) =>
-        {
-            if (_namedViewsButton.Checked == true)
-                _navigatorButton.Checked = false;
-            ApplySidebarVisibility();
-        };
+        _navigatorButton.Click += (_, _) => ApplySidebarVisibility();
+        _namedViewsButton.Click += (_, _) => ApplySidebarVisibility();
         openButton.Click += (_, _) => NavigateSelection();
-        assignNamedViewButton.Click += async (_, _) => await AssignSelectedNamedViewAsync();
-
-        var namedViewTools = new StackLayout
-        {
-            Spacing = FoundryTheme.Space2,
-            Items =
-            {
-                new StackLayoutItem(_namedViews, true),
-                assignNamedViewButton,
-            },
-        };
 
         _canvasToolbar = new StackLayout
         {
@@ -116,16 +97,6 @@ public sealed class ObserverFoundryPanel : Panel
             },
         };
 
-        _namedViewsSidebar = Sidebar(
-            "Named views",
-            namedViewTools,
-            "›",
-            "Collapse Named views",
-            () =>
-            {
-                _namedViewsButton.Checked = false;
-                ApplySidebarVisibility();
-            });
         _canvasOverlay = new PixelLayout
         {
             BackgroundColor = FoundryTheme.CanvasBackground,
@@ -140,16 +111,6 @@ public sealed class ObserverFoundryPanel : Panel
         _canvasOverlay.Add(_canvasToolbar, 0, 0);
         _canvasOverlay.SizeChanged += (_, _) => QueueCanvasOverlayLayout();
         ApplySidebarVisibility();
-        var board = new TableLayout
-        {
-            Spacing = new Size(FoundryTheme.Space2, 0),
-            Rows =
-            {
-                new TableRow(
-                    new TableCell(_canvasOverlay, true),
-                    new TableCell(_namedViewsSidebar, false)),
-            },
-        };
         Content = new StackLayout
         {
             Padding = new Padding(0),
@@ -157,7 +118,7 @@ public sealed class ObserverFoundryPanel : Panel
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Items =
             {
-                new StackLayoutItem(board, true),
+                new StackLayoutItem(_canvasOverlay, true),
                 _status,
             },
         };
@@ -165,8 +126,7 @@ public sealed class ObserverFoundryPanel : Panel
         _canvas.ViewChanged += (_, _) =>
         {
             _zoomLabel.Text = $"{_canvas.Camera.Zoom * 100:0}%";
-            if (_snapshot.HasDocument)
-                _documentCameras[_snapshot.DocumentRuntimeSerialNumber] = _canvas.Camera;
+            RememberCurrentCamera(_snapshot.DocumentRuntimeSerialNumber);
             QueueVisiblePreviews();
         };
         _canvas.SelectionRequested += (_, eventArgs) =>
@@ -186,8 +146,11 @@ public sealed class ObserverFoundryPanel : Panel
             await ReorderSelectionByStepAsync(eventArgs.Direction);
         _canvas.NamedViewRequested += async (_, eventArgs) =>
             await AssignNamedViewAsync(eventArgs);
+        _canvas.AssignNamedViewToSelectionRequested += async (_, eventArgs) =>
+            await AssignSelectedNamedViewAsync(eventArgs.NamedViewName);
+        _canvas.NamedViewPreviewsRequested += (_, _) => QueueNamedViewPreviews();
         _canvas.ContextRequested += (_, eventArgs) => ShowContextMenu(eventArgs.ControlPoint);
-        _canvas.DeleteRequested += async (_, _) => await DeleteSelectionAsync();
+        _canvas.DeleteRequested += (_, _) => RequestDeleteSelection();
         _canvas.TidyRequested += async (_, _) => await TidyAsync();
         _canvas.ExitWorkspaceRequested += (_, _) => ExitFullscreenRequested?.Invoke(this, EventArgs.Empty);
         _canvas.FolderDraftRequested += async (_, eventArgs) =>
@@ -213,25 +176,16 @@ public sealed class ObserverFoundryPanel : Panel
             _canvas.FocusSelection();
             eventArgs.Handled = true;
         };
-        _namedViews.MouseDown += (_, eventArgs) =>
-        {
-            _namedViewDragStart = eventArgs.Location;
-            _namedViewDragName = _namedViews.SelectedValue as string;
-        };
-        _namedViews.MouseMove += OnNamedViewMouseMove;
-        _namedViews.MouseUp += (_, _) =>
-        {
-            _namedViewDragStart = null;
-            _namedViewDragName = null;
-        };
-
         _thumbnailTimer = new UITimer { Interval = 0.06 };
         _thumbnailTimer.Elapsed += async (_, _) => await CaptureNextThumbnailAsync();
         _invalidationTimer = new UITimer { Interval = 0.12 };
         _invalidationTimer.Elapsed += OnInvalidationTimer;
         Load += OnLoaded;
         UnLoad += OnUnloaded;
-        RefreshSnapshot(fit: true);
+        // The panel has no meaningful viewport during construction. Fitting here would
+        // clamp the camera to its minimum zoom and incorrectly remember that provisional
+        // view. OnLoaded defers the first fit until the canvas has real dimensions.
+        RefreshSnapshot(fit: false);
     }
 
     internal void SetFullscreenState(bool fullscreen)
@@ -289,7 +243,7 @@ public sealed class ObserverFoundryPanel : Panel
     private void ApplySidebarVisibility()
     {
         _canvas.SetNavigatorVisible(_navigatorButton.Checked);
-        _namedViewsSidebar.Visible = _namedViewsButton.Checked == true;
+        _canvas.SetNamedViewsVisible(_namedViewsButton.Checked);
         UpdateCanvasOverlayLayout();
     }
 
@@ -302,6 +256,8 @@ public sealed class ObserverFoundryPanel : Panel
         _canvas.Size = clientSize;
         _canvasToolbar.Size = new Size(clientSize.Width, 28);
         _canvasOverlay.Move(_canvasToolbar, 0, 0);
+        TryApplyPendingInitialFit(clientSize);
+        QueueNamedViewPreviews();
     }
 
     private void QueueCanvasOverlayLayout()
@@ -322,10 +278,10 @@ public sealed class ObserverFoundryPanel : Panel
         return button;
     }
 
-    private static CanvasToolbarIconButton ToolbarButton(Bitmap image, string toolTip) =>
-        new(image, toolTip, isToggle: false);
+    private static FoundryToolbarIconButton ToolbarButton(Image image, string toolTip) =>
+        new(image, toolTip);
 
-    private static CanvasToolbarIconButton ToolbarToggleButton(Bitmap image, string toolTip) =>
+    private static FoundryToolbarIconButton ToolbarToggleButton(Image image, string toolTip) =>
         new(image, toolTip, isToggle: true);
 
     private static Control ToolbarSeparator() => new Panel
@@ -460,6 +416,9 @@ public sealed class ObserverFoundryPanel : Panel
             if (_snapshot.HasDocument)
                 _thumbnailCache.Invalidate(_snapshot.DocumentRuntimeSerialNumber,
                     affectedSheetIds.Count == 0 ? null : affectedSheetIds);
+            _namedViewPreviewContentVersion++;
+            _canvas.InvalidateNamedViewPreviews();
+            ClearNamedViewPreviewRequests();
         }
 
         RefreshSnapshot(fit: invalidation.Kind.HasFlag(OverviewInvalidationKind.DocumentIdentity));
@@ -467,9 +426,9 @@ public sealed class ObserverFoundryPanel : Panel
 
     private void RefreshSnapshot(bool fit)
     {
+        var previousNamedViews = _snapshot.NamedViews.ToArray();
         var previousSerial = _snapshot.DocumentRuntimeSerialNumber;
-        if (_snapshot.HasDocument)
-            _documentCameras[previousSerial] = _canvas.Camera;
+        RememberCurrentCamera(previousSerial);
         var next = LayoutFoundryUiHost.CaptureObserverSnapshot();
         var documentChanged = previousSerial != next.DocumentRuntimeSerialNumber;
         if (documentChanged)
@@ -479,6 +438,7 @@ public sealed class ObserverFoundryPanel : Panel
             if (previousSerial != 0) _thumbnailCache.Invalidate(previousSerial);
             _previewContentVersions.Clear();
             _previewContentSequence = 0;
+            _namedViewPreviewContentVersion++;
         }
 
         var currentSheetIds = next.Sheets.Select(sheet => sheet.PageViewId).ToHashSet();
@@ -498,22 +458,79 @@ public sealed class ObserverFoundryPanel : Panel
                 })
                 .ToArray(),
         };
-        ObserverCamera? savedCamera = null;
-        var restoreCamera = documentChanged &&
-                            _documentCameras.TryGetValue(_snapshot.DocumentRuntimeSerialNumber, out savedCamera);
-        _canvas.SetSnapshot(_snapshot, (fit || documentChanged) && !restoreCamera);
-        if (restoreCamera) _canvas.SetCamera(savedCamera!);
+        if (!previousNamedViews.SequenceEqual(_snapshot.NamedViews, StringComparer.OrdinalIgnoreCase))
+        {
+            _namedViewPreviewContentVersion++;
+            _canvas.InvalidateNamedViewPreviews();
+            ClearNamedViewPreviewRequests();
+        }
+        ObserverCamera? rememberedCamera = null;
+        var hasRememberedCamera = _snapshot.HasDocument &&
+                                  _documentCameras.TryGetValue(
+                                      _snapshot.DocumentRuntimeSerialNumber,
+                                      out rememberedCamera);
+        _canvas.SetSnapshot(_snapshot, fit: false);
+        if (hasRememberedCamera)
+        {
+            _pendingInitialFitDocumentSerial = null;
+            _canvas.SetCamera(rememberedCamera!);
+        }
+        else if (_snapshot.HasDocument && (fit || documentChanged))
+        {
+            _pendingInitialFitDocumentSerial = _snapshot.DocumentRuntimeSerialNumber;
+        }
+        else if (!_snapshot.HasDocument)
+        {
+            _pendingInitialFitDocumentSerial = null;
+        }
         _canvas.SetSelection(LayoutFoundryUiHost.Selection.DocumentRuntimeSerialNumber ==
                              (_snapshot.HasDocument ? _snapshot.DocumentRuntimeSerialNumber : null)
             ? LayoutFoundryUiHost.Selection.Selected
             : []);
         PopulateNavigator();
-        _namedViews.DataStore = _snapshot.NamedViews.ToArray();
         _status.Text = !_snapshot.HasDocument
             ? "No active Rhino document"
             : $"{_snapshot.Sheets.Count} layouts  ·  {_snapshot.Sheets.Sum(sheet => sheet.Details.Count)} details  ·  {_snapshot.NamedViews.Count} named views";
+        if (_pendingInitialFitDocumentSerial is not null)
+        {
+            TryApplyPendingInitialFit(_canvasOverlay.ClientSize);
+            QueueCanvasOverlayLayout();
+        }
         QueueVisiblePreviews();
+        QueueNamedViewPreviews();
     }
+
+    private void RememberCurrentCamera(uint documentSerial)
+    {
+        if (!_isLoaded ||
+            !_snapshot.HasDocument ||
+            documentSerial == 0 ||
+            _pendingInitialFitDocumentSerial == documentSerial ||
+            !CanvasViewportIsReady(_canvasOverlay.ClientSize))
+            return;
+
+        _documentCameras[documentSerial] = _canvas.Camera;
+    }
+
+    private void TryApplyPendingInitialFit(Size viewportSize)
+    {
+        if (!_isLoaded ||
+            _pendingInitialFitDocumentSerial is not { } documentSerial ||
+            !_snapshot.HasDocument ||
+            documentSerial != _snapshot.DocumentRuntimeSerialNumber ||
+            !CanvasViewportIsReady(viewportSize) ||
+            _canvas.BoardLayout.Bounds.IsEmpty)
+            return;
+
+        // Clear the pending marker first so the ViewChanged notification produced by
+        // FitAll records this valid camera for subsequent visits to this document.
+        _pendingInitialFitDocumentSerial = null;
+        _canvas.FitAll();
+    }
+
+    private static bool CanvasViewportIsReady(Size viewportSize) =>
+        viewportSize.Width >= MinimumInitialFitViewportDimension &&
+        viewportSize.Height >= MinimumInitialFitViewportDimension;
 
     private void PopulateNavigator()
     {
@@ -557,21 +574,6 @@ public sealed class ObserverFoundryPanel : Panel
             (_snapshot.HasDocument ? _snapshot.DocumentRuntimeSerialNumber : null)) return;
         _canvas.SetSelection(eventArgs.Selection);
         if (!ReferenceEquals(eventArgs.Source, this)) PopulateNavigator();
-    }
-
-    private void OnNamedViewMouseMove(object? sender, MouseEventArgs eventArgs)
-    {
-        if (_namedViewDragStart is not { } start ||
-            string.IsNullOrWhiteSpace(_namedViewDragName) ||
-            !eventArgs.Buttons.HasFlag(MouseButtons.Primary) ||
-            Math.Abs(eventArgs.Location.X - start.X) + Math.Abs(eventArgs.Location.Y - start.Y) < 6)
-            return;
-        var data = new DataObject();
-        data.SetString(_namedViewDragName, ObserverCanvasDrawable.NamedViewDragType);
-        _namedViews.DoDragDrop(data, DragEffects.Copy);
-        _namedViewDragStart = null;
-        _namedViewDragName = null;
-        eventArgs.Handled = true;
     }
 
     private void QueueVisiblePreviews()
@@ -629,8 +631,11 @@ public sealed class ObserverFoundryPanel : Panel
     private async Task CaptureNextThumbnailAsync()
     {
         if (_thumbnailCaptureInProgress) return;
-        var request = _thumbnailQueue.TakeNext();
-        if (request is null)
+        var namedViewRequest = _canvas.NamedViewsUseThumbnails && _namedViewThumbnailQueue.Count > 0
+            ? _namedViewThumbnailQueue.Dequeue()
+            : null;
+        var request = namedViewRequest is null ? _thumbnailQueue.TakeNext() : null;
+        if (request is null && namedViewRequest is null)
         {
             _thumbnailTimer.Stop();
             return;
@@ -639,25 +644,72 @@ public sealed class ObserverFoundryPanel : Panel
         _thumbnailCaptureInProgress = true;
         try
         {
-            var result = await LayoutFoundryUiHost.CaptureThumbnailAsync(
-                request,
-                _thumbnailCancellation.Token);
-            var sheet = _snapshot.Sheets.FirstOrDefault(candidate =>
-                candidate.PageViewId == request.Key.SheetPageViewId);
-            if (result.Succeeded &&
-                sheet is not null &&
-                sheet.PreviewContentVersion == request.Key.ContentVersion &&
-                _snapshot.DocumentRuntimeSerialNumber == request.Key.DocumentRuntimeSerialNumber)
+            if (namedViewRequest is not null)
             {
-                _thumbnailCache.Store(result.Key, result.PngBytes!);
-                _canvas.SetPreview(result.Key, new Bitmap(result.PngBytes!));
+                var namedResult = await LayoutFoundryUiHost.CaptureNamedViewThumbnailAsync(
+                    namedViewRequest,
+                    _thumbnailCancellation.Token);
+                if (namedResult.Succeeded &&
+                    namedViewRequest.Key.ContentVersion == _namedViewPreviewContentVersion &&
+                    _snapshot.DocumentRuntimeSerialNumber == namedViewRequest.Key.DocumentRuntimeSerialNumber &&
+                    _snapshot.NamedViews.Contains(namedViewRequest.Key.NamedViewName))
+                {
+                    _canvas.SetNamedViewPreview(
+                        namedResult.Key.NamedViewName,
+                        namedResult.Key.ContentVersion,
+                        new Bitmap(namedResult.PngBytes!));
+                }
+            }
+            else if (request is not null)
+            {
+                var result = await LayoutFoundryUiHost.CaptureThumbnailAsync(
+                    request,
+                    _thumbnailCancellation.Token);
+                var sheet = _snapshot.Sheets.FirstOrDefault(candidate =>
+                    candidate.PageViewId == request.Key.SheetPageViewId);
+                if (result.Succeeded &&
+                    sheet is not null &&
+                    sheet.PreviewContentVersion == request.Key.ContentVersion &&
+                    _snapshot.DocumentRuntimeSerialNumber == request.Key.DocumentRuntimeSerialNumber)
+                {
+                    _thumbnailCache.Store(result.Key, result.PngBytes!);
+                    _canvas.SetPreview(result.Key, new Bitmap(result.PngBytes!));
+                }
             }
         }
         finally
         {
-            _thumbnailQueue.Complete(request.Key);
+            if (request is not null) _thumbnailQueue.Complete(request.Key);
+            if (namedViewRequest is not null)
+                _pendingNamedViewThumbnails.Remove(namedViewRequest.Key);
             _thumbnailCaptureInProgress = false;
         }
+    }
+
+    private void QueueNamedViewPreviews()
+    {
+        if (!_snapshot.HasDocument || !_canvas.NamedViewsUseThumbnails) return;
+        foreach (var name in _canvas.VisibleNamedViews())
+        {
+            if (_canvas.HasNamedViewPreview(name, _namedViewPreviewContentVersion)) continue;
+            var key = new NamedViewThumbnailKey(
+                _snapshot.DocumentRuntimeSerialNumber,
+                name,
+                192,
+                120,
+                _namedViewPreviewContentVersion);
+            if (!_pendingNamedViewThumbnails.Add(key)) continue;
+            _namedViewThumbnailQueue.Enqueue(new NamedViewThumbnailRequest(key));
+        }
+
+        if (_namedViewThumbnailQueue.Count > 0 && !_thumbnailTimer.Started)
+            _thumbnailTimer.Start();
+    }
+
+    private void ClearNamedViewPreviewRequests()
+    {
+        _namedViewThumbnailQueue.Clear();
+        _pendingNamedViewThumbnails.Clear();
     }
 
     private void ResetThumbnailCapture()
@@ -667,6 +719,7 @@ public sealed class ObserverFoundryPanel : Panel
         _thumbnailCancellation.Dispose();
         _thumbnailCancellation = new CancellationTokenSource();
         _thumbnailQueue.Clear();
+        ClearNamedViewPreviewRequests();
         _thumbnailCaptureInProgress = false;
     }
 
@@ -726,9 +779,9 @@ public sealed class ObserverFoundryPanel : Panel
         if (result.Succeeded) RefreshSnapshot(fit: false);
     }
 
-    private async Task AssignSelectedNamedViewAsync()
+    private async Task AssignSelectedNamedViewAsync(string namedViewName)
     {
-        if (_namedViews.SelectedValue is not string namedViewName || string.IsNullOrWhiteSpace(namedViewName))
+        if (string.IsNullOrWhiteSpace(namedViewName))
         {
             _status.Text = "Choose a named view first.";
             return;
@@ -821,7 +874,7 @@ public sealed class ObserverFoundryPanel : Panel
         open.Click += (_, _) => NavigateSelection();
         properties.Click += (_, _) => OpenBatchProperties();
         duplicate.Click += async (_, _) => await DuplicateSelectionAsync();
-        delete.Click += async (_, _) => await DeleteSelectionAsync();
+        delete.Click += (_, _) => RequestDeleteSelection();
         include.Click += async (_, _) => await SetPrintInclusionAsync(true);
         exclude.Click += async (_, _) => await SetPrintInclusionAsync(false);
         moveEarlier.Click += async (_, _) => await ReorderSelectionByStepAsync(-1);
@@ -954,39 +1007,16 @@ public sealed class ObserverFoundryPanel : Panel
         if (result.Succeeded) RefreshSnapshot(fit: false);
     }
 
-    private async Task DeleteSelectionAsync()
+    private void RequestDeleteSelection()
     {
         var selection = LayoutFoundryUiHost.Selection.Selected
             .Where(key => key.Kind != OverviewNodeKind.Detail &&
                           !(key.Kind == OverviewNodeKind.Folder && key.Id == _snapshot.RootFolderId))
             .ToArray();
         if (selection.Length == 0) return;
-        var document = LayoutFoundryUiHost.CaptureSnapshot();
-        if (document is null) return;
-        var resolved = HierarchySelectionResolver.Resolve(document, selection);
-        var sheetCount = resolved.AllSheetPageViewIds.Count;
-        if (sheetCount > 0)
-        {
-            var folderCount = resolved.ExpandedFolderIds.Count;
-            var summary = folderCount > 0
-                ? $"{folderCount} folder{(folderCount == 1 ? string.Empty : "s")} and {sheetCount} Rhino layout{(sheetCount == 1 ? string.Empty : "s")}"
-                : $"{sheetCount} Rhino layout{(sheetCount == 1 ? string.Empty : "s")}";
-            var answer = MessageBox.Show(
-                this,
-                $"Permanently delete {summary}?\n\nLayout deletion cannot be undone.",
-                "Delete layouts and folders",
-                MessageBoxButtons.YesNo,
-                MessageBoxType.Warning,
-                MessageBoxDefaultButton.No);
-            if (answer != DialogResult.Yes) return;
-        }
-        var result = await LayoutFoundryUiHost.DeleteSelectionAsync(selection);
-        _status.Text = ResultMessage(result, "Selection deleted.");
-        if (result.Succeeded)
-        {
-            LayoutFoundryUiHost.Selection.Clear(_snapshot.DocumentRuntimeSerialNumber, this);
-            RefreshSnapshot(fit: false);
-        }
+        DeleteSelectionRequested?.Invoke(
+            this,
+            new DeleteSelectionRequestedEventArgs(selection));
     }
 
     private async Task SetPrintInclusionAsync(bool include)
@@ -1115,105 +1145,4 @@ public sealed class ObserverFoundryPanel : Panel
     }
 
     private sealed record NavigatorRow(OverviewNodeKey Key, string Label);
-}
-
-internal sealed class CanvasToolbarIconButton : Drawable
-{
-    private readonly Bitmap _image;
-    private readonly bool _isToggle;
-    private bool _checked;
-    private bool _hovered;
-    private bool _pressed;
-
-    internal CanvasToolbarIconButton(Bitmap image, string toolTip, bool isToggle)
-        : base(true)
-    {
-        _image = image;
-        _isToggle = isToggle;
-        Size = new Size(28, 28);
-        BackgroundColor = Colors.Transparent;
-        CanFocus = true;
-        ToolTip = toolTip;
-        Paint += OnPaint;
-        MouseEnter += (_, _) =>
-        {
-            _hovered = true;
-            Invalidate();
-        };
-        MouseLeave += (_, _) =>
-        {
-            _hovered = false;
-            _pressed = false;
-            Invalidate();
-        };
-        MouseDown += (_, eventArgs) =>
-        {
-            if (!eventArgs.Buttons.HasFlag(MouseButtons.Primary)) return;
-            Focus();
-            _pressed = true;
-            eventArgs.Handled = true;
-            Invalidate();
-        };
-        MouseUp += (_, eventArgs) =>
-        {
-            if (!_pressed) return;
-            _pressed = false;
-            Activate();
-            eventArgs.Handled = true;
-        };
-        KeyDown += (_, eventArgs) =>
-        {
-            if (eventArgs.Key is not (Keys.Enter or Keys.Space)) return;
-            Activate();
-            eventArgs.Handled = true;
-        };
-    }
-
-    internal event EventHandler? Click;
-
-    internal bool Checked
-    {
-        get => _checked;
-        set
-        {
-            if (_checked == value) return;
-            _checked = value;
-            Invalidate();
-        }
-    }
-
-    private void Activate()
-    {
-        if (_isToggle) Checked = !Checked;
-        Click?.Invoke(this, EventArgs.Empty);
-        Invalidate();
-    }
-
-    private void OnPaint(object? sender, PaintEventArgs eventArgs)
-    {
-        if (_hovered || _pressed)
-        {
-            eventArgs.Graphics.FillRectangle(
-                FoundryTheme.WithAlpha(FoundryTheme.CanvasSubtleSurface, _pressed ? 150 : 90),
-                1,
-                1,
-                Math.Max(0, Width - 2),
-                Math.Max(0, Height - 2));
-        }
-
-        var imageSize = _image.Size;
-        eventArgs.Graphics.DrawImage(
-            _image,
-            (Width - imageSize.Width) / 2f,
-            (Height - imageSize.Height) / 2f);
-        if (Checked)
-        {
-            eventArgs.Graphics.FillRectangle(
-                FoundryTheme.SelectionAccent,
-                5,
-                Height - 2,
-                Math.Max(0, Width - 10),
-                2);
-        }
-    }
 }

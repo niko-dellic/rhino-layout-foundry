@@ -18,7 +18,9 @@ public sealed class LayoutFoundryPanel : Panel
     private readonly Label _statusLabel;
     private readonly SearchBox _filterTextBox;
     private readonly DropDown _filterKindDropDown;
-    private readonly Button _clearFilterButton;
+    private readonly FoundryToolbarIconButton _clearFilterButton;
+    private readonly FoundryToolbarField _searchField;
+    private readonly FoundryToolbarField _filterKindField;
     private readonly TextBox _renameTextBox;
     private readonly Button _renameButton;
     private readonly Label _folderDraftDestinationLabel;
@@ -26,16 +28,16 @@ public sealed class LayoutFoundryPanel : Panel
     private readonly Button _folderDraftCreateButton;
     private readonly Button _folderDraftCancelButton;
     private readonly Panel _folderDraftStrip;
-    private readonly Button _manageButton;
-    private readonly Button _addFolderButton;
-    private readonly Button _batchCreateButton;
-    private readonly Button _deleteButton;
-    private readonly Button _importButton;
-    private readonly Button _exportButton;
-    private readonly ToggleButton _listViewButton;
-    private readonly ToggleButton _thumbnailViewButton;
-    private readonly ToggleButton _canvasViewButton;
-    private readonly Button _fullscreenButton;
+    private readonly FoundryToolbarIconButton _manageButton;
+    private readonly FoundryToolbarIconButton _addFolderButton;
+    private readonly FoundryToolbarIconButton _batchCreateButton;
+    private readonly FoundryToolbarIconButton _deleteButton;
+    private readonly FoundryToolbarIconButton _importButton;
+    private readonly FoundryToolbarIconButton _exportButton;
+    private readonly FoundryToolbarIconButton _listViewButton;
+    private readonly FoundryToolbarIconButton _thumbnailViewButton;
+    private readonly FoundryToolbarIconButton _canvasViewButton;
+    private readonly FoundryToolbarIconButton _fullscreenButton;
     private readonly bool _usesMacSafeHierarchy = OperatingSystem.IsMacOS();
     private readonly TreeGridView _treeGrid;
     private readonly GridColumn _layoutsColumn;
@@ -44,8 +46,8 @@ public sealed class LayoutFoundryPanel : Panel
     private readonly GridColumn _paperColumn;
     private readonly GridColumn _detailsColumn;
     private readonly GridColumn _displayModeColumn;
-    private readonly ComboBoxCell _paperCell;
-    private readonly ComboBoxCell _displayModeCell;
+    private readonly TextBoxCell _paperCell;
+    private readonly TextBoxCell _displayModeCell;
     private readonly Panel _contentHost;
     private readonly Panel _toolbarSurface;
     private readonly Panel _renameActions;
@@ -54,6 +56,8 @@ public sealed class LayoutFoundryPanel : Panel
     private readonly ObserverFoundryPanel _observerView;
     private readonly Panel _viewHost;
     private readonly Control _panelShell;
+    private readonly PixelLayout _panelOverlayHost;
+    private readonly DeleteConfirmationOverlay _deleteConfirmationOverlay;
     private ButtonMenuItem _setCurrentMenuItem = null!;
     private ButtonMenuItem _newFolderMenuItem = null!;
     private ButtonMenuItem _newPageMenuItem = null!;
@@ -96,6 +100,7 @@ public sealed class LayoutFoundryPanel : Panel
     private PointF? _dragStart;
     private HierarchyTreeItem? _dragSourceItem;
     private IReadOnlyList<OverviewNodeKey> _dragSourceKeys = [];
+    private IReadOnlyList<OverviewNodeKey> _propertyInteractionTargets = [];
     private CellInteractionGuard? _cellInteractionGuard;
     private InlineDraft? _inlineDraft;
     private Guid? _contextDestinationFolderId;
@@ -103,6 +108,8 @@ public sealed class LayoutFoundryPanel : Panel
     private Guid? _folderDraftId;
     private Guid? _folderDraftParentId;
     private Form? _fullscreenWindow;
+    private PendingDeleteSelection? _pendingDeleteSelection;
+    private bool _deleteInProgress;
     private FoundryPanelViewMode _viewMode = FoundryPanelViewMode.List;
 
     public LayoutFoundryPanel()
@@ -125,20 +132,25 @@ public sealed class LayoutFoundryPanel : Panel
         {
             PlaceholderText = "Search",
             ToolTip = "Search layouts, folders, and details",
+            ShowBorder = false,
+            BackgroundColor = Colors.Transparent,
         };
         _filterKindDropDown = new DropDown
         {
             ToolTip = "Choose which layout rows to show",
-            Width = 108,
+            ShowBorder = false,
+            BackgroundColor = Colors.Transparent,
             DataStore = new[] { "All rows", "Sheets", "Details" },
             SelectedIndex = 0,
         };
-        _clearFilterButton = FoundryTheme.ConfigureToolbarButton(new Button
+        _searchField = new FoundryToolbarField(_filterTextBox, 240);
+        _filterKindField = new FoundryToolbarField(_filterKindDropDown, 96);
+        _clearFilterButton = new FoundryToolbarIconButton(
+            FoundryViewIcons.Close(),
+            "Clear search and row filter")
         {
-            Text = "×",
-            ToolTip = "Clear search and row filter",
             Visible = false,
-        });
+        };
         _renameTextBox = new TextBox
         {
             PlaceholderText = "Sheet name",
@@ -155,72 +167,64 @@ public sealed class LayoutFoundryPanel : Panel
             CreateFolderDraftContent(),
             new Padding(FoundryTheme.Space2));
         _folderDraftStrip.Visible = false;
-        _addFolderButton = FoundryTheme.ConfigureToolbarButton(new Button
+        _addFolderButton = new FoundryToolbarIconButton(
+            FoundryViewIcons.NewFolder(),
+            "New folder")
         {
-            Image = FoundryViewIcons.NewFolder(),
-            ToolTip = "New folder",
             Enabled = false,
-        });
-        _batchCreateButton = FoundryTheme.ConfigureToolbarButton(new Button
-        {
-            Image = FoundryViewIcons.NewLayout(),
-            ToolTip = "New layout",
-            Enabled = false,
-        });
-        _manageButton = FoundryTheme.ConfigureToolbarButton(new Button
-        {
-            Image = FoundryViewIcons.Properties(),
-            ToolTip = "Edit selected properties",
-            Enabled = false,
-        });
-        _deleteButton = FoundryTheme.ConfigureToolbarButton(new Button
-        {
-            Image = FoundryViewIcons.Delete(),
-            ToolTip = "Delete selected items",
-            Enabled = false,
-        });
-        _importButton = FoundryTheme.ConfigureToolbarButton(new Button
-        {
-            Image = FoundryViewIcons.ImportPackage(),
-            ToolTip = "Import layout package",
-            Enabled = false,
-        });
-        _exportButton = FoundryTheme.ConfigureToolbarButton(new Button
-        {
-            Image = FoundryViewIcons.ExportPackage(),
-            ToolTip = "Export layout package",
-            Enabled = false,
-        });
-        _listViewButton = new ToggleButton
-        {
-            Text = "☷",
-            ToolTip = "List view",
         };
-        _canvasViewButton = new ToggleButton
+        _batchCreateButton = new FoundryToolbarIconButton(
+            FoundryViewIcons.NewLayout(),
+            "New layout")
         {
-            Image = FoundryViewIcons.CartesianPlane(),
-            ToolTip = "Canvas view (spatial board)",
+            Enabled = false,
         };
-        _thumbnailViewButton = new ToggleButton
+        _manageButton = new FoundryToolbarIconButton(
+            FoundryViewIcons.Properties(),
+            "Edit selected properties")
         {
-            Image = FoundryViewIcons.ThumbnailStack(),
-            ToolTip = "Thumbnail view (page grid)",
+            Enabled = false,
         };
-        FoundryTheme.ConfigureToolbarButton(_listViewButton);
-        FoundryTheme.ConfigureToolbarButton(_thumbnailViewButton);
-        FoundryTheme.ConfigureToolbarButton(_canvasViewButton);
-        _fullscreenButton = FoundryTheme.ConfigureToolbarButton(new Button
+        _deleteButton = new FoundryToolbarIconButton(
+            FoundryViewIcons.Delete(),
+            "Delete selected items")
         {
-            Text = "⛶",
-            ToolTip = "Expand the current view to a maximized workspace",
-        });
-        _paperCell = new ComboBoxCell(nameof(HierarchyTreeItem.PaperText))
-        {
-            DataStore = PaperSizeChoices.Select(choice => choice.Label).ToArray(),
+            Enabled = false,
         };
-        _displayModeCell = new ComboBoxCell(nameof(HierarchyTreeItem.DisplayModeText))
+        _importButton = new FoundryToolbarIconButton(
+            FoundryViewIcons.ImportPackage(),
+            "Import layout package")
         {
-            DataStore = new[] { "—" },
+            Enabled = false,
+        };
+        _exportButton = new FoundryToolbarIconButton(
+            FoundryViewIcons.ExportPackage(),
+            "Export layout package")
+        {
+            Enabled = false,
+        };
+        _listViewButton = new FoundryToolbarIconButton(
+            FoundryViewIcons.ListView(),
+            "List view",
+            isToggle: true);
+        _canvasViewButton = new FoundryToolbarIconButton(
+            FoundryViewIcons.CartesianPlane(),
+            "Canvas view (spatial board)",
+            isToggle: true);
+        _thumbnailViewButton = new FoundryToolbarIconButton(
+            FoundryViewIcons.ThumbnailStack(),
+            "Thumbnail view (page grid)",
+            isToggle: true);
+        _fullscreenButton = new FoundryToolbarIconButton(
+            FoundryViewIcons.Fullscreen(),
+            "Expand the current view to a maximized workspace");
+        _paperCell = new TextBoxCell
+        {
+            Binding = Binding.Property<HierarchyTreeItem, string>(item => item.PaperCellText),
+        };
+        _displayModeCell = new TextBoxCell
+        {
+            Binding = Binding.Property<HierarchyTreeItem, string>(item => item.DisplayModeCellText),
         };
         (_treeGrid, _layoutsColumn, _printColumn, _templateColumn, _paperColumn, _detailsColumn,
             _displayModeColumn) = CreateTreeGrid();
@@ -244,6 +248,8 @@ public sealed class LayoutFoundryPanel : Panel
         _thumbnailView = new ThumbnailFoundryPanel();
         _observerView = new ObserverFoundryPanel();
         _observerView.ExitFullscreenRequested += (_, _) => ExitFullscreen();
+        _thumbnailView.DeleteSelectionRequested += OnDeleteSelectionRequested;
+        _observerView.DeleteSelectionRequested += OnDeleteSelectionRequested;
         _viewHost = new Panel { Content = _managementView };
         _panelShell = new StackLayout
         {
@@ -260,7 +266,18 @@ public sealed class LayoutFoundryPanel : Panel
                 _statusLabel,
             },
         };
-        Content = _panelShell;
+        _deleteConfirmationOverlay = new DeleteConfirmationOverlay();
+        _deleteConfirmationOverlay.CancelRequested += (_, _) => CancelDeleteConfirmation();
+        _deleteConfirmationOverlay.ConfirmRequested += async (_, _) =>
+            await ConfirmDeleteSelectionAsync();
+        _panelOverlayHost = new PixelLayout
+        {
+            BackgroundColor = FoundryTheme.PanelBackground,
+        };
+        _panelOverlayHost.Add(_panelShell, 0, 0);
+        _panelOverlayHost.Add(_deleteConfirmationOverlay, 0, 0);
+        _panelOverlayHost.SizeChanged += (_, _) => LayoutPanelOverlay();
+        Content = _panelOverlayHost;
         UpdateViewModeButtons(FoundryPanelViewMode.List);
 
         _treeGrid.SelectedItemChanged += OnSelectionChanged;
@@ -273,7 +290,6 @@ public sealed class LayoutFoundryPanel : Panel
         _treeGrid.DragDrop += async (_, eventArgs) => await CompleteInternalDragAsync(eventArgs);
         _treeGrid.DragEnd += (_, _) => ResetPendingDrag();
         _treeGrid.CellClick += async (_, eventArgs) => await OnTreeCellClickAsync(eventArgs);
-        _treeGrid.CellEditing += OnTreeCellEditing;
         _treeGrid.CellEdited += async (_, eventArgs) => await OnTreeCellEditedAsync(eventArgs);
         _treeGrid.ColumnHeaderClick += (_, eventArgs) => OnColumnHeaderClick(eventArgs);
         _treeGrid.Collapsed += (_, eventArgs) =>
@@ -290,7 +306,7 @@ public sealed class LayoutFoundryPanel : Panel
         _addFolderButton.Click += (_, _) => BeginFolderCreationForCurrentView();
         _batchCreateButton.Click += (_, _) => OpenCreateLayouts(ResolveCreationDestinationFolderId());
         _manageButton.Click += (_, _) => OpenBatchProperties();
-        _deleteButton.Click += async (_, _) => await DeleteSelectionAsync();
+        _deleteButton.Click += (_, _) => RequestDeleteSelection(SelectedKeys());
         _importButton.Click += async (_, _) => await ImportLayoutPackageAsync();
         _exportButton.Click += async (_, _) => await ExportLayoutPackageAsync();
         _listViewButton.Click += (_, _) => ShowListView();
@@ -389,7 +405,7 @@ public sealed class LayoutFoundryPanel : Panel
             HeaderText = "Paper size",
             DataCell = _paperCell,
             Width = 178,
-            Editable = true,
+            Editable = false,
             Sortable = true,
         };
         treeGrid.Columns.Add(paperColumn);
@@ -409,7 +425,7 @@ public sealed class LayoutFoundryPanel : Panel
             HeaderText = "Display mode",
             DataCell = _displayModeCell,
             Width = 175,
-            Editable = true,
+            Editable = false,
             Sortable = true,
         };
         treeGrid.Columns.Add(displayModeColumn);
@@ -615,6 +631,7 @@ public sealed class LayoutFoundryPanel : Panel
         _listViewButton.Checked = mode == FoundryPanelViewMode.List;
         _thumbnailViewButton.Checked = mode == FoundryPanelViewMode.Thumbnail;
         _canvasViewButton.Checked = mode == FoundryPanelViewMode.Canvas;
+        _fullscreenButton.Checked = _fullscreenWindow is not null;
         _fullscreenButton.ToolTip = _fullscreenWindow is null
             ? $"Expand {ViewModeLabel(mode)} to a maximized workspace"
             : "Return Layout Foundry to the Rhino panel (Esc)";
@@ -664,10 +681,10 @@ public sealed class LayoutFoundryPanel : Panel
             BackgroundColor = FoundryTheme.PanelBackground,
             MinimumSize = new Size(720, 480),
             WindowState = WindowState.Maximized,
-            Content = _panelShell,
+            Content = _panelOverlayHost,
         };
         _fullscreenWindow = window;
-        _fullscreenButton.Text = "⤡";
+        _fullscreenButton.Image = FoundryViewIcons.ExitFullscreen();
         _observerView.SetFullscreenState(true);
         UpdateViewModeButtons(_viewMode);
         window.KeyDown += (_, eventArgs) =>
@@ -676,6 +693,12 @@ public sealed class LayoutFoundryPanel : Panel
                 return;
 
             eventArgs.Handled = true;
+            if (_pendingDeleteSelection is not null)
+            {
+                CancelDeleteConfirmation();
+                return;
+            }
+
             window.Close();
         };
         window.Closing += (_, _) => RestoreFromFullscreen(window);
@@ -694,10 +717,22 @@ public sealed class LayoutFoundryPanel : Panel
 
         window.Content = null;
         _fullscreenWindow = null;
-        _fullscreenButton.Text = "⛶";
+        _fullscreenButton.Image = FoundryViewIcons.Fullscreen();
         _observerView.SetFullscreenState(false);
-        Content = _panelShell;
+        Content = _panelOverlayHost;
         UpdateViewModeButtons(_viewMode);
+    }
+
+    private void LayoutPanelOverlay()
+    {
+        var size = _panelOverlayHost.ClientSize;
+        if (size.Width <= 0 || size.Height <= 0)
+            return;
+
+        _panelShell.Size = size;
+        _deleteConfirmationOverlay.Size = size;
+        _panelOverlayHost.Move(_panelShell, 0, 0);
+        _panelOverlayHost.Move(_deleteConfirmationOverlay, 0, 0);
     }
 
     private static string ViewModeLabel(FoundryPanelViewMode mode) => mode switch
@@ -709,6 +744,8 @@ public sealed class LayoutFoundryPanel : Panel
 
     private Control CreateToolbarContent()
     {
+        _searchField.Width = _responsiveLayout.StackToolbar ? 180 : 240;
+        _filterKindField.Width = _responsiveLayout.StackToolbar ? 84 : 96;
         return new StackLayout
         {
             Spacing = FoundryTheme.Space1,
@@ -744,9 +781,10 @@ public sealed class LayoutFoundryPanel : Panel
                     VerticalContentAlignment = VerticalAlignment.Center,
                     Items =
                     {
-                        new StackLayoutItem(_filterTextBox, expand: true),
-                        _filterKindDropDown,
+                        _searchField,
+                        _filterKindField,
                         _clearFilterButton,
+                        new StackLayoutItem(null, expand: true),
                     },
                 },
             },
@@ -772,7 +810,7 @@ public sealed class LayoutFoundryPanel : Panel
             BeginInlineCreation(InlineDraftKind.Folder, _contextDestinationFolderId);
         _newPageMenuItem.Click += (_, _) => QueueOpenCreateLayouts(_contextDestinationFolderId);
         _duplicateSelectionMenuItem.Click += async (_, _) => await DuplicateSelectionAsync();
-        _deleteSelectionMenuItem.Click += async (_, _) => await DeleteSelectionAsync();
+        _deleteSelectionMenuItem.Click += (_, _) => RequestDeleteSelection(SelectedKeys());
         _renamePageMenuItem.Click += (_, _) => BeginInlineSheetRename();
         _newDetailMenuItem.Click += (_, _) => RunSelectedSheetCommand(LayoutSheetCommand.NewDetail);
         _printPageMenuItem.Click += (_, _) => RunSelectedSheetCommand(LayoutSheetCommand.Print);
@@ -971,7 +1009,7 @@ public sealed class LayoutFoundryPanel : Panel
                  SelectedItemCount() > 0 &&
                  SelectedItems().All(item => !item.Node.IsDocumentRoot))
         {
-            _ = DeleteSelectionAsync();
+            RequestDeleteSelection(SelectedKeys());
             eventArgs.Handled = true;
         }
     }
@@ -1091,16 +1129,27 @@ public sealed class LayoutFoundryPanel : Panel
         RefreshOverview();
     }
 
-    private async Task DeleteSelectionAsync()
+    private void OnDeleteSelectionRequested(
+        object? sender,
+        DeleteSelectionRequestedEventArgs eventArgs) =>
+        RequestDeleteSelection(eventArgs.Selection);
+
+    private void RequestDeleteSelection(IReadOnlyList<OverviewNodeKey> requestedSelection)
     {
-        var keys = SelectedKeys();
+        if (_pendingDeleteSelection is not null || _deleteInProgress)
+            return;
+
+        var keys = requestedSelection.Distinct().ToArray();
         if (keys.Any(IsDocumentRootKey))
         {
             _statusLabel.Text = "The project root cannot be deleted.";
             return;
         }
+
         var snapshot = LayoutFoundryUiHost.CaptureSnapshot();
-        if (keys.Length == 0 || snapshot is null) return;
+        if (keys.Length == 0 || snapshot is null)
+            return;
+
         var resolved = HierarchySelectionResolver.Resolve(snapshot, keys);
         if (resolved.SelectedItemCount == 0 || resolved.UnresolvedKeys.Count > 0)
         {
@@ -1115,29 +1164,82 @@ public sealed class LayoutFoundryPanel : Panel
             : folderCount > 0
                 ? $"{folderCount} folder{(folderCount == 1 ? string.Empty : "s")}"
                 : $"{sheetCount} Rhino layout{(sheetCount == 1 ? string.Empty : "s")}";
-        if (sheetCount > 0)
+        var pending = new PendingDeleteSelection(
+            snapshot.DocumentRuntimeSerialNumber,
+            snapshot.Revision,
+            keys,
+            summary);
+
+        if (sheetCount == 0)
         {
-            var response = MessageBox.Show(
-                this,
-                $"Permanently delete {summary}?\n\nLayout deletion cannot be undone.",
-                keys.Length == 1 ? "Delete selected item" : "Delete selected items",
-                MessageBoxButtons.YesNo,
-                MessageBoxType.Warning,
-                MessageBoxDefaultButton.No);
-            if (response != DialogResult.Yes) return;
+            _ = ExecuteDeleteSelectionAsync(pending, showBusyOverlay: false);
+            return;
         }
 
-        _statusLabel.Text = $"Deleting {summary}…";
-        var result = await LayoutFoundryUiHost.DeleteSelectionAsync(keys);
+        _pendingDeleteSelection = pending;
+        _deleteConfirmationOverlay.ShowConfirmation(
+            summary,
+            resolved.SelectedItemCount == 1);
+    }
+
+    private async Task ConfirmDeleteSelectionAsync()
+    {
+        if (_pendingDeleteSelection is not { } pending || _deleteInProgress)
+            return;
+
+        var current = LayoutFoundryUiHost.CaptureSnapshot();
+        if (current is null ||
+            current.DocumentRuntimeSerialNumber != pending.DocumentRuntimeSerialNumber ||
+            current.Revision != pending.SourceRevision)
+        {
+            _pendingDeleteSelection = null;
+            _deleteConfirmationOverlay.Dismiss();
+            _statusLabel.Text = "The Rhino document changed. Review the selection and try deleting again.";
+            RefreshOverview();
+            return;
+        }
+
+        await ExecuteDeleteSelectionAsync(pending, showBusyOverlay: true);
+    }
+
+    private async Task ExecuteDeleteSelectionAsync(
+        PendingDeleteSelection pending,
+        bool showBusyOverlay)
+    {
+        if (_deleteInProgress)
+            return;
+
+        _deleteInProgress = true;
+        if (showBusyOverlay)
+            _deleteConfirmationOverlay.ShowBusy(pending.Summary);
+        _statusLabel.Text = $"Deleting {pending.Summary}…";
+
+        var result = await LayoutFoundryUiHost.DeleteSelectionAsync(pending.Selection);
+
+        _deleteInProgress = false;
+        _pendingDeleteSelection = null;
+        _deleteConfirmationOverlay.Dismiss();
         if (!result.Succeeded)
         {
             _statusLabel.Text = DiagnosticMessage(result);
+            RefreshOverview();
+            LayoutFoundryUiHost.NotifyOverviewChanged(OverviewInvalidation.All);
             return;
         }
 
         ClearSelection();
-        _statusLabel.Text = $"Deleted {summary}.";
+        _statusLabel.Text = $"Deleted {pending.Summary}.";
         RefreshOverview();
+    }
+
+    private void CancelDeleteConfirmation()
+    {
+        if (_pendingDeleteSelection is null || _deleteInProgress)
+            return;
+
+        _pendingDeleteSelection = null;
+        _deleteConfirmationOverlay.Dismiss();
+        _statusLabel.Text = "Deletion cancelled.";
     }
 
     private void BeginInlineSheetRename()
@@ -1302,7 +1404,6 @@ public sealed class LayoutFoundryPanel : Panel
     private void RefreshOverview()
     {
         _overview = LayoutFoundryUiHost.CaptureOverview();
-        RefreshPropertyChoiceLists();
         if (_documentSerialNumber != _overview.DocumentRuntimeSerialNumber)
         {
             if (_documentSerialNumber is { } previousSerial)
@@ -1324,26 +1425,6 @@ public sealed class LayoutFoundryPanel : Panel
 
         _selection.Prune(Flatten(OverviewTreeBuilder.Build(_overview)).Select(node => node.Key));
         PopulateTree();
-    }
-
-    private void RefreshPropertyChoiceLists()
-    {
-        var paperLabels = PaperSizeChoices.Select(choice => choice.Label)
-            .Concat(_overview.Sheets
-                .Where(sheet => sheet.PageWidth > 0 && sheet.PageHeight > 0)
-                .Select(PaperLabel))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-        _paperCell.DataStore = paperLabels;
-
-        var snapshot = LayoutFoundryUiHost.CaptureSnapshot();
-        _displayModeCell.DataStore = new[] { "—", "Mixed" }
-            .Concat(snapshot?.DisplayModes.Values ?? [])
-            .Where(value => !string.IsNullOrWhiteSpace(value))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(value => value is "—" or "Mixed" ? 0 : 1)
-            .ThenBy(value => value, StringComparer.OrdinalIgnoreCase)
-            .ToArray();
     }
 
     private void PopulateTree()
@@ -1785,11 +1866,38 @@ public sealed class LayoutFoundryPanel : Panel
             return;
         }
 
-        if ((ReferenceEquals(eventArgs.GridColumn, _printColumn) ||
-             ReferenceEquals(eventArgs.GridColumn, _templateColumn)) &&
+        if (IsInteractivePropertyColumn(eventArgs.GridColumn) &&
             ConsumeCellInteractionGuard(item, eventArgs.GridColumn))
         {
+            _propertyInteractionTargets = [];
             _statusLabel.Text = "Row selected. Click the property again to change it.";
+            return;
+        }
+
+        if (ReferenceEquals(eventArgs.GridColumn, _paperColumn))
+        {
+            if (!item.HasSheetTargets)
+            {
+                _statusLabel.Text = "Paper size applies to folders and layouts, not individual details.";
+                return;
+            }
+
+            ShowPaperSizeMenu(
+                PropertyInteractionTargets(item.Node.Key),
+                item.Node.Key,
+                eventArgs.Location);
+            return;
+        }
+
+        if (ReferenceEquals(eventArgs.GridColumn, _displayModeColumn))
+        {
+            if (!item.HasDetailTargets)
+            {
+                _statusLabel.Text = "This row does not contain any detail viewports.";
+                return;
+            }
+
+            ShowDisplayModeMenu(PropertyInteractionTargets(item.Node.Key), eventArgs.Location);
             return;
         }
 
@@ -1828,20 +1936,136 @@ public sealed class LayoutFoundryPanel : Panel
         RefreshOverview();
     }
 
-    private void OnTreeCellEditing(object? sender, GridViewCellEventArgs eventArgs)
+    private void ShowPaperSizeMenu(
+        IReadOnlyList<OverviewNodeKey> targets,
+        OverviewNodeKey source,
+        PointF location)
     {
-        if (_inlineDraft is not null || eventArgs.Item is not HierarchyTreeItem item)
+        var custom = new ButtonMenuItem { Text = "Custom…" };
+        custom.Click += (_, _) => Application.Instance.AsyncInvoke(
+            async () => await SetCustomPaperSizeAsync(targets, source));
+        var menuItems = new List<MenuItem>
+        {
+            custom,
+            new SeparatorMenuItem(),
+        };
+        foreach (var choice in PaperSizeChoices)
+        {
+            var capturedChoice = choice;
+            var menuItem = new ButtonMenuItem { Text = choice.Label };
+            menuItem.Click += (_, _) => Application.Instance.AsyncInvoke(
+                async () => await SetPaperSizeAsync(targets, capturedChoice));
+            menuItems.Add(menuItem);
+        }
+
+        new ContextMenu(menuItems).Show(_treeGrid, location);
+    }
+
+    private void ShowDisplayModeMenu(IReadOnlyList<OverviewNodeKey> targets, PointF location)
+    {
+        var snapshot = LayoutFoundryUiHost.CaptureSnapshot();
+        var modes = snapshot?.DisplayModes
+            .Where(pair => pair.Key != Guid.Empty && !string.IsNullOrWhiteSpace(pair.Value))
+            .OrderBy(pair => pair.Value, StringComparer.OrdinalIgnoreCase)
+            .ToArray() ?? [];
+        if (modes.Length == 0)
+        {
+            _statusLabel.Text = "No Rhino display modes are available.";
+            return;
+        }
+
+        var menuItems = new List<MenuItem>();
+        foreach (var mode in modes)
+        {
+            var capturedMode = mode;
+            var menuItem = new ButtonMenuItem { Text = mode.Value };
+            menuItem.Click += (_, _) => Application.Instance.AsyncInvoke(
+                async () => await SetDisplayModeAsync(targets, capturedMode.Key, capturedMode.Value));
+            menuItems.Add(menuItem);
+        }
+
+        new ContextMenu(menuItems).Show(_treeGrid, location);
+    }
+
+    private async Task SetPaperSizeAsync(
+        IReadOnlyList<OverviewNodeKey> targets,
+        PaperSizeChoice choice)
+    {
+        _statusLabel.Text = $"Setting {choice.Label}…";
+        var result = await LayoutFoundryUiHost.SetPaperSizeAsync(
+            targets,
+            choice.Width,
+            choice.Height,
+            choice.UnitSystem);
+        _statusLabel.Text = result.Succeeded ? "Layout properties updated." : DiagnosticMessage(result);
+        RefreshOverview();
+    }
+
+    private async Task SetCustomPaperSizeAsync(
+        IReadOnlyList<OverviewNodeKey> targets,
+        OverviewNodeKey source)
+    {
+        var initial = FirstTargetSheet(source);
+        var dialog = new CustomPaperSizeDialog(
+            initial?.PageWidth ?? 420,
+            initial?.PageHeight ?? 297,
+            initial?.PageUnitSystem ?? "Millimeters");
+        dialog.ShowModal(this);
+        if (!dialog.Accepted)
         {
             return;
         }
 
-        if (!ConsumeCellInteractionGuard(item, eventArgs.GridColumn))
+        _statusLabel.Text = "Setting custom paper size…";
+        var result = await LayoutFoundryUiHost.SetPaperSizeAsync(
+            targets,
+            dialog.PaperWidth,
+            dialog.PaperHeight,
+            dialog.UnitSystem);
+        _statusLabel.Text = result.Succeeded ? "Layout properties updated." : DiagnosticMessage(result);
+        RefreshOverview();
+    }
+
+    private async Task SetDisplayModeAsync(
+        IReadOnlyList<OverviewNodeKey> targets,
+        Guid modeId,
+        string modeName)
+    {
+        _statusLabel.Text = $"Setting {modeName}…";
+        var result = await LayoutFoundryUiHost.SetDisplayModeAsync(targets, modeId);
+        _statusLabel.Text = result.Succeeded ? "Layout properties updated." : DiagnosticMessage(result);
+        RefreshOverview();
+    }
+
+    private SheetOverview? FirstTargetSheet(OverviewNodeKey target)
+    {
+        if (target.Kind == OverviewNodeKind.Sheet)
         {
-            return;
+            return _overview.Sheets.FirstOrDefault(sheet => sheet.PageViewId == target.Id);
         }
 
-        _treeGrid.CancelEdit();
-        _statusLabel.Text = "Row selected. Click the property again to edit it.";
+        if (target.Kind == OverviewNodeKind.Detail)
+        {
+            return _overview.Sheets.FirstOrDefault(sheet =>
+                sheet.Details.Any(detail => detail.DetailViewportId == target.Id));
+        }
+
+        var folderIds = DescendantFolderIds(target.Id).ToHashSet();
+        return _overview.Sheets
+            .OrderBy(sheet => sheet.Order)
+            .FirstOrDefault(sheet => folderIds.Contains(sheet.FolderId));
+    }
+
+    private IEnumerable<Guid> DescendantFolderIds(Guid folderId)
+    {
+        yield return folderId;
+        foreach (var child in _overview.Folders.Where(folder => folder.ParentId == folderId))
+        {
+            foreach (var descendant in DescendantFolderIds(child.Id))
+            {
+                yield return descendant;
+            }
+        }
     }
 
     private async Task OnTreeCellEditedAsync(GridViewCellEventArgs eventArgs)
@@ -1849,64 +2073,7 @@ public sealed class LayoutFoundryPanel : Panel
         if (_inlineDraft is not null)
         {
             await CommitInlineDraftAsync(eventArgs);
-            return;
         }
-
-        if (eventArgs.Item is not HierarchyTreeItem item)
-            return;
-
-        OperationResult? result = null;
-        if (ReferenceEquals(eventArgs.GridColumn, _paperColumn))
-        {
-            var choice = PaperSizeChoices.FirstOrDefault(candidate =>
-                string.Equals(candidate.Label, item.PaperText, StringComparison.OrdinalIgnoreCase));
-            if (choice is null || !item.HasSheetTargets)
-            {
-                _statusLabel.Text = item.HasSheetTargets
-                    ? "Choose one of the standard paper sizes from the list."
-                    : "Paper size applies to folders and layouts, not individual details.";
-                RefreshOverview();
-                return;
-            }
-
-            _statusLabel.Text = $"Setting {choice.Label}…";
-            result = await LayoutFoundryUiHost.SetPaperSizeAsync(
-                [item.Node.Key],
-                choice.Width,
-                choice.Height,
-                choice.UnitSystem);
-        }
-        else if (ReferenceEquals(eventArgs.GridColumn, _displayModeColumn))
-        {
-            if (!item.HasDetailTargets || item.DisplayModeText is "—" or "Mixed")
-            {
-                _statusLabel.Text = item.HasDetailTargets
-                    ? "Choose a Rhino display mode from the list."
-                    : "This row does not contain any detail viewports.";
-                RefreshOverview();
-                return;
-            }
-
-            var snapshot = LayoutFoundryUiHost.CaptureSnapshot();
-            var mode = snapshot?.DisplayModes.FirstOrDefault(pair => string.Equals(
-                pair.Value,
-                item.DisplayModeText,
-                StringComparison.OrdinalIgnoreCase));
-            if (mode is null || mode.Value.Key == Guid.Empty)
-            {
-                _statusLabel.Text = "The selected Rhino display mode is unavailable.";
-                RefreshOverview();
-                return;
-            }
-
-            _statusLabel.Text = $"Setting {mode.Value.Value}…";
-            result = await LayoutFoundryUiHost.SetDisplayModeAsync([item.Node.Key], mode.Value.Key);
-        }
-
-        if (result is null)
-            return;
-        _statusLabel.Text = result.Succeeded ? "Layout properties updated." : DiagnosticMessage(result);
-        RefreshOverview();
     }
 
     private async Task CommitInlineDraftAsync(GridViewCellEventArgs eventArgs)
@@ -2115,6 +2282,19 @@ public sealed class LayoutFoundryPanel : Panel
         var item = cell.Item as HierarchyTreeItem;
         var column = cell.Column;
         _cellInteractionGuard = null;
+        _propertyInteractionTargets = [];
+        if ((eventArgs.Buttons & MouseButtons.Primary) != 0 &&
+            eventArgs.Modifiers == Keys.None &&
+            item is not null &&
+            column is not null &&
+            IsInteractivePropertyColumn(column))
+        {
+            var selected = SelectedKeys();
+            _propertyInteractionTargets = selected.Contains(item.Node.Key)
+                ? selected
+                : [item.Node.Key];
+        }
+
         if ((eventArgs.Buttons & MouseButtons.Primary) != 0 &&
             eventArgs.Modifiers == Keys.None &&
             item is not null &&
@@ -2185,6 +2365,15 @@ public sealed class LayoutFoundryPanel : Panel
 
         _cellInteractionGuard = null;
         return true;
+    }
+
+    private IReadOnlyList<OverviewNodeKey> PropertyInteractionTargets(OverviewNodeKey source)
+    {
+        var targets = _propertyInteractionTargets.Contains(source)
+            ? _propertyInteractionTargets.Distinct().ToArray()
+            : [source];
+        _propertyInteractionTargets = [];
+        return targets;
     }
 
     private void OnTreeMouseMove(object? sender, MouseEventArgs eventArgs)
@@ -2822,6 +3011,8 @@ public sealed class LayoutFoundryPanel : Panel
             set => _paperText = value;
         }
 
+        public string PaperCellText => PaperText is "" or "—" ? PaperText : $"{PaperText}  ▾";
+
         public string DetailsText => Node.Key.Kind switch
         {
             OverviewNodeKind.Detail => string.Empty,
@@ -2840,6 +3031,10 @@ public sealed class LayoutFoundryPanel : Panel
                 "—");
             set => _displayModeText = value;
         }
+
+        public string DisplayModeCellText => DisplayModeText is "" or "—"
+            ? DisplayModeText
+            : $"{DisplayModeText}  ▾";
 
         public Image? Thumbnail { get; set; }
 
@@ -2903,6 +3098,12 @@ public sealed class LayoutFoundryPanel : Panel
     }
 
     private sealed record CellInteractionGuard(OverviewNodeKey Key, GridColumn Column);
+
+    private sealed record PendingDeleteSelection(
+        uint DocumentRuntimeSerialNumber,
+        long SourceRevision,
+        IReadOnlyList<OverviewNodeKey> Selection,
+        string Summary);
 
     private sealed class InlineDraft(
         InlineDraftKind kind,

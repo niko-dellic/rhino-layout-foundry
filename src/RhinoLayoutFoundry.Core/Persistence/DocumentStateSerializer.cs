@@ -36,7 +36,7 @@ public static class DocumentStateSerializer
                         pair => pair.Value with { IncludeInPrintAll = true })
                     : state.Sheets,
                 ObserverCanvas = state.SchemaVersion < 4 ? ObserverCanvasState.Empty : state.Canvas,
-                ImportRecovery = [],
+                ImportRecovery = state.SchemaVersion < 5 ? [] : state.Recovery,
                 DedicatedDetailLayerId = null,
             };
         }

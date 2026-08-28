@@ -166,6 +166,7 @@ public sealed class DocumentStateSerializerTests
         var payload = DocumentStateSerializer.Serialize(DocumentState.Empty() with
             {
                 DedicatedDetailLayerId = detailLayerId,
+                ImportRecovery = [new ImportRecoveryRecord("layer", "A-Wall", "Missing source layer")],
             })
             .Replace($"\"SchemaVersion\":{DocumentState.CurrentSchemaVersion}", "\"SchemaVersion\":5", StringComparison.Ordinal)
             .Replace($",\"DedicatedDetailLayerId\":\"{detailLayerId}\"", string.Empty, StringComparison.Ordinal);
@@ -174,6 +175,7 @@ public sealed class DocumentStateSerializerTests
 
         Assert.Equal(DocumentState.CurrentSchemaVersion, restored.SchemaVersion);
         Assert.Null(restored.DedicatedDetailLayerId);
+        Assert.Single(restored.Recovery);
     }
 
     [Fact]

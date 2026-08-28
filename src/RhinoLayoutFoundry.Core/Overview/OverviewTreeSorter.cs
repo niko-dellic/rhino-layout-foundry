@@ -35,7 +35,10 @@ public static class OverviewTreeSorter
         OverviewSortDirection direction)
     {
         var children = node.Children.Select(child => SortNode(child, property, direction));
-        if (property != OverviewSortProperty.None)
+        // Detail viewports have a stable order owned by their layout. Column
+        // sorting organizes folders and sheets, but must not reshuffle a
+        // layout's details when a detail property changes.
+        if (property != OverviewSortProperty.None && node.Key.Kind != OverviewNodeKind.Sheet)
         {
             children = direction == OverviewSortDirection.Ascending
                 ? children.OrderBy(child => SortValue(child, property), NaturalValueComparer.Instance)

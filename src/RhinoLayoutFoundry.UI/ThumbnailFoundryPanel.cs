@@ -28,6 +28,8 @@ internal sealed class ThumbnailFoundryPanel : Panel
     private bool _isLoaded;
     private long _previewContentSequence;
 
+    internal event EventHandler<DeleteSelectionRequestedEventArgs>? DeleteSelectionRequested;
+
     internal ThumbnailFoundryPanel()
     {
         BackgroundColor = FoundryTheme.PanelBackground;
@@ -55,8 +57,8 @@ internal sealed class ThumbnailFoundryPanel : Panel
         _invalidationTimer = new UITimer { Interval = 0.12 };
         _resizeTimer = new UITimer { Interval = 0.12 };
 
-        var smaller = ToolbarButton("−", "Show more layouts per row");
-        var larger = ToolbarButton("+", "Show fewer, larger layouts per row");
+        var smaller = ToolbarButton(FoundryViewIcons.ZoomOut(), "Show more layouts per row");
+        var larger = ToolbarButton(FoundryViewIcons.ZoomIn(), "Show fewer, larger layouts per row");
         smaller.Click += (_, _) => _sizeSlider.Value = Math.Max(_sizeSlider.MinValue, _sizeSlider.Value - 20);
         larger.Click += (_, _) => _sizeSlider.Value = Math.Min(_sizeSlider.MaxValue, _sizeSlider.Value + 20);
         _sizeSlider.ValueChanged += (_, _) => ApplyGridSize();
@@ -123,8 +125,8 @@ internal sealed class ThumbnailFoundryPanel : Panel
         RefreshSnapshot();
     }
 
-    private static Button ToolbarButton(string text, string toolTip) =>
-        FoundryTheme.ConfigureToolbarButton(new Button { Text = text, ToolTip = toolTip });
+    private static FoundryToolbarIconButton ToolbarButton(Image image, string toolTip) =>
+        new(image, toolTip);
 
     internal void SetFilter(OverviewFilterProjection projection)
     {
@@ -283,7 +285,7 @@ internal sealed class ThumbnailFoundryPanel : Panel
         open.Click += (_, _) => OpenSelectedSheet();
         properties.Click += (_, _) => OpenBatchProperties();
         duplicate.Click += async (_, _) => await DuplicateSelectionAsync();
-        delete.Click += async (_, _) => await DeleteSelectionAsync();
+        delete.Click += (_, _) => RequestDeleteSelection();
         include.Click += async (_, _) => await SetPrintInclusionAsync(true);
         exclude.Click += async (_, _) => await SetPrintInclusionAsync(false);
 
@@ -338,24 +340,13 @@ internal sealed class ThumbnailFoundryPanel : Panel
         if (result.Succeeded) RefreshSnapshot();
     }
 
-    private async Task DeleteSelectionAsync()
+    private void RequestDeleteSelection()
     {
         var selection = SelectedSheets();
         if (selection.Length == 0) return;
-        var response = MessageBox.Show(
+        DeleteSelectionRequested?.Invoke(
             this,
-            $"Permanently delete {selection.Length} Rhino layout{(selection.Length == 1 ? string.Empty : "s")}?\n\nLayout deletion cannot be undone.",
-            selection.Length == 1 ? "Delete layout" : "Delete layouts",
-            MessageBoxButtons.YesNo,
-            MessageBoxType.Warning,
-            MessageBoxDefaultButton.No);
-        if (response != DialogResult.Yes) return;
-
-        var result = await LayoutFoundryUiHost.DeleteSelectionAsync(selection);
-        _status.Text = ResultMessage(result, "Selection deleted.");
-        if (!result.Succeeded) return;
-        LayoutFoundryUiHost.Selection.Clear(_snapshot.DocumentRuntimeSerialNumber, this);
-        RefreshSnapshot();
+            new DeleteSelectionRequestedEventArgs(selection));
     }
 
     private async Task SetPrintInclusionAsync(bool include)

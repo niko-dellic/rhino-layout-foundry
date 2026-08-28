@@ -17,6 +17,7 @@ public static class LayoutFoundryUiHost
     private static ILayoutPdfExportService? _pdfExportService;
     private static ILayoutPackageService? _layoutPackageService;
     private static IDocumentThumbnailProvider? _thumbnailProvider;
+    private static INamedViewThumbnailProvider? _namedViewThumbnailProvider;
     private static IMutationCapabilityProvider? _capabilityProvider;
     private static ITemplateCaptureContextProvider? _templateCaptureContextProvider;
     private static IDocumentObserverSnapshotProvider? _observerSnapshotProvider;
@@ -38,6 +39,7 @@ public static class LayoutFoundryUiHost
         ILayoutPdfExportService pdfExportService,
         ILayoutPackageService layoutPackageService,
         IDocumentThumbnailProvider thumbnailProvider,
+        INamedViewThumbnailProvider namedViewThumbnailProvider,
         IMutationCapabilityProvider capabilityProvider,
         ITemplateCaptureContextProvider templateCaptureContextProvider,
         IDocumentObserverSnapshotProvider observerSnapshotProvider,
@@ -50,6 +52,8 @@ public static class LayoutFoundryUiHost
         _pdfExportService = pdfExportService ?? throw new ArgumentNullException(nameof(pdfExportService));
         _layoutPackageService = layoutPackageService ?? throw new ArgumentNullException(nameof(layoutPackageService));
         _thumbnailProvider = thumbnailProvider ?? throw new ArgumentNullException(nameof(thumbnailProvider));
+        _namedViewThumbnailProvider = namedViewThumbnailProvider ??
+            throw new ArgumentNullException(nameof(namedViewThumbnailProvider));
         _capabilityProvider = capabilityProvider ?? throw new ArgumentNullException(nameof(capabilityProvider));
         _templateCaptureContextProvider = templateCaptureContextProvider ??
             throw new ArgumentNullException(nameof(templateCaptureContextProvider));
@@ -225,6 +229,17 @@ public static class LayoutFoundryUiHost
                    request.Key,
                    null,
                    "Foundry is not connected to a thumbnail provider."));
+    }
+
+    public static Task<NamedViewThumbnailResult> CaptureNamedViewThumbnailAsync(
+        NamedViewThumbnailRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        return _namedViewThumbnailProvider?.CaptureAsync(request, cancellationToken) ??
+               Task.FromResult(new NamedViewThumbnailResult(
+                   request.Key,
+                   null,
+                   "Foundry is not connected to a named-view thumbnail provider."));
     }
 
     public static FoundryMutationCapabilities CaptureMutationCapabilities()
@@ -976,6 +991,7 @@ public static class LayoutFoundryUiHost
         _pdfExportService = null;
         _layoutPackageService = null;
         _thumbnailProvider = null;
+        _namedViewThumbnailProvider = null;
         _capabilityProvider = null;
         _templateCaptureContextProvider = null;
         _observerSnapshotProvider = null;

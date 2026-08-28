@@ -7,23 +7,31 @@ internal static class FoundryViewIcons
     private const int IconSize = 16;
     private const float Hairline = 0.8f;
     private const float Emphasis = 0.9f;
+    private static readonly float[] IconScales = [1f, 2f, 3f];
 
-    internal static Bitmap ThumbnailStack()
+    internal static Icon ListView() => NewIcon(graphics =>
     {
-        var bitmap = NewBitmap();
-        using var graphics = new Graphics(bitmap) { AntiAlias = true };
+        var color = FoundryTheme.PrimaryText;
+        var pen = new Pen(color, Hairline);
+        graphics.FillEllipse(color, 1.25f, 3.25f, 1.5f, 1.5f);
+        graphics.FillEllipse(color, 1.25f, 7.25f, 1.5f, 1.5f);
+        graphics.FillEllipse(color, 1.25f, 11.25f, 1.5f, 1.5f);
+        graphics.DrawLine(pen, 4, 4, 14, 4);
+        graphics.DrawLine(pen, 4, 8, 14, 8);
+        graphics.DrawLine(pen, 4, 12, 14, 12);
+    });
+
+    internal static Icon ThumbnailStack() => NewIcon(graphics =>
+    {
         var color = FoundryTheme.PrimaryText;
         var muted = FoundryTheme.WithAlpha(color, 145);
         graphics.DrawRectangle(new Pen(muted, Hairline), 2.5f, 2.5f, 10, 2.5f);
         graphics.DrawRectangle(new Pen(muted, Hairline), 3.5f, 6.5f, 10, 2.5f);
         graphics.DrawRectangle(new Pen(color, Emphasis), 4.5f, 10.5f, 9, 2.5f);
-        return bitmap;
-    }
+    });
 
-    internal static Bitmap CartesianPlane()
+    internal static Icon CartesianPlane() => NewIcon(graphics =>
     {
-        var bitmap = NewBitmap();
-        using var graphics = new Graphics(bitmap) { AntiAlias = true };
         var color = FoundryTheme.PrimaryText;
         var grid = FoundryTheme.WithAlpha(color, 110);
         graphics.FillEllipse(grid, 7, 4, 1.5f, 1.5f);
@@ -38,13 +46,10 @@ internal static class FoundryViewIcons
         graphics.DrawLine(axisPen, 3.5f, 2, 1.5f, 4.5f);
         graphics.DrawLine(axisPen, 3.5f, 2, 5.5f, 4.5f);
         graphics.FillEllipse(color, 2.75f, 11.75f, 1.5f, 1.5f);
-        return bitmap;
-    }
+    });
 
-    internal static Bitmap NewFolder()
+    internal static Icon NewFolder() => NewIcon(graphics =>
     {
-        var bitmap = NewBitmap();
-        using var graphics = new Graphics(bitmap) { AntiAlias = true };
         var color = FoundryTheme.PrimaryText;
         var pen = new Pen(color, Hairline);
         graphics.DrawLine(pen, 1.5f, 5, 1.5f, 13.5f);
@@ -54,24 +59,18 @@ internal static class FoundryViewIcons
         graphics.DrawLine(pen, 5, 5, 6.5f, 6.5f);
         graphics.DrawLine(pen, 6.5f, 6.5f, 11.5f, 6.5f);
         DrawPlus(graphics, color, 12.5f, 3.5f);
-        return bitmap;
-    }
+    });
 
-    internal static Bitmap NewLayout()
+    internal static Icon NewLayout() => NewIcon(graphics =>
     {
-        var bitmap = NewBitmap();
-        using var graphics = new Graphics(bitmap) { AntiAlias = true };
         var color = FoundryTheme.PrimaryText;
         graphics.DrawRectangle(new Pen(color, Emphasis), 1.5f, 3.5f, 9, 10.5f);
         graphics.DrawRectangle(new Pen(color, Hairline), 3.5f, 6, 5, 5.5f);
         DrawPlus(graphics, color, 12.5f, 3.5f);
-        return bitmap;
-    }
+    });
 
-    internal static Bitmap Properties()
+    internal static Icon Properties() => NewIcon(graphics =>
     {
-        var bitmap = NewBitmap();
-        using var graphics = new Graphics(bitmap) { AntiAlias = true };
         var color = FoundryTheme.PrimaryText;
         var pen = new Pen(color, Hairline);
         graphics.DrawLine(pen, 2, 4, 14, 4);
@@ -80,13 +79,10 @@ internal static class FoundryViewIcons
         graphics.DrawEllipse(pen, 4.5f, 2, 4, 4);
         graphics.DrawEllipse(pen, 9.5f, 6, 4, 4);
         graphics.DrawEllipse(pen, 6.5f, 10, 4, 4);
-        return bitmap;
-    }
+    });
 
-    internal static Bitmap Delete()
+    internal static Icon Delete() => NewIcon(graphics =>
     {
-        var bitmap = NewBitmap();
-        using var graphics = new Graphics(bitmap) { AntiAlias = true };
         var color = FoundryTheme.PrimaryText;
         var pen = new Pen(color, Hairline);
         graphics.DrawLine(pen, 3, 4.5f, 13, 4.5f);
@@ -96,33 +92,20 @@ internal static class FoundryViewIcons
         graphics.DrawRectangle(pen, 4.5f, 5.5f, 7, 8);
         graphics.DrawLine(pen, 7, 7, 7, 12);
         graphics.DrawLine(pen, 9, 7, 9, 12);
-        return bitmap;
-    }
+    });
 
-    internal static Bitmap ImportPackage() => TransferPackage(arrowPointsDown: true);
+    internal static Icon ImportPackage() => TransferPackage(arrowPointsDown: true);
 
-    internal static Bitmap ExportPackage() => TransferPackage(arrowPointsDown: false);
+    internal static Icon ExportPackage() => TransferPackage(arrowPointsDown: false);
 
-    internal static Bitmap FitAll()
+    internal static Icon FitAll() => NewIcon(graphics =>
     {
-        var bitmap = NewBitmap();
-        using var graphics = new Graphics(bitmap) { AntiAlias = true };
         var pen = new Pen(FoundryTheme.PrimaryText, Hairline);
-        graphics.DrawLine(pen, 2, 6, 2, 2);
-        graphics.DrawLine(pen, 2, 2, 6, 2);
-        graphics.DrawLine(pen, 10, 2, 14, 2);
-        graphics.DrawLine(pen, 14, 2, 14, 6);
-        graphics.DrawLine(pen, 14, 10, 14, 14);
-        graphics.DrawLine(pen, 14, 14, 10, 14);
-        graphics.DrawLine(pen, 6, 14, 2, 14);
-        graphics.DrawLine(pen, 2, 14, 2, 10);
-        return bitmap;
-    }
+        DrawCornerFrame(graphics, pen);
+    });
 
-    internal static Bitmap FocusSelection()
+    internal static Icon FocusSelection() => NewIcon(graphics =>
     {
-        var bitmap = NewBitmap();
-        using var graphics = new Graphics(bitmap) { AntiAlias = true };
         var color = FoundryTheme.PrimaryText;
         var pen = new Pen(color, Hairline);
         graphics.DrawEllipse(pen, 3, 3, 10, 10);
@@ -131,29 +114,23 @@ internal static class FoundryViewIcons
         graphics.DrawLine(pen, 8, 12, 8, 15);
         graphics.DrawLine(pen, 1, 8, 4, 8);
         graphics.DrawLine(pen, 12, 8, 15, 8);
-        return bitmap;
-    }
+    });
 
-    internal static Bitmap Tidy()
+    internal static Icon Tidy() => NewIcon(graphics =>
     {
-        var bitmap = NewBitmap();
-        using var graphics = new Graphics(bitmap) { AntiAlias = true };
         var pen = new Pen(FoundryTheme.PrimaryText, Hairline);
         graphics.DrawRectangle(pen, 2, 2, 5, 5);
         graphics.DrawRectangle(pen, 9, 2, 5, 5);
         graphics.DrawRectangle(pen, 2, 9, 5, 5);
         graphics.DrawRectangle(pen, 9, 9, 5, 5);
-        return bitmap;
-    }
+    });
 
-    internal static Bitmap ZoomOut() => ZoomGlyph(includePlus: false);
+    internal static Icon ZoomOut() => ZoomGlyph(includePlus: false);
 
-    internal static Bitmap ZoomIn() => ZoomGlyph(includePlus: true);
+    internal static Icon ZoomIn() => ZoomGlyph(includePlus: true);
 
-    internal static Bitmap Navigator()
+    internal static Icon Navigator() => NewIcon(graphics =>
     {
-        var bitmap = NewBitmap();
-        using var graphics = new Graphics(bitmap) { AntiAlias = true };
         var color = FoundryTheme.PrimaryText;
         var pen = new Pen(color, Hairline);
         graphics.DrawLine(pen, 4, 4, 13.5f, 4);
@@ -162,13 +139,10 @@ internal static class FoundryViewIcons
         graphics.FillEllipse(color, 1.25f, 3.25f, 1.5f, 1.5f);
         graphics.FillEllipse(color, 1.25f, 7.25f, 1.5f, 1.5f);
         graphics.FillEllipse(color, 1.25f, 11.25f, 1.5f, 1.5f);
-        return bitmap;
-    }
+    });
 
-    internal static Bitmap NamedViews()
+    internal static Icon NamedViews() => NewIcon(graphics =>
     {
-        var bitmap = NewBitmap();
-        using var graphics = new Graphics(bitmap) { AntiAlias = true };
         var color = FoundryTheme.PrimaryText;
         var pen = new Pen(color, Hairline);
         graphics.DrawRectangle(pen, 1.5f, 2.5f, 13, 11);
@@ -177,50 +151,64 @@ internal static class FoundryViewIcons
         graphics.DrawLine(pen, 6.25f, 7.5f, 8.5f, 10);
         graphics.DrawLine(pen, 8.5f, 10, 10, 8.5f);
         graphics.DrawLine(pen, 10, 8.5f, 13, 11.5f);
-        return bitmap;
-    }
+    });
 
-    internal static Bitmap OpenSelection()
+    internal static Icon OpenSelection() => NewIcon(graphics =>
     {
-        var bitmap = NewBitmap();
-        using var graphics = new Graphics(bitmap) { AntiAlias = true };
         var pen = new Pen(FoundryTheme.PrimaryText, Hairline);
         graphics.DrawLine(pen, 3, 6, 3, 13);
         graphics.DrawLine(pen, 3, 13, 10, 13);
         graphics.DrawLine(pen, 7, 3, 13, 3);
         graphics.DrawLine(pen, 13, 3, 13, 9);
         graphics.DrawLine(pen, 7, 9, 13, 3);
-        return bitmap;
-    }
+    });
 
-    internal static Bitmap More()
+    internal static Icon Fullscreen() => NewIcon(graphics =>
     {
-        var bitmap = NewBitmap();
-        using var graphics = new Graphics(bitmap) { AntiAlias = true };
+        var pen = new Pen(FoundryTheme.PrimaryText, Hairline);
+        DrawCornerFrame(graphics, pen);
+    });
+
+    internal static Icon ExitFullscreen() => NewIcon(graphics =>
+    {
+        var pen = new Pen(FoundryTheme.PrimaryText, Hairline);
+        graphics.DrawLine(pen, 6, 1.5f, 6, 6);
+        graphics.DrawLine(pen, 6, 6, 1.5f, 6);
+        graphics.DrawLine(pen, 10, 1.5f, 10, 6);
+        graphics.DrawLine(pen, 10, 6, 14.5f, 6);
+        graphics.DrawLine(pen, 10, 14.5f, 10, 10);
+        graphics.DrawLine(pen, 10, 10, 14.5f, 10);
+        graphics.DrawLine(pen, 6, 14.5f, 6, 10);
+        graphics.DrawLine(pen, 6, 10, 1.5f, 10);
+    });
+
+    internal static Icon Close() => NewIcon(graphics =>
+    {
+        var pen = new Pen(FoundryTheme.PrimaryText, Emphasis);
+        graphics.DrawLine(pen, 4, 4, 12, 12);
+        graphics.DrawLine(pen, 12, 4, 4, 12);
+    });
+
+    internal static Icon More() => NewIcon(graphics =>
+    {
         var color = FoundryTheme.PrimaryText;
         graphics.FillEllipse(color, 2.25f, 7.25f, 1.5f, 1.5f);
         graphics.FillEllipse(color, 7.25f, 7.25f, 1.5f, 1.5f);
         graphics.FillEllipse(color, 12.25f, 7.25f, 1.5f, 1.5f);
-        return bitmap;
-    }
+    });
 
-    private static Bitmap ZoomGlyph(bool includePlus)
+    private static Icon ZoomGlyph(bool includePlus) => NewIcon(graphics =>
     {
-        var bitmap = NewBitmap();
-        using var graphics = new Graphics(bitmap) { AntiAlias = true };
         var pen = new Pen(FoundryTheme.PrimaryText, Hairline);
         graphics.DrawEllipse(pen, 2, 2, 9, 9);
         graphics.DrawLine(pen, 9.5f, 9.5f, 14, 14);
         graphics.DrawLine(pen, 4.25f, 6.5f, 8.75f, 6.5f);
         if (includePlus)
             graphics.DrawLine(pen, 6.5f, 4.25f, 6.5f, 8.75f);
-        return bitmap;
-    }
+    });
 
-    private static Bitmap TransferPackage(bool arrowPointsDown)
+    private static Icon TransferPackage(bool arrowPointsDown) => NewIcon(graphics =>
     {
-        var bitmap = NewBitmap();
-        using var graphics = new Graphics(bitmap) { AntiAlias = true };
         var pen = new Pen(FoundryTheme.PrimaryText, 1.15f);
         graphics.DrawRectangle(pen, 2, 8.5f, 12, 5.5f);
         graphics.DrawLine(pen, 5, 11, 11, 11);
@@ -236,7 +224,18 @@ internal static class FoundryViewIcons
             graphics.DrawLine(pen, 5.5f, 4, 8, 1.5f);
             graphics.DrawLine(pen, 10.5f, 4, 8, 1.5f);
         }
-        return bitmap;
+    });
+
+    private static void DrawCornerFrame(Graphics graphics, Pen pen)
+    {
+        graphics.DrawLine(pen, 2, 6, 2, 2);
+        graphics.DrawLine(pen, 2, 2, 6, 2);
+        graphics.DrawLine(pen, 10, 2, 14, 2);
+        graphics.DrawLine(pen, 14, 2, 14, 6);
+        graphics.DrawLine(pen, 14, 10, 14, 14);
+        graphics.DrawLine(pen, 14, 14, 10, 14);
+        graphics.DrawLine(pen, 6, 14, 2, 14);
+        graphics.DrawLine(pen, 2, 14, 2, 10);
     }
 
     private static void DrawPlus(Graphics graphics, Color color, float x, float y)
@@ -246,6 +245,22 @@ internal static class FoundryViewIcons
         graphics.DrawLine(pen, x, y - 2.5f, x, y + 2.5f);
     }
 
-    private static Bitmap NewBitmap() =>
-        new(IconSize, IconSize, PixelFormat.Format32bppRgba);
+    private static Icon NewIcon(Action<Graphics> draw)
+    {
+        var frames = new IconFrame[IconScales.Length];
+        for (var index = 0; index < IconScales.Length; index++)
+        {
+            var scale = IconScales[index];
+            var bitmap = new Bitmap(
+                (int)(IconSize * scale),
+                (int)(IconSize * scale),
+                PixelFormat.Format32bppRgba);
+            using var graphics = new Graphics(bitmap) { AntiAlias = true };
+            graphics.ScaleTransform(scale);
+            draw(graphics);
+            frames[index] = new IconFrame(scale, bitmap);
+        }
+
+        return new Icon(frames);
+    }
 }

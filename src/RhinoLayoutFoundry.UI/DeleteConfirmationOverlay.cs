@@ -1,0 +1,153 @@
+using Eto.Drawing;
+using Eto.Forms;
+using RhinoLayoutFoundry.Core.Overview;
+
+namespace RhinoLayoutFoundry.UI;
+
+internal sealed class DeleteSelectionRequestedEventArgs(
+    IReadOnlyList<OverviewNodeKey> selection) : EventArgs
+{
+    internal IReadOnlyList<OverviewNodeKey> Selection { get; } =
+        selection ?? throw new ArgumentNullException(nameof(selection));
+}
+
+internal sealed class DeleteConfirmationOverlay : Panel
+{
+    private readonly Panel _card;
+    private readonly Label _title;
+    private readonly Label _message;
+    private readonly Button _cancelButton;
+    private readonly Button _deleteButton;
+    private bool _busy;
+
+    internal DeleteConfirmationOverlay()
+    {
+        BackgroundColor = FoundryTheme.WithAlpha(Colors.Black, FoundryTheme.IsDarkMode ? 170 : 115);
+        Visible = false;
+
+        _title = new Label
+        {
+            Text = "Delete selected items?",
+            Font = SystemFonts.Bold(14),
+            TextColor = FoundryTheme.PrimaryText,
+            Wrap = WrapMode.Word,
+        };
+        _message = new Label
+        {
+            TextColor = FoundryTheme.PrimaryText,
+            Wrap = WrapMode.Word,
+        };
+        _cancelButton = FoundryTheme.ConfigureButton(new Button { Text = "Cancel" }, 92);
+        _deleteButton = FoundryTheme.ConfigureButton(new Button { Text = "Delete" }, 92);
+
+        _cancelButton.Click += (_, _) => CancelRequested?.Invoke(this, EventArgs.Empty);
+        _deleteButton.Click += (_, _) => ConfirmRequested?.Invoke(this, EventArgs.Empty);
+        _cancelButton.KeyDown += OnActionKeyDown;
+        _deleteButton.KeyDown += OnActionKeyDown;
+        KeyDown += OnActionKeyDown;
+        MouseDown += (_, eventArgs) => eventArgs.Handled = true;
+
+        var cardContent = new StackLayout
+        {
+            Padding = new Padding(FoundryTheme.Space6),
+            Spacing = FoundryTheme.Space3,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            Items =
+            {
+                _title,
+                _message,
+                new StackLayout
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = FoundryTheme.Space2,
+                    HorizontalContentAlignment = HorizontalAlignment.Right,
+                    Items =
+                    {
+                        new StackLayoutItem(null, expand: true),
+                        _cancelButton,
+                        _deleteButton,
+                    },
+                },
+            },
+        };
+        var cardSurface = new Panel
+        {
+            BackgroundColor = FoundryTheme.CanvasSurface,
+            Content = cardContent,
+        };
+        _card = new Panel
+        {
+            Padding = new Padding(1),
+            BackgroundColor = FoundryTheme.CanvasBorder,
+            Content = cardSurface,
+        };
+
+        Content = new TableLayout
+        {
+            Padding = new Padding(FoundryTheme.Space4),
+            Rows =
+            {
+                new TableRow { ScaleHeight = true },
+                new TableRow(
+                    new TableCell(null, scaleWidth: true),
+                    new TableCell(_card),
+                    new TableCell(null, scaleWidth: true)),
+                new TableRow { ScaleHeight = true },
+            },
+        };
+        SizeChanged += (_, _) => UpdateCardWidth();
+    }
+
+    internal event EventHandler? CancelRequested;
+
+    internal event EventHandler? ConfirmRequested;
+
+    internal void ShowConfirmation(string summary, bool singularSelection)
+    {
+        _busy = false;
+        _title.Text = singularSelection ? "Delete selected item?" : "Delete selected items?";
+        _message.Text = $"Permanently delete {summary}?\n\nLayout deletion cannot be undone.";
+        _cancelButton.Text = "Cancel";
+        _cancelButton.Enabled = true;
+        _deleteButton.Enabled = true;
+        Visible = true;
+        UpdateCardWidth();
+        Application.Instance.AsyncInvoke(() =>
+        {
+            if (Visible && !_busy)
+                _cancelButton.Focus();
+        });
+    }
+
+    internal void ShowBusy(string summary)
+    {
+        _busy = true;
+        _title.Text = "Deleting selected items…";
+        _message.Text = $"Deleting {summary}. Keep this pane open until the operation finishes.";
+        _cancelButton.Enabled = false;
+        _deleteButton.Enabled = false;
+    }
+
+    internal void Dismiss()
+    {
+        Visible = false;
+        _busy = false;
+        _cancelButton.Enabled = true;
+        _deleteButton.Enabled = true;
+    }
+
+    private void OnActionKeyDown(object? sender, KeyEventArgs eventArgs)
+    {
+        if (eventArgs.Key != Keys.Escape || _busy)
+            return;
+
+        eventArgs.Handled = true;
+        CancelRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void UpdateCardWidth()
+    {
+        var availableWidth = Math.Max(0, ClientSize.Width - FoundryTheme.Space4 * 2);
+        _card.Width = Math.Min(460, availableWidth);
+    }
+}

@@ -7,8 +7,6 @@ namespace RhinoLayoutFoundry.Rhino;
 
 internal sealed class RhinoDocumentThumbnailProvider : IDocumentThumbnailProvider
 {
-    private static readonly SemaphoreSlim CaptureGate = new(1, 1);
-
     public async Task<OverviewThumbnailResult> CaptureAsync(
         OverviewThumbnailRequest request,
         CancellationToken cancellationToken)
@@ -17,7 +15,7 @@ internal sealed class RhinoDocumentThumbnailProvider : IDocumentThumbnailProvide
         var enteredGate = false;
         try
         {
-            await CaptureGate.WaitAsync(cancellationToken);
+            await RhinoThumbnailCaptureGate.Gate.WaitAsync(cancellationToken);
             enteredGate = true;
             if (!RhinoApp.InvokeRequired)
             {
@@ -48,7 +46,7 @@ internal sealed class RhinoDocumentThumbnailProvider : IDocumentThumbnailProvide
         }
         finally
         {
-            if (enteredGate) CaptureGate.Release();
+            if (enteredGate) RhinoThumbnailCaptureGate.Gate.Release();
         }
     }
 
@@ -100,4 +98,9 @@ internal sealed class RhinoDocumentThumbnailProvider : IDocumentThumbnailProvide
         bitmap.Save(stream, ImageFormat.Png);
         return new OverviewThumbnailResult(request.Key, stream.ToArray());
     }
+}
+
+internal static class RhinoThumbnailCaptureGate
+{
+    internal static readonly SemaphoreSlim Gate = new(1, 1);
 }

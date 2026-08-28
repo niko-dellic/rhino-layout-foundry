@@ -268,7 +268,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             new Label
             {
                 Text = "The layer can be renamed or moved later; Foundry will continue using the same layer.",
-                TextColor = FoundryTheme.SecondaryText,
+                TextColor = FoundryTheme.MutedText,
                 Wrap = WrapMode.Word,
             },
         },

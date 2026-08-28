@@ -91,4 +91,34 @@ public sealed class OverviewTreeSorterTests
         Assert.True(sorted[0].Children[0].Sheet!.IsTemplate);
         Assert.False(sorted[0].Children[1].Sheet!.IsTemplate);
     }
+
+    [Fact]
+    public void DisplayModeSortPreservesDetailOrderWithinEachLayout()
+    {
+        var sheetId = Guid.NewGuid();
+        var overview = TestSnapshots.Overview(sheetCount: 0, detailsPerSheet: 0) with
+        {
+            Sheets =
+            [
+                new SheetOverview(
+                    sheetId,
+                    TestSnapshots.RootFolderId,
+                    "Page 1",
+                    0,
+                    [],
+                    [
+                        new DetailOverview(Guid.NewGuid(), "Detail 1", 0, Guid.NewGuid(), "Zebra"),
+                        new DetailOverview(Guid.NewGuid(), "Detail 2", 1, Guid.NewGuid(), "Arctic"),
+                    ]),
+            ],
+        };
+
+        var sorted = OverviewTreeSorter.Sort(
+            OverviewTreeBuilder.Build(overview),
+            OverviewSortProperty.DisplayMode,
+            OverviewSortDirection.Ascending);
+
+        var sheet = Assert.Single(Assert.Single(sorted).Children);
+        Assert.Equal(["Detail 1", "Detail 2"], sheet.Children.Select(node => node.Label));
+    }
 }
