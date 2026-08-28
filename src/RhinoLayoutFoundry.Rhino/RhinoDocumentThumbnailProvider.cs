@@ -72,10 +72,15 @@ internal sealed class RhinoDocumentThumbnailProvider : IDocumentThumbnailProvide
         // settings from the page instead so the bitmap media is the sheet itself.
         using var pageSettings = new ViewCaptureSettings(page, 72.0)
         {
-            DrawBackground = true,
+            // Thumbnail and canvas previews represent the printed sheet, not
+            // Rhino's configured viewport background color.
+            DrawBackground = false,
+            DrawBackgroundBitmap = false,
+            DrawWallpaper = false,
             DrawGrid = false,
             DrawAxis = false,
             RasterMode = true,
+            OutputColor = ViewCaptureSettings.ColorMode.PrintColor,
             UsePrintWidths = false,
         };
         using var previewSettings = pageSettings.CreatePreviewSettings(

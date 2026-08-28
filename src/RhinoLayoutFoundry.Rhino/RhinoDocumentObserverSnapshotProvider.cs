@@ -58,12 +58,14 @@ internal sealed class RhinoDocumentObserverSnapshotProvider : IDocumentObserverS
                     .Select((detail, index) =>
                     {
                         var box = detail.DetailGeometry.GetBoundingBox(true);
-                        var normalized = box.IsValid && page.PageWidth > 0 && page.PageHeight > 0
-                            ? new ObserverRect(
-                                Math.Clamp(box.Min.X / page.PageWidth, 0, 1),
-                                Math.Clamp(box.Min.Y / page.PageHeight, 0, 1),
-                                Math.Clamp((box.Max.X - box.Min.X) / page.PageWidth, 0, 1),
-                                Math.Clamp((box.Max.Y - box.Min.Y) / page.PageHeight, 0, 1))
+                        var normalized = box.IsValid
+                            ? ObserverDetailBounds.FromPageCoordinates(
+                                box.Min.X,
+                                box.Min.Y,
+                                box.Max.X,
+                                box.Max.Y,
+                                page.PageWidth,
+                                page.PageHeight)
                             : new ObserverRect(0.05, 0.05, 0.9, 0.9);
                         return new ObserverDetailSnapshot(
                             detail.Viewport.Id,

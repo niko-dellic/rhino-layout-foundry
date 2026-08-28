@@ -7,6 +7,11 @@ public sealed record ObserverSheetCard(
     ObserverRect Bounds,
     bool HasManualPlacement);
 
+public sealed record ObserverDetailTarget(
+    Guid SheetPageViewId,
+    ObserverDetailSnapshot Detail,
+    ObserverRect Bounds);
+
 public sealed record ObserverFolderFrame(
     ObserverFolderSnapshot Folder,
     ObserverRect Bounds,
@@ -294,6 +299,28 @@ public sealed class ObserverSpatialIndex
             .OrderBy(card => card.Bounds.Width * card.Bounds.Height)
             .FirstOrDefault();
 
+    public IReadOnlyList<ObserverDetailTarget> QueryDetails(ObserverRect worldBounds) =>
+        QuerySheets(worldBounds)
+            .SelectMany(card => card.Sheet.Details.Select(detail => new ObserverDetailTarget(
+                card.Sheet.PageViewId,
+                detail,
+                DetailBounds(card.Bounds, detail.NormalizedBounds))))
+            .Where(target => target.Bounds.Intersects(worldBounds))
+            .OrderBy(target => target.Bounds.Width * target.Bounds.Height)
+            .ThenBy(target => target.Detail.Name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+    public ObserverDetailTarget? HitDetail(ObserverPoint worldPoint) =>
+        _layout.Sheets.Values
+            .Where(card => card.Bounds.Contains(worldPoint))
+            .SelectMany(card => card.Sheet.Details.Select(detail => new ObserverDetailTarget(
+                card.Sheet.PageViewId,
+                detail,
+                DetailBounds(card.Bounds, detail.NormalizedBounds))))
+            .Where(target => target.Bounds.Contains(worldPoint))
+            .OrderBy(target => target.Bounds.Width * target.Bounds.Height)
+            .FirstOrDefault();
+
     public ObserverFolderFrame? HitFolderHeader(ObserverPoint worldPoint, double headerHeight) =>
         _layout.Folders.Values
             .Where(frame => new ObserverRect(
@@ -303,4 +330,10 @@ public sealed class ObserverSpatialIndex
                 headerHeight).Contains(worldPoint))
             .OrderByDescending(frame => frame.Depth)
             .FirstOrDefault();
+
+    public static ObserverRect DetailBounds(ObserverRect sheetBounds, ObserverRect normalizedBounds) => new(
+        sheetBounds.Left + normalizedBounds.Left * sheetBounds.Width,
+        sheetBounds.Top + normalizedBounds.Top * sheetBounds.Height,
+        normalizedBounds.Width * sheetBounds.Width,
+        normalizedBounds.Height * sheetBounds.Height);
 }

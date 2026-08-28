@@ -255,12 +255,20 @@ public sealed class LayoutFoundryPanel : Panel
         {
             BackgroundColor = FoundryTheme.PanelBackground,
             Padding = new Padding(FoundryTheme.Space4),
-            Spacing = FoundryTheme.Space3,
+            Spacing = 0,
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Items =
             {
-                CreateHeader(),
-                _toolbarSurface,
+                new StackLayout
+                {
+                    Spacing = FoundryTheme.Space3,
+                    HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                    Items =
+                    {
+                        CreateHeader(),
+                        _toolbarSurface,
+                    },
+                },
                 _folderDraftStrip,
                 new StackLayoutItem(_viewHost, expand: true),
                 _statusLabel,
@@ -488,39 +496,23 @@ public sealed class LayoutFoundryPanel : Panel
 
     private Control CreateHeader()
     {
-        var brandLabel = new Label
+        var title = new Label
         {
             Text = "Layout Foundry",
             Font = SystemFonts.Bold(14),
             TextColor = FoundryTheme.PrimaryText,
             TextAlignment = TextAlignment.Left,
         };
-        return new TableLayout
+
+        return new StackLayout
         {
-            Rows =
+            Orientation = Orientation.Horizontal,
+            Spacing = FoundryTheme.Space2,
+            VerticalContentAlignment = VerticalAlignment.Center,
+            Items =
             {
-                new TableRow(
-                    brandLabel,
-                    new TableCell(null, scaleWidth: true),
-                    new StackLayout
-                    {
-                        Orientation = Orientation.Horizontal,
-                        Spacing = FoundryTheme.Space1,
-                        VerticalContentAlignment = VerticalAlignment.Center,
-                        Items =
-                        {
-                            _listViewButton,
-                            _thumbnailViewButton,
-                            _canvasViewButton,
-                            new Panel
-                            {
-                                Width = 1,
-                                Height = 20,
-                                BackgroundColor = FoundryTheme.CanvasBorder,
-                            },
-                            _fullscreenButton,
-                        },
-                    }),
+                new ImageView { Image = FoundryViewIcons.BrandMark() },
+                title,
             },
         };
     }
@@ -748,45 +740,38 @@ public sealed class LayoutFoundryPanel : Panel
         _filterKindField.Width = _responsiveLayout.StackToolbar ? 84 : 96;
         return new StackLayout
         {
+            Orientation = Orientation.Horizontal,
             Spacing = FoundryTheme.Space1,
-            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            VerticalContentAlignment = VerticalAlignment.Center,
             Items =
             {
-                new StackLayout
+                _addFolderButton,
+                _batchCreateButton,
+                _manageButton,
+                _deleteButton,
+                new Panel
                 {
-                    Orientation = Orientation.Horizontal,
-                    Spacing = FoundryTheme.Space1,
-                    VerticalContentAlignment = VerticalAlignment.Center,
-                    Items =
-                    {
-                        _addFolderButton,
-                        _batchCreateButton,
-                        _manageButton,
-                        _deleteButton,
-                        new Panel
-                        {
-                            Width = 1,
-                            Height = 20,
-                            BackgroundColor = FoundryTheme.CanvasBorder,
-                        },
-                        _importButton,
-                        _exportButton,
-                        new StackLayoutItem(null, expand: true),
-                    },
+                    Width = 1,
+                    Height = 20,
+                    BackgroundColor = FoundryTheme.CanvasBorder,
                 },
-                new StackLayout
+                _importButton,
+                _exportButton,
+                new StackLayoutItem(null, expand: true),
+                _searchField,
+                _filterKindField,
+                _clearFilterButton,
+                new StackLayoutItem(null, expand: true),
+                _listViewButton,
+                _thumbnailViewButton,
+                _canvasViewButton,
+                new Panel
                 {
-                    Orientation = Orientation.Horizontal,
-                    Spacing = FoundryTheme.Space1,
-                    VerticalContentAlignment = VerticalAlignment.Center,
-                    Items =
-                    {
-                        _searchField,
-                        _filterKindField,
-                        _clearFilterButton,
-                        new StackLayoutItem(null, expand: true),
-                    },
+                    Width = 1,
+                    Height = 20,
+                    BackgroundColor = FoundryTheme.CanvasBorder,
                 },
+                _fullscreenButton,
             },
         };
     }
@@ -1177,6 +1162,7 @@ public sealed class LayoutFoundryPanel : Panel
         }
 
         _pendingDeleteSelection = pending;
+        _panelShell.Enabled = false;
         _deleteConfirmationOverlay.ShowConfirmation(
             summary,
             resolved.SelectedItemCount == 1);
@@ -1193,7 +1179,7 @@ public sealed class LayoutFoundryPanel : Panel
             current.Revision != pending.SourceRevision)
         {
             _pendingDeleteSelection = null;
-            _deleteConfirmationOverlay.Dismiss();
+            DismissDeleteOverlay();
             _statusLabel.Text = "The Rhino document changed. Review the selection and try deleting again.";
             RefreshOverview();
             return;
@@ -1214,11 +1200,25 @@ public sealed class LayoutFoundryPanel : Panel
             _deleteConfirmationOverlay.ShowBusy(pending.Summary);
         _statusLabel.Text = $"Deleting {pending.Summary}…";
 
-        var result = await LayoutFoundryUiHost.DeleteSelectionAsync(pending.Selection);
+        OperationResult result;
+        try
+        {
+            result = await LayoutFoundryUiHost.DeleteSelectionAsync(pending.Selection);
+        }
+        catch (Exception exception)
+        {
+            _statusLabel.Text = $"Deletion failed: {exception.Message}";
+            RefreshOverview();
+            LayoutFoundryUiHost.NotifyOverviewChanged(OverviewInvalidation.All);
+            return;
+        }
+        finally
+        {
+            _deleteInProgress = false;
+            _pendingDeleteSelection = null;
+            DismissDeleteOverlay();
+        }
 
-        _deleteInProgress = false;
-        _pendingDeleteSelection = null;
-        _deleteConfirmationOverlay.Dismiss();
         if (!result.Succeeded)
         {
             _statusLabel.Text = DiagnosticMessage(result);
@@ -1238,8 +1238,14 @@ public sealed class LayoutFoundryPanel : Panel
             return;
 
         _pendingDeleteSelection = null;
-        _deleteConfirmationOverlay.Dismiss();
+        DismissDeleteOverlay();
         _statusLabel.Text = "Deletion cancelled.";
+    }
+
+    private void DismissDeleteOverlay()
+    {
+        _deleteConfirmationOverlay.Dismiss();
+        _panelShell.Enabled = true;
     }
 
     private void BeginInlineSheetRename()

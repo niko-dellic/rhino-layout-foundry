@@ -44,7 +44,7 @@ public sealed class LayoutFoundryPlugin : PlugIn
             new RhinoTemplateCaptureContextProvider(),
             new RhinoDocumentObserverSnapshotProvider(_stateStore, _revisionTracker),
             RhinoProjectIconLoader.Load());
-        _panelIcon = TemporaryPanelIcon.Create();
+        _panelIcon = PanelIcon.Create();
         Panels.RegisterPanel(this, typeof(LayoutFoundryPanel), "Layout Foundry", _panelIcon);
         _eventBridge = new RhinoDocumentEventBridge(
             _revisionTracker,

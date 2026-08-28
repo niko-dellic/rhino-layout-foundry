@@ -832,7 +832,23 @@ public sealed class ObserverFoundryPanel : Panel
     {
         var snapshot = LayoutFoundryUiHost.CaptureSnapshot();
         if (snapshot is null) return;
-        var targets = BatchTargetResolver.Resolve(snapshot, LayoutFoundryUiHost.Selection.Selected);
+        var selection = LayoutFoundryUiHost.Selection.Selected.ToArray();
+        if (selection.Any(key => key.Kind == OverviewNodeKind.Detail))
+        {
+            var detailIds = BatchTargetResolver.ResolveDetailIds(snapshot, selection);
+            if (detailIds.Count == 0)
+            {
+                _status.Text = "The selection does not contain any detail viewports.";
+                return;
+            }
+
+            var detailDialog = new DetailPropertiesDialog(snapshot, detailIds);
+            detailDialog.ShowModal(this);
+            if (detailDialog.Succeeded) RefreshSnapshot(fit: false);
+            return;
+        }
+
+        var targets = BatchTargetResolver.Resolve(snapshot, selection);
         if (targets.Count == 0)
         {
             _status.Text = "The selection does not contain any layouts.";

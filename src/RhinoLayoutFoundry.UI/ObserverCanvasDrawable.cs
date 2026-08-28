@@ -54,6 +54,7 @@ internal sealed class ObserverCanvasDrawable : Drawable
     private int _namedViewsScrollRow;
     private string? _selectedNamedView;
     private string? _dragNamedView;
+    private Guid? _hoverDetailId;
 
     internal ObserverCanvasDrawable()
         : base(true)
@@ -64,6 +65,7 @@ internal sealed class ObserverCanvasDrawable : Drawable
         Paint += OnPaint;
         MouseDown += OnMouseDown;
         MouseMove += OnMouseMove;
+        MouseLeave += (_, _) => SetHoveredDetail(null);
         MouseUp += OnMouseUp;
         MouseDoubleClick += OnMouseDoubleClick;
         MouseWheel += OnMouseWheel;
@@ -207,6 +209,16 @@ internal sealed class ObserverCanvasDrawable : Drawable
     internal void SetSelection(IEnumerable<OverviewNodeKey> selection)
     {
         _selection = selection.Where(ContainsKey).ToHashSet();
+        foreach (var detailId in _selection
+                     .Where(key => key.Kind == OverviewNodeKind.Detail)
+                     .Select(key => key.Id))
+        {
+            var owner = _snapshot.Sheets.FirstOrDefault(sheet =>
+                sheet.Details.Any(detail => detail.DetailViewportId == detailId));
+            if (owner is not null) _expandedNavigatorSheets.Add(owner.PageViewId);
+        }
+        _navigatorRows = BuildNavigatorRows(_snapshot);
+        ClampNavigatorScroll();
         Invalidate();
     }
 
@@ -494,15 +506,33 @@ internal sealed class ObserverCanvasDrawable : Drawable
         {
             var detailSelected = _selection.Contains(
                 new OverviewNodeKey(OverviewNodeKind.Detail, detail.DetailViewportId));
-            if (!sheetSelected && !detailSelected) continue;
+            var hovered = _hoverDetailId == detail.DetailViewportId;
             var rect = DetailScreenRect(detail.NormalizedBounds, bounds);
+            if (rect.Width < 5 || rect.Height < 5) continue;
+            var prominent = sheetSelected || detailSelected || hovered;
             graphics.DrawRectangle(
                 new Pen(
                     FoundryTheme.WithAlpha(
-                        FoundryTheme.SelectionAccent,
-                        detailSelected ? 255 : 180),
-                    detailSelected ? 3 : 1),
+                        prominent ? FoundryTheme.SelectionAccent : FoundryTheme.CanvasBorder,
+                        detailSelected ? 255 : hovered ? 220 : sheetSelected ? 155 : 90),
+                    detailSelected ? 3 : hovered ? 2 : 1),
                 rect);
+            if (detailSelected || hovered)
+            {
+                graphics.FillRectangle(
+                    FoundryTheme.WithAlpha(FoundryTheme.CanvasBackground, 205),
+                    rect.Left,
+                    rect.Top,
+                    Math.Min(rect.Width, Math.Max(54, detail.Name.Length * 6 + 10)),
+                    18);
+                DrawOverlayText(
+                    graphics,
+                    _smallFont,
+                    FoundryTheme.PrimaryText,
+                    rect.Left + 4,
+                    rect.Top + 3,
+                    detail.Name);
+            }
         }
     }
 
@@ -1093,15 +1123,17 @@ internal sealed class ObserverCanvasDrawable : Drawable
             var screenBounds = ScreenRect(card.Bounds, ViewportSize());
             var reorderHandle = eventArgs.Location.X <= screenBounds.Left + 24 &&
                                 eventArgs.Location.Y <= screenBounds.Top + 24;
-            var detail = reorderHandle ? null : HitDetail(card, _pressWorld);
-            if (detail is not null)
-                SelectKey(new OverviewNodeKey(OverviewNodeKind.Detail, detail.DetailViewportId), eventArgs.Modifiers);
+            var detail = reorderHandle ? null : _spatialIndex.HitDetail(_pressWorld);
+            if (detail is not null && detail.SheetPageViewId == card.Sheet.PageViewId)
+                SelectKey(new OverviewNodeKey(OverviewNodeKind.Detail, detail.Detail.DetailViewportId), eventArgs.Modifiers);
             else
                 SelectSheet(card.Sheet.PageViewId, eventArgs.Modifiers);
             _reorderSheetId = card.Sheet.PageViewId;
             _dragMode = reorderHandle
                 ? DragMode.Reorder
-                : DragMode.Sheets;
+                : detail is not null
+                    ? DragMode.Detail
+                    : DragMode.Sheets;
         }
         else
         {
@@ -1129,7 +1161,19 @@ internal sealed class ObserverCanvasDrawable : Drawable
     private void OnMouseMove(object? sender, MouseEventArgs eventArgs)
     {
         var current = Point(eventArgs.Location);
-        if (_dragMode == DragMode.None) return;
+        if (_dragMode == DragMode.None)
+        {
+            var overNavigator = _navigatorVisible &&
+                                eventArgs.Location.X >= 0 && eventArgs.Location.X <= NavigatorWidth &&
+                                eventArgs.Location.Y >= NavigatorTop;
+            var overNamedViews = _namedViewsVisible &&
+                                 eventArgs.Location.X >= Size.Width - NamedViewsWidth &&
+                                 eventArgs.Location.Y >= NamedViewsTop;
+            SetHoveredDetail(overNavigator || overNamedViews
+                ? null
+                : HitDetailAtScreen(eventArgs.Location)?.DetailViewportId);
+            return;
+        }
         if (_dragMode == DragMode.NamedView)
         {
             if (!string.IsNullOrWhiteSpace(_dragNamedView) &&
@@ -1265,10 +1309,17 @@ internal sealed class ObserverCanvasDrawable : Drawable
         else if (_dragMode == DragMode.Lasso && _lassoWorld is { } lasso)
         {
             var crossing = lasso.Width < 0;
-            var keys = _spatialIndex.QuerySheets(lasso)
-                .Where(card => crossing || lasso.Contains(card.Bounds))
-                .Select(card => new OverviewNodeKey(OverviewNodeKind.Sheet, card.Sheet.PageViewId))
+            var detailKeys = _spatialIndex.QueryDetails(lasso)
+                .Where(target => crossing || lasso.Contains(target.Bounds))
+                .Select(target => new OverviewNodeKey(OverviewNodeKind.Detail, target.Detail.DetailViewportId))
+                .Distinct()
                 .ToArray();
+            var keys = detailKeys.Length > 0
+                ? detailKeys
+                : _spatialIndex.QuerySheets(lasso)
+                    .Where(card => crossing || lasso.Contains(card.Bounds))
+                    .Select(card => new OverviewNodeKey(OverviewNodeKind.Sheet, card.Sheet.PageViewId))
+                    .ToArray();
             SelectionRequested?.Invoke(this, new ObserverSelectionRequestedEventArgs(
                 keys,
                 keys.FirstOrDefault()));
@@ -1306,7 +1357,7 @@ internal sealed class ObserverCanvasDrawable : Drawable
         var world = _camera.ScreenToWorld(Point(eventArgs.Location), ViewportSize());
         var card = _spatialIndex.HitSheet(world);
         if (card is null) return;
-        var detail = HitDetail(card, world);
+        var detail = _spatialIndex.HitDetail(world)?.Detail;
         var target = detail is null
             ? new OverviewNavigationTarget(card.Sheet.PageViewId)
             : new OverviewNavigationTarget(card.Sheet.PageViewId, detail.DetailViewportId);
@@ -1533,7 +1584,7 @@ internal sealed class ObserverCanvasDrawable : Drawable
         var sheet = _spatialIndex.HitSheet(world);
         if (sheet is not null)
         {
-            var detail = HitDetail(sheet, world);
+            var detail = _spatialIndex.HitDetail(world)?.Detail;
             if (detail is not null)
             {
                 var detailKey = new OverviewNodeKey(OverviewNodeKind.Detail, detail.DetailViewportId);
@@ -1578,19 +1629,14 @@ internal sealed class ObserverCanvasDrawable : Drawable
     private ObserverDetailSnapshot? HitDetailAtScreen(PointF screen)
     {
         var world = _camera.ScreenToWorld(Point(screen), ViewportSize());
-        var card = _spatialIndex.HitSheet(world);
-        return card is null ? null : HitDetail(card, world);
+        return _spatialIndex.HitDetail(world)?.Detail;
     }
 
-    private static ObserverDetailSnapshot? HitDetail(ObserverSheetCard card, ObserverPoint world)
+    private void SetHoveredDetail(Guid? detailId)
     {
-        var localX = (world.X - card.Bounds.Left) / card.Bounds.Width;
-        var localY = (world.Y - card.Bounds.Top) / card.Bounds.Height;
-        var point = new ObserverPoint(localX, localY);
-        return card.Sheet.Details
-            .Where(detail => detail.NormalizedBounds.Contains(point))
-            .OrderBy(detail => detail.NormalizedBounds.Width * detail.NormalizedBounds.Height)
-            .FirstOrDefault();
+        if (_hoverDetailId == detailId) return;
+        _hoverDetailId = detailId;
+        Invalidate();
     }
 
     private void NavigateFirstSelection()
@@ -1651,22 +1697,11 @@ internal sealed class ObserverCanvasDrawable : Drawable
     }
 
     private Guid[] SelectedSheetIds()
-    {
-        var result = _selection
+        => _selection
             .Where(key => key.Kind == OverviewNodeKind.Sheet)
             .Select(key => key.Id)
-            .ToHashSet();
-        foreach (var detailId in _selection
-                     .Where(key => key.Kind == OverviewNodeKind.Detail)
-                     .Select(key => key.Id))
-        {
-            var owner = _snapshot.Sheets.FirstOrDefault(sheet =>
-                sheet.Details.Any(detail => detail.DetailViewportId == detailId));
-            if (owner is not null) result.Add(owner.PageViewId);
-        }
-
-        return result.ToArray();
-    }
+            .Distinct()
+            .ToArray();
 
     private ObserverRect PreviewBounds(ObserverRect bounds, Guid id)
     {
@@ -1751,11 +1786,8 @@ internal sealed class ObserverCanvasDrawable : Drawable
         (float)(normalized.Width * card.Width),
         (float)(normalized.Height * card.Height));
 
-    private static ObserverRect DetailWorldRect(ObserverRect card, ObserverRect normalized) => new(
-        card.Left + normalized.Left * card.Width,
-        card.Top + normalized.Top * card.Height,
-        normalized.Width * card.Width,
-        normalized.Height * card.Height);
+    private static ObserverRect DetailWorldRect(ObserverRect card, ObserverRect normalized) =>
+        ObserverSpatialIndex.DetailBounds(card, normalized);
 
     private static ObserverPoint Point(PointF point) => new(point.X, point.Y);
     private static double Distance(ObserverPoint first, ObserverPoint second) =>
@@ -1787,6 +1819,7 @@ internal sealed class ObserverCanvasDrawable : Drawable
         Sheets,
         Folder,
         Reorder,
+        Detail,
         Lasso,
         NamedView,
     }

@@ -13,6 +13,17 @@ public sealed class ObserverBoardLayoutTests
     }
 
     [Fact]
+    public void DetailPageBoundsConvertBottomOriginRhinoCoordinatesToTopOriginCanvasCoordinates()
+    {
+        var bounds = ObserverDetailBounds.FromPageCoordinates(10, 20, 30, 40, 100, 100);
+
+        Assert.True(Math.Abs(0.1 - bounds.X) < 1e-8);
+        Assert.True(Math.Abs(0.6 - bounds.Y) < 1e-8);
+        Assert.True(Math.Abs(0.2 - bounds.Width) < 1e-8);
+        Assert.True(Math.Abs(0.2 - bounds.Height) < 1e-8);
+    }
+
+    [Fact]
     public void AutomaticLayoutIsDeterministicAndNonOverlapping()
     {
         var snapshot = Snapshot();
@@ -59,6 +70,43 @@ public sealed class ObserverBoardLayoutTests
         Assert.Contains(visible, card => card.Sheet.PageViewId == first.Sheet.PageViewId);
         Assert.False(visible.Any(card =>
             card.Sheet.PageViewId != first.Sheet.PageViewId && !card.Bounds.Intersects(first.Bounds.Inflate(1))));
+    }
+
+    [Fact]
+    public void SpatialIndexHitsAndQueriesIndividualDetailsInsideASheet()
+    {
+        var snapshot = Snapshot();
+        var detailId = Guid.NewGuid();
+        var firstSheet = snapshot.Sheets[0] with
+        {
+            Details =
+            [
+                new ObserverDetailSnapshot(
+                    detailId,
+                    "Plan detail",
+                    new ObserverRect(0.1, 0.2, 0.35, 0.4),
+                    Guid.NewGuid(),
+                    "Wireframe"),
+            ],
+        };
+        snapshot = snapshot with
+        {
+            Sheets = [firstSheet, .. snapshot.Sheets.Skip(1)],
+        };
+        var layout = new ObserverPlacementPlanner().Arrange(snapshot);
+        var card = layout.Sheets[firstSheet.PageViewId];
+        var expected = ObserverSpatialIndex.DetailBounds(card.Bounds, firstSheet.Details[0].NormalizedBounds);
+        var index = new ObserverSpatialIndex(layout);
+
+        var hit = index.HitDetail(expected.Center);
+        var queried = index.QueryDetails(expected.Inflate(1));
+
+        Assert.NotNull(hit);
+        Assert.Equal(detailId, hit!.Detail.DetailViewportId);
+        Assert.Equal(firstSheet.PageViewId, hit.SheetPageViewId);
+        Assert.Equal(expected, hit.Bounds);
+        Assert.Contains(queried, target => target.Detail.DetailViewportId == detailId);
+        Assert.Null(index.HitDetail(new ObserverPoint(card.Bounds.Right - 1, card.Bounds.Bottom - 1)));
     }
 
     [Fact]

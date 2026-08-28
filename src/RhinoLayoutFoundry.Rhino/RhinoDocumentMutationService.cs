@@ -118,6 +118,7 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
             .ToArray();
         if (details.Length != change.DetailViewportIds.Distinct().Count())
             return Failure("named_view.detail_missing", "A targeted detail viewport no longer exists.");
+        var namedView = document.NamedViews[namedViewIndex];
 
         var before = details.ToDictionary(
             detail => detail.Viewport.Id,
@@ -129,8 +130,12 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
         {
             foreach (var detail in details)
             {
-                document.NamedViews.Restore(namedViewIndex, detail.Viewport);
-                detail.CommitViewportChanges();
+                if (!detail.Viewport.SetViewProjection(namedView.Viewport, true))
+                    throw new InvalidOperationException(
+                        $"Rhino did not apply named view '{change.NamedViewName}' to detail '{detail.DescriptiveTitle}'.");
+                if (!detail.CommitViewportChanges())
+                    throw new InvalidOperationException(
+                        $"Rhino did not commit named view '{change.NamedViewName}' on detail '{detail.DescriptiveTitle}'.");
             }
 
             _revisionTracker.Bump(document);
@@ -1463,7 +1468,10 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
             var index = document.NamedViews.FindByName(namedView);
             if (index >= 0)
             {
-                document.NamedViews.Restore(index, detail.Viewport);
+                var storedView = document.NamedViews[index];
+                if (!detail.Viewport.SetViewProjection(storedView.Viewport, true))
+                    throw new InvalidOperationException(
+                        $"Rhino did not apply named view '{namedView}' to detail '{slot.Name}'.");
                 viewportChanged = true;
             }
         }

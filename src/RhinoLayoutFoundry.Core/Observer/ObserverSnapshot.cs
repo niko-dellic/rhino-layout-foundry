@@ -55,6 +55,33 @@ public sealed record ObserverDetailSnapshot(
     Guid DisplayModeId,
     string DisplayModeName);
 
+public static class ObserverDetailBounds
+{
+    public static ObserverRect FromPageCoordinates(
+        double minimumX,
+        double minimumY,
+        double maximumX,
+        double maximumY,
+        double pageWidth,
+        double pageHeight)
+    {
+        if (pageWidth <= 0 || pageHeight <= 0 ||
+            !double.IsFinite(minimumX) || !double.IsFinite(minimumY) ||
+            !double.IsFinite(maximumX) || !double.IsFinite(maximumY))
+            return new ObserverRect(0.05, 0.05, 0.9, 0.9);
+
+        var left = Math.Clamp(Math.Min(minimumX, maximumX) / pageWidth, 0, 1);
+        var right = Math.Clamp(Math.Max(minimumX, maximumX) / pageWidth, 0, 1);
+        var bottom = Math.Clamp(Math.Min(minimumY, maximumY) / pageHeight, 0, 1);
+        var top = Math.Clamp(Math.Max(minimumY, maximumY) / pageHeight, 0, 1);
+        return new ObserverRect(
+            left,
+            1 - top,
+            Math.Max(0, right - left),
+            Math.Max(0, top - bottom));
+    }
+}
+
 public interface IDocumentObserverSnapshotProvider
 {
     ObserverSnapshot Capture();

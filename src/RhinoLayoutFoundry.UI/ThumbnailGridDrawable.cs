@@ -149,7 +149,7 @@ internal sealed class ThumbnailGridDrawable : Drawable
         }
         else
         {
-            graphics.FillRectangle(Color.FromArgb(255, 232, 232, 228), image);
+            graphics.FillRectangle(Colors.White, image);
             foreach (var detail in sheet.Details)
             {
                 var bounds = new RectangleF(
@@ -157,7 +157,7 @@ internal sealed class ThumbnailGridDrawable : Drawable
                     image.Y + (float)(detail.NormalizedBounds.Y * image.Height),
                     (float)(detail.NormalizedBounds.Width * image.Width),
                     (float)(detail.NormalizedBounds.Height * image.Height));
-                graphics.FillRectangle(Color.FromArgb(255, 214, 216, 218), bounds);
+                graphics.FillRectangle(Color.FromArgb(255, 242, 243, 244), bounds);
                 graphics.DrawRectangle(Color.FromArgb(130, 100, 103, 106), bounds);
             }
         }

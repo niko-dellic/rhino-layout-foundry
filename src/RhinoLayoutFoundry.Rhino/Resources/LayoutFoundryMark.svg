@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <title>Layout Foundry Mark 1</title>
+  <g fill="#000000">
+    <!-- top cap -->
+    <polygon points="205,64 307,64 340,120 172,120"/>
+    <!-- left arm -->
+    <polygon points="126,120 172,120 103,240 74,290 50,248"/>
+    <!-- right arm -->
+    <polygon points="340,120 386,120 430,196 384,276 332,276 378,196"/>
+    <!-- bottom bar -->
+    <polygon points="50,292 332,292 292,360 92,360"/>
+    <!-- center trapezoid -->
+    <polygon points="177,190 287,190 258,246 206,246"/>
+  </g>
+</svg>
