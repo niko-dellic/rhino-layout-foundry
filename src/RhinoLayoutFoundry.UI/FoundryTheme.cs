@@ -65,6 +65,16 @@ internal static class FoundryTheme
         ? Color.FromArgb(239, 68, 68, 255)
         : Color.FromArgb(220, 38, 38, 255);
 
+    // Neutral shadcn-style primary actions. SelectionAccent remains reserved
+    // for selection/focus affordances instead of becoming a large color block.
+    internal static Color PrimaryActionBackground => IsDarkMode
+        ? Color.FromArgb(250, 250, 250, 255)
+        : Color.FromArgb(24, 24, 27, 255);
+
+    internal static Color PrimaryActionText => IsDarkMode
+        ? Color.FromArgb(24, 24, 27, 255)
+        : Color.FromArgb(250, 250, 250, 255);
+
     internal static Color SelectionWindowStroke(bool crossing) => RhinoColor(
         () => crossing
             ? AppearanceSettings.SelectionWindowCrossingStrokeColor

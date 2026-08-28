@@ -8,18 +8,24 @@ internal sealed class ProjectInformationDialog : Dialog
 {
     private readonly ProjectInformationEditor _editor;
     private readonly Label _status = FoundryTheme.MutedLabel();
-    private readonly Button _save;
+    private readonly FoundryDialogButton _save;
 
     internal ProjectInformationDialog(ProjectInformation information)
     {
         Title = "Project information";
-        MinimumSize = new Size(720, 700);
+        MinimumSize = new Size(760, 600);
+        Size = new Size(900, 760);
         Resizable = true;
-        Padding = new Padding(FoundryTheme.Space4);
+        Padding = new Padding(FoundryTheme.Space4 + FoundryTheme.Space1);
         BackgroundColor = FoundryTheme.PanelBackground;
         _editor = new ProjectInformationEditor(information);
-        _save = FoundryTheme.ConfigureButton(new Button { Text = "Save project info" }, 128);
-        var cancel = FoundryTheme.ConfigureButton(new Button { Text = "Cancel" });
+        _save = new FoundryDialogButton(
+            "Save project info",
+            FoundryDialogButtonStyle.Primary,
+            132);
+        var cancel = new FoundryDialogButton(
+            "Cancel",
+            FoundryDialogButtonStyle.Secondary);
         cancel.Click += (_, _) => Close();
         _save.Click += async (_, _) => await SaveAsync();
         _editor.Changed += (_, _) =>
@@ -27,19 +33,38 @@ internal sealed class ProjectInformationDialog : Dialog
             _status.Text = _editor.ValidationError ?? string.Empty;
             _save.Enabled = _editor.ValidationError is null;
         };
-        DefaultButton = _save;
-        AbortButton = cancel;
+        KeyDown += (_, eventArgs) =>
+        {
+            if (eventArgs.Key != Keys.Escape) return;
+            eventArgs.Handled = true;
+            Close();
+        };
         Content = new StackLayout
         {
-            Spacing = FoundryTheme.Space3,
+            Spacing = FoundryTheme.Space4,
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Items =
             {
-                new Label
+                new StackLayout
                 {
-                    Text = "Project information",
-                    Font = SystemFonts.Bold(17),
-                    TextColor = FoundryTheme.PrimaryText,
+                    Orientation = Orientation.Horizontal,
+                    Spacing = FoundryTheme.Space3,
+                    VerticalContentAlignment = VerticalAlignment.Center,
+                    Items =
+                    {
+                        new ImageView
+                        {
+                            Image = FoundryViewIcons.ProjectInformation(),
+                            Size = new Size(20, 20),
+                        },
+                        new Label
+                        {
+                            Text = "Project information",
+                            Font = SystemFonts.Bold(17),
+                            TextColor = FoundryTheme.PrimaryText,
+                            TextAlignment = TextAlignment.Left,
+                        },
+                    },
                 },
                 new StackLayoutItem(new Scrollable
                 {
@@ -48,10 +73,22 @@ internal sealed class ProjectInformationDialog : Dialog
                     Content = _editor,
                 }, true),
                 _status,
-                new TableLayout
+                new Panel
                 {
-                    Rows = { new TableRow(new TableCell(null, true), cancel, _save) },
-                    Spacing = new Size(FoundryTheme.Space2, 0),
+                    Height = 1,
+                    BackgroundColor = FoundryTheme.WithAlpha(FoundryTheme.CanvasBorder, 145),
+                },
+                new StackLayout
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = FoundryTheme.Space2,
+                    HorizontalContentAlignment = HorizontalAlignment.Right,
+                    Items =
+                    {
+                        new StackLayoutItem(null, expand: true),
+                        cancel,
+                        _save,
+                    },
                 },
             },
         };

@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using Eto.Drawing;
 using Eto.Forms;
 using RhinoLayoutFoundry.Core.Domain;
 
@@ -8,16 +9,23 @@ internal sealed class ProjectInformationEditor : Panel
 {
     private const int MaximumLogoBytes = 5 * 1024 * 1024;
     private readonly Dictionary<string, TextBox> _fields = new(StringComparer.Ordinal);
-    private readonly TextArea _siteAddress = new() { Height = 52 };
-    private readonly TextArea _firmAddress = new() { Height = 52 };
-    private readonly TextArea _customFields = new() { Height = 92, Wrap = false };
+    private readonly TextArea _siteAddress = Area(48);
+    private readonly TextArea _firmAddress = Area(48);
+    private readonly TextArea _customFields = Area(72, wrap: false);
     private readonly Label _logoLabel = FoundryTheme.MutedLabel();
     private BrandAsset? _logo;
 
     internal ProjectInformationEditor(ProjectInformation value)
     {
-        var chooseLogo = FoundryTheme.ConfigureButton(new Button { Text = "Choose PNG/JPEG…" }, 132);
-        var clearLogo = FoundryTheme.ConfigureButton(new Button { Text = "Clear" }, 58);
+        MinimumSize = new Size(700, 0);
+        var chooseLogo = new FoundryDialogButton(
+            "Choose image…",
+            FoundryDialogButtonStyle.Secondary,
+            116);
+        var clearLogo = new FoundryDialogButton(
+            "Clear",
+            FoundryDialogButtonStyle.Secondary,
+            62);
         chooseLogo.Click += (_, _) => ChooseLogo();
         clearLogo.Click += (_, _) =>
         {
@@ -28,51 +36,100 @@ internal sealed class ProjectInformationEditor : Panel
 
         Content = new StackLayout
         {
-            Spacing = FoundryTheme.Space3,
+            Padding = new Padding(FoundryTheme.Space1, FoundryTheme.Space2),
+            Spacing = FoundryTheme.Space4,
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            VerticalContentAlignment = VerticalAlignment.Top,
             Items =
             {
                 FoundryTheme.MutedLabel(
                     "Project information is stored in this Rhino document and drives every Foundry-managed title block."),
-                Section("Project", Form(
-                    Row("Project name", Field("projectName")),
-                    Row("Project number", Field("projectNumber")),
-                    Row("Client", Field("clientName")),
-                    Row("Site address", _siteAddress),
-                    Row("Phase", Field("projectPhase")),
-                    Row("Status", Field("projectStatus")))),
-                Section("Firm", Form(
-                    Row("Firm name", Field("firmName")),
-                    Row("Firm address", _firmAddress),
-                    Row("Phone", Field("firmPhone")),
-                    Row("Email", Field("firmEmail")),
-                    Row("Website", Field("firmWebsite")),
-                    Row("Registration / license", Field("firmRegistration")),
-                    new TableRow(new Label { Text = "Logo" }, new StackLayout
+                Section("Project", new StackLayout
+                {
+                    Spacing = FoundryTheme.Space3,
+                    HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                    VerticalContentAlignment = VerticalAlignment.Top,
+                    Items =
                     {
-                        Orientation = Orientation.Horizontal,
-                        Spacing = FoundryTheme.Space2,
-                        Items = { chooseLogo, clearLogo, _logoLabel },
-                    }))),
-                Section("Issue defaults", Form(
-                    Row("Issue date", Field("issueDate")),
-                    Row("Issue purpose", Field("issuePurpose")),
-                    Row("Drawn by", Field("drawnBy")),
-                    Row("Checked by", Field("checkedBy")),
-                    Row("Approved by", Field("approvedBy")))),
-                Section("Default revision", Form(
-                    Row("Code", Field("revisionCode")),
-                    Row("Date", Field("revisionDate")),
-                    Row("Description", Field("revisionDescription")),
-                    Row("Issued by", Field("revisionIssuedBy")),
-                    Row("Checked by", Field("revisionCheckedBy")))),
+                        Pair(
+                            Labeled("Project name", Field("projectName")),
+                            Labeled("Project number", Field("projectNumber"))),
+                        Pair(
+                            Labeled("Client", Field("clientName")),
+                            Labeled("Phase", Field("projectPhase"))),
+                        Pair(
+                            Labeled("Status", Field("projectStatus")),
+                            Labeled("Site address", _siteAddress)),
+                    },
+                }),
+                Section("Firm", new StackLayout
+                {
+                    Spacing = FoundryTheme.Space3,
+                    HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                    VerticalContentAlignment = VerticalAlignment.Top,
+                    Items =
+                    {
+                        Pair(
+                            Labeled("Firm name", Field("firmName")),
+                            Labeled("Phone", Field("firmPhone"))),
+                        Pair(
+                            Labeled("Email", Field("firmEmail")),
+                            Labeled("Website", Field("firmWebsite"))),
+                        Pair(
+                            Labeled("Firm address", _firmAddress),
+                            Labeled("Registration / license", Field("firmRegistration"))),
+                        FieldGroup("Logo", new StackLayout
+                        {
+                            Orientation = Orientation.Horizontal,
+                            Spacing = FoundryTheme.Space2,
+                            VerticalContentAlignment = VerticalAlignment.Center,
+                            Items = { chooseLogo, clearLogo, _logoLabel },
+                        }),
+                    },
+                }),
+                Section("Issue defaults", new StackLayout
+                {
+                    Spacing = FoundryTheme.Space3,
+                    HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                    VerticalContentAlignment = VerticalAlignment.Top,
+                    Items =
+                    {
+                        Pair(
+                            Labeled("Issue date", Field("issueDate")),
+                            Labeled("Issue purpose", Field("issuePurpose"))),
+                        Pair(
+                            Labeled("Drawn by", Field("drawnBy")),
+                            Labeled("Checked by", Field("checkedBy"))),
+                        Pair(
+                            Labeled("Approved by", Field("approvedBy")),
+                            new Panel()),
+                    },
+                }),
+                Section("Default revision", new StackLayout
+                {
+                    Spacing = FoundryTheme.Space3,
+                    HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                    VerticalContentAlignment = VerticalAlignment.Top,
+                    Items =
+                    {
+                        Pair(
+                            Labeled("Code", Field("revisionCode")),
+                            Labeled("Date", Field("revisionDate"))),
+                        Labeled("Description", Field("revisionDescription")),
+                        Pair(
+                            Labeled("Issued by", Field("revisionIssuedBy")),
+                            Labeled("Checked by", Field("revisionCheckedBy"))),
+                    },
+                }),
                 Section("Custom fields", new StackLayout
                 {
-                    Spacing = FoundryTheme.Space1,
+                    Spacing = FoundryTheme.Space2,
+                    HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                    VerticalContentAlignment = VerticalAlignment.Top,
                     Items =
                     {
                         FoundryTheme.MutedLabel("Enter one field per line as Label = Value."),
-                        _customFields,
+                        new FoundryFormField(_customFields),
                     },
                 }),
             },
@@ -149,7 +206,11 @@ internal sealed class ProjectInformationEditor : Panel
 
     private TextBox Field(string key)
     {
-        var result = new TextBox();
+        var result = new TextBox
+        {
+            ShowBorder = false,
+            BackgroundColor = Colors.Transparent,
+        };
         _fields.Add(key, result);
         return result;
     }
@@ -218,23 +279,64 @@ internal sealed class ProjectInformationEditor : Panel
 
     private void OnChanged(object? sender, EventArgs eventArgs) => Changed?.Invoke(this, EventArgs.Empty);
 
-    private static TableRow Row(string label, Control editor) =>
-        new(new Label { Text = label }, new TableCell(editor, true));
-
-    private static TableLayout Form(params TableRow[] rows)
+    private static TextArea Area(int height, bool wrap = true) => new()
     {
-        var layout = new TableLayout
+        Height = height,
+        Wrap = wrap,
+        BackgroundColor = Colors.Transparent,
+    };
+
+    private static Control Labeled(string label, Control editor) =>
+        FieldGroup(label, new FoundryFormField(editor));
+
+    private static Control FieldGroup(string label, Control content) => new StackLayout
+    {
+        Spacing = FoundryTheme.Space1,
+        HorizontalContentAlignment = HorizontalAlignment.Stretch,
+        Items =
         {
-            Spacing = new Eto.Drawing.Size(FoundryTheme.Space3, FoundryTheme.Space1),
-        };
-        foreach (var row in rows) layout.Rows.Add(row);
-        return layout;
-    }
+            new Label
+            {
+                Text = label,
+                Font = SystemFonts.Bold(9),
+                TextColor = FoundryTheme.MutedText,
+                TextAlignment = TextAlignment.Left,
+            },
+            content,
+        },
+    };
 
-    private static Control Section(string title, Control content) => new GroupBox
+    private static Control Pair(Control left, Control right) => new TableLayout
     {
-        Text = title,
-        Padding = new Eto.Drawing.Padding(FoundryTheme.Space3),
-        Content = content,
+        Spacing = new Size(FoundryTheme.Space4, 0),
+        Rows =
+        {
+            new TableRow(
+                new TableCell(left, scaleWidth: true),
+                new TableCell(right, scaleWidth: true)),
+        },
+    };
+
+    private static Control Section(string title, Control content) => new StackLayout
+    {
+        Spacing = FoundryTheme.Space2,
+        HorizontalContentAlignment = HorizontalAlignment.Stretch,
+        VerticalContentAlignment = VerticalAlignment.Top,
+        Items =
+        {
+            new Label
+            {
+                Text = title,
+                Font = SystemFonts.Bold(11),
+                TextColor = FoundryTheme.PrimaryText,
+                TextAlignment = TextAlignment.Left,
+            },
+            new Panel
+            {
+                Height = 1,
+                BackgroundColor = FoundryTheme.WithAlpha(FoundryTheme.CanvasBorder, 145),
+            },
+            content,
+        },
     };
 }

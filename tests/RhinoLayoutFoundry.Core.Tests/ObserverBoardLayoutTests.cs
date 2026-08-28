@@ -128,6 +128,52 @@ public sealed class ObserverBoardLayoutTests
     }
 
     [Fact]
+    public void NestedPackingContainsChildFoldersInsideTheirParents()
+    {
+        var snapshot = NestedSnapshot();
+        var layout = new ObserverPlacementPlanner().Arrange(
+            snapshot,
+            ObserverPackingMode.NestedFolders);
+        var root = layout.Folders[snapshot.RootFolderId];
+        var parent = snapshot.Folders.Single(folder => folder.ParentId == snapshot.RootFolderId);
+        var nested = snapshot.Folders.Single(folder => folder.ParentId == parent.Id);
+
+        Assert.True(root.Bounds.Contains(layout.Folders[parent.Id].Bounds));
+        Assert.True(layout.Folders[parent.Id].Bounds.Contains(layout.Folders[nested.Id].Bounds));
+        Assert.True(root.Bounds.Contains(layout.Sheets.Values.Single(card =>
+            card.Sheet.FolderId == nested.Id).Bounds));
+    }
+
+    [Fact]
+    public void CompactPackingRemovesFolderFramesAndIgnoresManualBoardPlacements()
+    {
+        var snapshot = NestedSnapshot();
+        var movedSheet = snapshot.Sheets[0];
+        snapshot = snapshot with
+        {
+            CanvasState = snapshot.CanvasState with
+            {
+                SheetPlacements = new Dictionary<Guid, ObserverPointRecord>
+                {
+                    [movedSheet.PageViewId] = new(9000, 9000),
+                },
+            },
+        };
+        var layout = new ObserverPlacementPlanner().Arrange(
+            snapshot,
+            ObserverPackingMode.CompactSheets);
+
+        Assert.Empty(layout.Folders);
+        Assert.Equal(snapshot.Sheets.Count, layout.Sheets.Count);
+        Assert.False(layout.Sheets[movedSheet.PageViewId].HasManualPlacement);
+        Assert.True(layout.Bounds.Right < 9000);
+        var cards = layout.Sheets.Values.ToArray();
+        for (var left = 0; left < cards.Length; left++)
+        for (var right = left + 1; right < cards.Length; right++)
+            Assert.False(cards[left].Bounds.Intersects(cards[right].Bounds));
+    }
+
+    [Fact]
     public void TidyingFolderClearsDescendantManualPlacements()
     {
         var snapshot = NestedSnapshot();

@@ -170,6 +170,129 @@ public sealed class SheetTemplatePlannerTests
     }
 
     [Fact]
+    public void PerDetailNamedViewsAreMappedToResolvedDetailSlots()
+    {
+        var snapshot = WithTemplates(TestSnapshots.Create(), []) with
+        {
+            NamedViewNames = new HashSet<string>(["North", "South", "East", "West"],
+                StringComparer.OrdinalIgnoreCase),
+        };
+        var plan = new BatchCreateSheetsPlanner().Plan(new BatchCreateSheetsRequest(
+            42, 1, TestSnapshots.RootFolderId, [], "Views {index}", 1, 1,
+            CreationSpecs:
+            [
+                new LayoutCreationSpec(
+                    1,
+                    new PaperRecipe(594, 420, "Millimeters"),
+                    BuiltInLayoutKind.FourDetailsGrid,
+                    NamedViewsByDetail: ["North", "South", "East", "West"]),
+            ]), snapshot);
+
+        Assert.True(plan.CanApply);
+        var change = Assert.IsType<CreateSheetFromTemplateChange>(Assert.Single(plan.Changes));
+        Assert.Equal(["North", "South", "East", "West"], change.Template.DetailSlots
+            .Select(slot => change.NamedViewAssignments.GetValueOrDefault(slot.Id)));
+    }
+
+    [Fact]
+    public void NullPerDetailAssignmentInheritsTemplateCameraAndRepeatedViewsAreAllowed()
+    {
+        var template = Template("Captured", 420, 297);
+        var first = template.DetailSlots.Single() with { DefaultNamedView = "Captured camera" };
+        var second = first with { Id = Guid.NewGuid(), Name = "Section", DefaultNamedView = null };
+        template = template with { DetailSlots = [first, second] };
+        var snapshot = WithTemplates(TestSnapshots.Create(), [template]) with
+        {
+            NamedViewNames = new HashSet<string>(["Captured camera", "Perspective"],
+                StringComparer.OrdinalIgnoreCase),
+        };
+        var plan = new BatchCreateSheetsPlanner().Plan(new BatchCreateSheetsRequest(
+            42, 1, TestSnapshots.RootFolderId, [], "Views {index}", 1, 1,
+            CreationSpecs:
+            [
+                new LayoutCreationSpec(
+                    1,
+                    new PaperRecipe(420, 297, "Millimeters"),
+                    TemplateId: template.Id,
+                    NamedViewsByDetail: [null, "Perspective"]),
+            ]), snapshot);
+
+        Assert.True(plan.CanApply);
+        var change = Assert.IsType<CreateSheetFromTemplateChange>(Assert.Single(plan.Changes));
+        Assert.False(change.NamedViewAssignments.ContainsKey(change.Template.DetailSlots[0].Id));
+        Assert.Equal("Captured camera", change.Template.DetailSlots[0].DefaultNamedView);
+        Assert.Equal("Perspective", change.NamedViewAssignments[change.Template.DetailSlots[1].Id]);
+
+        var repeated = new BatchCreateSheetsPlanner().Plan(new BatchCreateSheetsRequest(
+            42, 1, TestSnapshots.RootFolderId, [], "Repeated {index}", 1, 1,
+            CreationSpecs:
+            [
+                new LayoutCreationSpec(
+                    1,
+                    new PaperRecipe(420, 297, "Millimeters"),
+                    TemplateId: template.Id,
+                    NamedViewsByDetail: ["Perspective", "Perspective"]),
+            ]), snapshot);
+        Assert.True(repeated.CanApply);
+    }
+
+    [Fact]
+    public void PerDetailAssignmentCountAndMissingViewsBlockBeforeMutation()
+    {
+        var snapshot = WithTemplates(TestSnapshots.Create(), []) with
+        {
+            NamedViewNames = new HashSet<string>(["Existing"], StringComparer.OrdinalIgnoreCase),
+        };
+        BatchCreateSheetsRequest Request(IReadOnlyList<string?> assignments) => new(
+            42, 1, TestSnapshots.RootFolderId, [], "Views {index}", 1, 1,
+            CreationSpecs:
+            [
+                new LayoutCreationSpec(
+                    1,
+                    new PaperRecipe(594, 420, "Millimeters"),
+                    BuiltInLayoutKind.TwoDetailsVertical,
+                    NamedViewsByDetail: assignments),
+            ]);
+
+        var wrongCount = new BatchCreateSheetsPlanner().Plan(Request(["Existing"]), snapshot);
+        Assert.False(wrongCount.CanApply);
+        Assert.Empty(wrongCount.Changes);
+        Assert.Contains(wrongCount.Diagnostics,
+            diagnostic => diagnostic.Code == "template.named_view_assignment_count");
+
+        var missing = new BatchCreateSheetsPlanner().Plan(Request(["Existing", "Deleted"]), snapshot);
+        Assert.False(missing.CanApply);
+        Assert.Empty(missing.Changes);
+        Assert.Contains(missing.Diagnostics,
+            diagnostic => diagnostic.Code == "template.named_view_unresolved");
+    }
+
+    [Fact]
+    public void LegacySingularNamedViewStillAppliesToEveryDetail()
+    {
+        var snapshot = WithTemplates(TestSnapshots.Create(), []) with
+        {
+            NamedViewNames = new HashSet<string>(["Legacy"], StringComparer.OrdinalIgnoreCase),
+        };
+        var plan = new BatchCreateSheetsPlanner().Plan(new BatchCreateSheetsRequest(
+            42, 1, TestSnapshots.RootFolderId, [], "Legacy {index}", 1, 1,
+            CreationSpecs:
+            [
+                new LayoutCreationSpec(
+                    1,
+                    new PaperRecipe(594, 420, "Millimeters"),
+                    BuiltInLayoutKind.TwoDetailsHorizontal,
+                    NamedView: "Legacy"),
+            ]), snapshot);
+
+        Assert.True(plan.CanApply);
+        var change = Assert.IsType<CreateSheetFromTemplateChange>(Assert.Single(plan.Changes));
+        Assert.Equal(2, change.NamedViewAssignments.Count);
+        Assert.All(change.Template.DetailSlots,
+            slot => Assert.Equal("Legacy", change.NamedViewAssignments[slot.Id]));
+    }
+
+    [Fact]
     public void CapturedTemplateIsScaledToSelectedPaperSize()
     {
         var template = Template("A3", 420, 297);

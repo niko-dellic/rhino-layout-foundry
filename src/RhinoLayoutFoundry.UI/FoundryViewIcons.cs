@@ -148,6 +148,22 @@ internal static class FoundryViewIcons
         graphics.DrawLine(pen, 9, 7, 9, 12);
     });
 
+    internal static Icon ClearSelection() => NewIcon(graphics =>
+    {
+        var color = FoundryTheme.PrimaryText;
+        var pen = new Pen(color, Hairline);
+        graphics.DrawLine(pen, 2, 5, 2, 2);
+        graphics.DrawLine(pen, 2, 2, 5, 2);
+        graphics.DrawLine(pen, 11, 2, 14, 2);
+        graphics.DrawLine(pen, 14, 2, 14, 5);
+        graphics.DrawLine(pen, 2, 11, 2, 14);
+        graphics.DrawLine(pen, 2, 14, 5, 14);
+        graphics.DrawLine(pen, 11, 14, 14, 14);
+        graphics.DrawLine(pen, 14, 14, 14, 11);
+        graphics.DrawLine(pen, 6, 6, 10, 10);
+        graphics.DrawLine(pen, 10, 6, 6, 10);
+    });
+
     internal static Icon ImportPackage() => TransferPackage(arrowPointsDown: true);
 
     internal static Icon ExportPackage() => TransferPackage(arrowPointsDown: false);
@@ -177,6 +193,24 @@ internal static class FoundryViewIcons
         graphics.DrawRectangle(pen, 9, 2, 5, 5);
         graphics.DrawRectangle(pen, 2, 9, 5, 5);
         graphics.DrawRectangle(pen, 9, 9, 5, 5);
+    });
+
+    internal static Icon NestedPacking() => NewIcon(graphics =>
+    {
+        var pen = new Pen(FoundryTheme.PrimaryText, Hairline);
+        graphics.DrawRectangle(pen, 1.5f, 2, 13, 12.5f);
+        graphics.DrawLine(pen, 1.5f, 5, 14.5f, 5);
+        graphics.DrawRectangle(pen, 4, 7, 8, 5);
+        graphics.DrawLine(pen, 4, 8.75f, 12, 8.75f);
+    });
+
+    internal static Icon CompactPacking() => NewIcon(graphics =>
+    {
+        var pen = new Pen(FoundryTheme.PrimaryText, Hairline);
+        graphics.DrawRectangle(pen, 1.5f, 2, 6, 5);
+        graphics.DrawRectangle(pen, 8.5f, 2, 6, 5);
+        graphics.DrawRectangle(pen, 1.5f, 8, 6, 5);
+        graphics.DrawRectangle(pen, 8.5f, 8, 6, 5);
     });
 
     internal static Icon ZoomOut() => ZoomGlyph(includePlus: false);

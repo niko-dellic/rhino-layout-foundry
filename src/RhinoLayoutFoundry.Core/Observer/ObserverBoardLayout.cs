@@ -2,6 +2,12 @@ using RhinoLayoutFoundry.Core.Domain;
 
 namespace RhinoLayoutFoundry.Core.Observer;
 
+public enum ObserverPackingMode
+{
+    NestedFolders,
+    CompactSheets,
+}
+
 public sealed record ObserverSheetCard(
     ObserverSheetSnapshot Sheet,
     ObserverRect Bounds,
@@ -38,7 +44,9 @@ public sealed class ObserverPlacementPlanner
     public const double FolderGap = 52;
     public const double MaximumRowWidth = 1200;
 
-    public ObserverBoardLayout Arrange(ObserverSnapshot snapshot)
+    public ObserverBoardLayout Arrange(
+        ObserverSnapshot snapshot,
+        ObserverPackingMode packingMode = ObserverPackingMode.NestedFolders)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         if (!snapshot.HasDocument || snapshot.Folders.Count == 0)
@@ -46,91 +54,208 @@ public sealed class ObserverPlacementPlanner
             return ObserverBoardLayout.Empty;
         }
 
+        return packingMode == ObserverPackingMode.CompactSheets
+            ? ArrangeCompact(snapshot)
+            : ArrangeNested(snapshot);
+    }
+
+    private static ObserverBoardLayout ArrangeCompact(ObserverSnapshot snapshot)
+    {
+        var folderMap = snapshot.Folders.ToDictionary(folder => folder.Id);
+        var folderOrder = PreOrderFolders(snapshot.RootFolderId, folderMap)
+            .Select((entry, index) => (entry.Folder.Id, index))
+            .ToDictionary(entry => entry.Id, entry => entry.index);
+        var orderedSheets = snapshot.Sheets
+            .OrderBy(sheet => folderOrder.GetValueOrDefault(sheet.FolderId, int.MaxValue))
+            .ThenBy(sheet => sheet.Order)
+            .ThenBy(sheet => sheet.Name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var packed = Pack(orderedSheets.Select(sheet => (
+            sheet.PageViewId,
+            SheetSize(sheet))), SheetGap);
+        var cards = orderedSheets.ToDictionary(
+            sheet => sheet.PageViewId,
+            sheet =>
+            {
+                var position = packed.Positions[sheet.PageViewId];
+                var size = SheetSize(sheet);
+                return new ObserverSheetCard(
+                    sheet,
+                    new ObserverRect(position.X, position.Y, size.Width, size.Height),
+                    HasManualPlacement: false);
+            });
+        var bounds = cards.Values
+            .Select(card => card.Bounds)
+            .Aggregate(new ObserverRect(), ObserverRect.Union);
+        return new ObserverBoardLayout(
+            cards,
+            new Dictionary<Guid, ObserverFolderFrame>(),
+            bounds);
+    }
+
+    private static ObserverBoardLayout ArrangeNested(ObserverSnapshot snapshot)
+    {
         var folderMap = snapshot.Folders.ToDictionary(folder => folder.Id);
         var orderedFolders = PreOrderFolders(snapshot.RootFolderId, folderMap);
-        var sheetCards = new Dictionary<Guid, ObserverSheetCard>();
-        var folderFrames = new Dictionary<Guid, ObserverFolderFrame>();
-        var cumulativeFolderOffsets = new Dictionary<Guid, ObserverPoint>();
-        var cursorY = 0d;
+        var children = folderMap.Values
+            .Where(folder => folder.ParentId is { } parentId && folderMap.ContainsKey(parentId))
+            .GroupBy(folder => folder.ParentId!.Value)
+            .ToDictionary(
+                group => group.Key,
+                group => group.OrderBy(folder => folder.Order)
+                    .ThenBy(folder => folder.Name, StringComparer.OrdinalIgnoreCase)
+                    .ToArray());
+        var directSheets = snapshot.Sheets
+            .GroupBy(sheet => sheet.FolderId)
+            .ToDictionary(
+                group => group.Key,
+                group => group.OrderBy(sheet => sheet.Order)
+                    .ThenBy(sheet => sheet.Name, StringComparer.OrdinalIgnoreCase)
+                    .ToArray());
+        var measures = new Dictionary<Guid, FolderMeasure>();
+        var measuring = new HashSet<Guid>();
 
-        foreach (var (folder, depth) in orderedFolders)
+        FolderMeasure Measure(Guid folderId)
         {
-            var directSheets = snapshot.Sheets
-                .Where(sheet => sheet.FolderId == folder.Id)
-                .OrderBy(sheet => sheet.Order)
-                .ThenBy(sheet => sheet.Name, StringComparer.OrdinalIgnoreCase)
-                .ToArray();
-            var automaticOrigin = new ObserverPoint(depth * 44, cursorY);
-            var localFolderOffset = snapshot.CanvasState.FolderOrigins.TryGetValue(folder.Id, out var origin)
+            if (measures.TryGetValue(folderId, out var cached)) return cached;
+            if (!measuring.Add(folderId))
+                return new FolderMeasure(new ObserverSize(300, 92), PackedLayout.Empty, PackedLayout.Empty);
+            var sheets = directSheets.GetValueOrDefault(folderId, []);
+            var sheetPack = Pack(sheets.Select(sheet => (sheet.PageViewId, SheetSize(sheet))), SheetGap);
+            var childFolders = children.GetValueOrDefault(folderId, []);
+            var childPack = Pack(childFolders.Select(folder => (folder.Id, Measure(folder.Id).Size)), FolderPadding);
+            var hasBoth = !sheetPack.Size.IsEmpty && !childPack.Size.IsEmpty;
+            var contentWidth = Math.Max(sheetPack.Size.Width, childPack.Size.Width);
+            var contentHeight = sheetPack.Size.Height + childPack.Size.Height +
+                                (hasBoth ? FolderPadding : 0);
+            var measured = new FolderMeasure(
+                new ObserverSize(
+                    Math.Max(300, contentWidth + FolderPadding * 2),
+                    Math.Max(92, FolderHeaderHeight + FolderPadding * 2 + contentHeight)),
+                sheetPack,
+                childPack);
+            measuring.Remove(folderId);
+            measures[folderId] = measured;
+            return measured;
+        }
+
+        var roots = orderedFolders
+            .Where(entry => entry.Depth == 0)
+            .Select(entry => entry.Folder)
+            .ToArray();
+        foreach (var folder in roots) Measure(folder.Id);
+        var rootPack = Pack(roots.Select(folder => (folder.Id, measures[folder.Id].Size)), FolderGap);
+        var cards = new Dictionary<Guid, ObserverSheetCard>();
+        var frames = new Dictionary<Guid, ObserverFolderFrame>();
+
+        ObserverRect Place(
+            ObserverFolderSnapshot folder,
+            ObserverPoint naturalOrigin,
+            ObserverPoint inheritedOffset,
+            int depth)
+        {
+            var measure = measures[folder.Id];
+            var localOffset = snapshot.CanvasState.FolderOrigins.TryGetValue(folder.Id, out var origin)
                 ? new ObserverPoint(origin.X, origin.Y)
-                : new ObserverPoint(0, 0);
-            var parentFolderOffset = folder.ParentId is { } parentId &&
-                                     cumulativeFolderOffsets.TryGetValue(parentId, out var inheritedOffset)
-                ? inheritedOffset
-                : new ObserverPoint(0, 0);
-            var folderOffset = parentFolderOffset + localFolderOffset;
-            cumulativeFolderOffsets[folder.Id] = folderOffset;
-            var contentX = automaticOrigin.X + FolderPadding;
-            var contentY = automaticOrigin.Y + FolderHeaderHeight + FolderPadding;
-            var rowX = 0d;
-            var rowY = 0d;
-            var rowHeight = 0d;
+                : new ObserverPoint();
+            var cumulativeOffset = inheritedOffset + localOffset;
+            var actualOrigin = naturalOrigin + cumulativeOffset;
             var contentBounds = new ObserverRect();
-
-            foreach (var sheet in directSheets)
+            var sheets = directSheets.GetValueOrDefault(folder.Id, []);
+            foreach (var sheet in sheets)
             {
-                var width = Math.Max(1, sheet.PaperWidthMillimeters) * PaperScale;
-                var height = Math.Max(1, sheet.PaperHeightMillimeters) * PaperScale;
-                if (rowX > 0 && rowX + width > MaximumRowWidth)
-                {
-                    rowX = 0;
-                    rowY += rowHeight + SheetGap;
-                    rowHeight = 0;
-                }
-
-                var automatic = new ObserverPoint(contentX + rowX, contentY + rowY);
-                var hasManual = snapshot.CanvasState.SheetPlacements.TryGetValue(sheet.PageViewId, out var placement);
+                var position = measure.DirectSheets.Positions[sheet.PageViewId];
+                var automatic = new ObserverPoint(
+                    naturalOrigin.X + FolderPadding + position.X,
+                    naturalOrigin.Y + FolderHeaderHeight + FolderPadding + position.Y);
+                var hasManual = snapshot.CanvasState.SheetPlacements.TryGetValue(
+                    sheet.PageViewId,
+                    out var placement);
                 var basePoint = hasManual
                     ? new ObserverPoint(placement.X, placement.Y)
                     : automatic;
+                var size = SheetSize(sheet);
                 var bounds = new ObserverRect(
-                    basePoint.X + folderOffset.X,
-                    basePoint.Y + folderOffset.Y,
-                    width,
-                    height);
-                sheetCards[sheet.PageViewId] = new ObserverSheetCard(sheet, bounds, hasManual);
+                    basePoint.X + cumulativeOffset.X,
+                    basePoint.Y + cumulativeOffset.Y,
+                    size.Width,
+                    size.Height);
+                cards[sheet.PageViewId] = new ObserverSheetCard(sheet, bounds, hasManual);
                 contentBounds = ObserverRect.Union(contentBounds, bounds);
-                rowX += width + SheetGap;
-                rowHeight = Math.Max(rowHeight, height);
             }
 
-            ObserverRect frameBounds;
-            if (contentBounds.IsEmpty)
+            var childTop = naturalOrigin.Y + FolderHeaderHeight + FolderPadding +
+                           measure.DirectSheets.Size.Height +
+                           (!measure.DirectSheets.Size.IsEmpty && !measure.ChildFolders.Size.IsEmpty
+                               ? FolderPadding
+                               : 0);
+            foreach (var child in children.GetValueOrDefault(folder.Id, []))
             {
-                frameBounds = new ObserverRect(
-                    automaticOrigin.X + folderOffset.X,
-                    automaticOrigin.Y + folderOffset.Y,
-                    300,
-                    92);
-            }
-            else
-            {
-                frameBounds = new ObserverRect(
-                    Math.Min(automaticOrigin.X + folderOffset.X, contentBounds.Left - FolderPadding),
-                    Math.Min(automaticOrigin.Y + folderOffset.Y, contentBounds.Top - FolderHeaderHeight - FolderPadding),
-                    Math.Max(300, contentBounds.Right - automaticOrigin.X - folderOffset.X + FolderPadding),
-                    Math.Max(92, contentBounds.Bottom - automaticOrigin.Y - folderOffset.Y + FolderPadding));
+                var position = measure.ChildFolders.Positions[child.Id];
+                var childBounds = Place(
+                    child,
+                    new ObserverPoint(
+                        naturalOrigin.X + FolderPadding + position.X,
+                        childTop + position.Y),
+                    cumulativeOffset,
+                    depth + 1);
+                contentBounds = ObserverRect.Union(contentBounds, childBounds);
             }
 
-            folderFrames[folder.Id] = new ObserverFolderFrame(folder, frameBounds, depth, directSheets.Length);
-            cursorY += Math.Max(132, frameBounds.Height) + FolderGap;
+            var frameBounds = new ObserverRect(
+                actualOrigin.X,
+                actualOrigin.Y,
+                measure.Size.Width,
+                measure.Size.Height);
+            if (!contentBounds.IsEmpty)
+                frameBounds = ObserverRect.Union(frameBounds, contentBounds.Inflate(FolderPadding));
+            frames[folder.Id] = new ObserverFolderFrame(folder, frameBounds, depth, sheets.Length);
+            return frameBounds;
         }
 
-        var boardBounds = folderFrames.Values
+        foreach (var root in roots)
+            Place(root, rootPack.Positions[root.Id], new ObserverPoint(), 0);
+
+        var boardBounds = frames.Values
             .Select(frame => frame.Bounds)
-            .Concat(sheetCards.Values.Select(card => card.Bounds))
+            .Concat(cards.Values.Select(card => card.Bounds))
             .Aggregate(new ObserverRect(), ObserverRect.Union);
-        return new ObserverBoardLayout(sheetCards, folderFrames, boardBounds);
+        return new ObserverBoardLayout(cards, frames, boardBounds);
+    }
+
+    private static ObserverSize SheetSize(ObserverSheetSnapshot sheet) => new(
+        Math.Max(1, sheet.PaperWidthMillimeters) * PaperScale,
+        Math.Max(1, sheet.PaperHeightMillimeters) * PaperScale);
+
+    private static PackedLayout Pack(
+        IEnumerable<(Guid Id, ObserverSize Size)> items,
+        double gap)
+    {
+        var positions = new Dictionary<Guid, ObserverPoint>();
+        var rowX = 0d;
+        var rowY = 0d;
+        var rowHeight = 0d;
+        var width = 0d;
+        var hasItems = false;
+        foreach (var (id, size) in items)
+        {
+            hasItems = true;
+            if (rowX > 0 && rowX + size.Width > MaximumRowWidth)
+            {
+                rowX = 0;
+                rowY += rowHeight + gap;
+                rowHeight = 0;
+            }
+
+            positions[id] = new ObserverPoint(rowX, rowY);
+            rowX += size.Width + gap;
+            rowHeight = Math.Max(rowHeight, size.Height);
+            width = Math.Max(width, rowX - gap);
+        }
+
+        return new PackedLayout(
+            positions,
+            hasItems ? new ObserverSize(width, rowY + rowHeight) : new ObserverSize());
     }
 
     public ObserverCanvasState MoveSheets(
@@ -267,6 +392,20 @@ public sealed class ObserverPlacementPlanner
         }
 
         return result;
+    }
+
+    private sealed record FolderMeasure(
+        ObserverSize Size,
+        PackedLayout DirectSheets,
+        PackedLayout ChildFolders);
+
+    private sealed record PackedLayout(
+        IReadOnlyDictionary<Guid, ObserverPoint> Positions,
+        ObserverSize Size)
+    {
+        internal static PackedLayout Empty { get; } = new(
+            new Dictionary<Guid, ObserverPoint>(),
+            new ObserverSize());
     }
 }
 

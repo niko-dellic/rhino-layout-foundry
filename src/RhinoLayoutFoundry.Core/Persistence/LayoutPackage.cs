@@ -127,7 +127,52 @@ public sealed record LayoutPackageImportRequest(
     long SourceRevision,
     string FilePath,
     LayoutPackageImportMode Mode,
-    IReadOnlyDictionary<string, LayoutPackageConflictResolution>? ConflictResolutions = null);
+    IReadOnlyDictionary<string, LayoutPackageConflictResolution>? ConflictResolutions = null,
+    bool ImportProjectInformation = false);
+
+public static class LayoutPackageProjectInformationPolicy
+{
+    public static ProjectInformation Resolve(
+        ProjectInformation destination,
+        ProjectInformation source,
+        LayoutPackageImportMode mode,
+        bool importProjectInformation)
+    {
+        ArgumentNullException.ThrowIfNull(destination);
+        ArgumentNullException.ThrowIfNull(source);
+        if (!importProjectInformation) return destination;
+        if (mode == LayoutPackageImportMode.Replace) return source;
+
+        static string Prefer(string destinationValue, string sourceValue) =>
+            string.IsNullOrWhiteSpace(destinationValue) ? sourceValue : destinationValue;
+        var custom = destination.CustomFields
+            .Concat(source.CustomFields.Where(pair => !destination.CustomFields.ContainsKey(pair.Key)))
+            .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
+        return destination with
+        {
+            ProjectName = Prefer(destination.ProjectName, source.ProjectName),
+            ProjectNumber = Prefer(destination.ProjectNumber, source.ProjectNumber),
+            ClientName = Prefer(destination.ClientName, source.ClientName),
+            SiteAddress = Prefer(destination.SiteAddress, source.SiteAddress),
+            ProjectPhase = Prefer(destination.ProjectPhase, source.ProjectPhase),
+            ProjectStatus = Prefer(destination.ProjectStatus, source.ProjectStatus),
+            FirmName = Prefer(destination.FirmName, source.FirmName),
+            FirmAddress = Prefer(destination.FirmAddress, source.FirmAddress),
+            FirmPhone = Prefer(destination.FirmPhone, source.FirmPhone),
+            FirmEmail = Prefer(destination.FirmEmail, source.FirmEmail),
+            FirmWebsite = Prefer(destination.FirmWebsite, source.FirmWebsite),
+            FirmRegistration = Prefer(destination.FirmRegistration, source.FirmRegistration),
+            IssueDate = Prefer(destination.IssueDate, source.IssueDate),
+            IssuePurpose = Prefer(destination.IssuePurpose, source.IssuePurpose),
+            DrawnBy = Prefer(destination.DrawnBy, source.DrawnBy),
+            CheckedBy = Prefer(destination.CheckedBy, source.CheckedBy),
+            ApprovedBy = Prefer(destination.ApprovedBy, source.ApprovedBy),
+            CustomFields = custom,
+            Logo = destination.Logo ?? source.Logo,
+            DefaultRevision = destination.DefaultRevision ?? source.DefaultRevision,
+        };
+    }
+}
 
 public sealed record LayoutPackageImportResult(
     bool Succeeded,

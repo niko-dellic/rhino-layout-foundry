@@ -7,6 +7,8 @@ namespace RhinoLayoutFoundry.UI;
 internal sealed class LayoutPackageImportDialog : Dialog
 {
     private readonly DropDown _mode;
+    private readonly CheckBox _importProjectInformation;
+    private readonly Label _projectInformationHelp;
     private readonly Dictionary<string, DropDown> _resolutionControls = new(StringComparer.Ordinal);
 
     internal LayoutPackageImportDialog(LayoutPackagePreflight preflight)
@@ -24,6 +26,22 @@ internal sealed class LayoutPackageImportDialog : Dialog
             SelectedIndex = 0,
             Width = 280,
         };
+        _importProjectInformation = new CheckBox
+        {
+            Text = "Import project information",
+            Checked = false,
+            ToolTip = "Include project, firm, issue-default, revision, custom-field, and logo data from this package.",
+        };
+        _projectInformationHelp = FoundryTheme.MutedLabel();
+        _projectInformationHelp.Wrap = WrapMode.Word;
+        void UpdateProjectInformationHelp()
+        {
+            _projectInformationHelp.Text = _mode.SelectedIndex == 1
+                ? "When enabled, package project information replaces the current document values."
+                : "When enabled, package values fill blank fields; existing document values are kept.";
+        }
+        _mode.SelectedIndexChanged += (_, _) => UpdateProjectInformationHelp();
+        UpdateProjectInformationHelp();
         var conflictRows = new StackLayout
         {
             Spacing = FoundryTheme.Space2,
@@ -80,6 +98,10 @@ internal sealed class LayoutPackageImportDialog : Dialog
         var warnings = preflight.Warnings.Count == 0
             ? "No preflight warnings."
             : string.Join(Environment.NewLine, preflight.Warnings.Select(item => $"• {item}"));
+        var sourceProject = manifest.FoundryState.ProjectInfo;
+        var projectSummary = new[] { sourceProject.ProjectName, sourceProject.FirmName }
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .ToArray();
         Content = new StackLayout
         {
             Spacing = FoundryTheme.Space3,
@@ -95,6 +117,18 @@ internal sealed class LayoutPackageImportDialog : Dialog
                     VerticalContentAlignment = VerticalAlignment.Center,
                     Items = { new Label { Text = "Import mode" }, _mode },
                 },
+                FoundryTheme.Surface(new StackLayout
+                {
+                    Spacing = FoundryTheme.Space1,
+                    Items =
+                    {
+                        _importProjectInformation,
+                        FoundryTheme.MutedLabel(projectSummary.Length == 0
+                            ? "The package does not name a project or firm."
+                            : $"Package data: {string.Join(" · ", projectSummary)}"),
+                        _projectInformationHelp,
+                    },
+                }, new Padding(FoundryTheme.Space3)),
                 FoundryTheme.Surface(new Scrollable
                 {
                     Border = BorderType.None,
@@ -117,6 +151,8 @@ internal sealed class LayoutPackageImportDialog : Dialog
 
     internal LayoutPackageImportMode ImportMode =>
         _mode.SelectedIndex == 1 ? LayoutPackageImportMode.Replace : LayoutPackageImportMode.Merge;
+
+    internal bool ImportProjectInformation => _importProjectInformation.Checked == true;
 
     internal IReadOnlyDictionary<string, LayoutPackageConflictResolution> ConflictResolutions =>
         _resolutionControls.ToDictionary(

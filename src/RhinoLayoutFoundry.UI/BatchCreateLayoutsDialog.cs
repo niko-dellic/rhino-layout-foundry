@@ -34,15 +34,22 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
     private readonly TitleBlockPreviewTray _titleBlockPreviewTray;
     private readonly TitleBlockSelectionDrawable _titleBlockSelectorPreview;
     private readonly NamedViewPreviewTray _namedViewPreviewTray;
-    private readonly NamedViewSelectionDrawable _namedViewSelectorPreview;
-    private readonly ProjectInformationEditor _projectInformationEditor;
+    private readonly Panel _detailViewAssignmentsHost;
+    private readonly StackLayout _layoutGroupChips;
+    private readonly Scrollable _layoutGroupChipScroll;
+    private readonly Label _namedViewGalleryPrompt;
     private readonly GridView _previewGrid;
     private readonly Label _countLabel;
     private readonly Label _selectionHint;
-    private readonly Button _editAllButton;
+    private readonly FoundryToolbarIconButton _clearSelectionButton;
     private readonly Label _status;
     private readonly Button _createButton;
     private readonly List<CreationDraft> _drafts = [];
+    private readonly List<CreationPreviewRow> _visiblePreviewRows = [];
+    private readonly List<NamedViewSelectionDrawable> _detailViewSelectors = [];
+    private LayoutGroupKey? _activeGroupFilter;
+    private int? _activeDetailIndex;
+    private NamedViewSelectionDrawable? _activeNamedViewSelector;
     private Form? _layoutGallery;
     private Scrollable? _layoutGalleryScroll;
     private Form? _titleBlockGallery;
@@ -108,17 +115,34 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         _titleBlockPreviewTray = new TitleBlockPreviewTray(_titleBlockChoices, selectedIndex: 0);
         _titleBlockSelectorPreview = new TitleBlockSelectionDrawable(_titleBlockChoices, selectedIndex: 0);
         _namedViewPreviewTray = new NamedViewPreviewTray(_namedViewChoices, selectedIndex: 0);
-        _namedViewSelectorPreview = new NamedViewSelectionDrawable(
-            _namedViewChoices,
-            _namedViewPreviewTray,
-            selectedIndex: 0);
-        _projectInformationEditor = new ProjectInformationEditor(snapshot.ProjectInfo);
+        _detailViewAssignmentsHost = new Panel();
+        _layoutGroupChips = new StackLayout
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = FoundryTheme.Space1,
+        };
+        _layoutGroupChipScroll = new Scrollable
+        {
+            Border = BorderType.None,
+            ExpandContentWidth = false,
+            ExpandContentHeight = false,
+            Height = 36,
+            Content = _layoutGroupChips,
+        };
+        _namedViewGalleryPrompt = new Label
+        {
+            Text = "Choose a named view for this detail.",
+            Font = SystemFonts.Bold(10),
+            TextColor = FoundryTheme.PrimaryText,
+        };
         _previewGrid = CreatePreviewGrid();
         _countLabel = new Label { Font = SystemFonts.Bold(13), TextColor = FoundryTheme.PrimaryText };
         _selectionHint = FoundryTheme.MutedLabel();
-        _editAllButton = FoundryTheme.ConfigureButton(new Button { Text = "Edit all" }, 72);
-        _editAllButton.Visible = false;
-        _editAllButton.Click += (_, _) => ClearPreviewSelection();
+        _clearSelectionButton = new FoundryToolbarIconButton(
+            FoundryViewIcons.ClearSelection(),
+            "Clear row selection and edit all layouts");
+        _clearSelectionButton.Visible = false;
+        _clearSelectionButton.Click += (_, _) => ClearPreviewSelection();
         _status = FoundryTheme.MutedLabel();
         _status.Wrap = WrapMode.Word;
         _createButton = FoundryTheme.ConfigureButton(new Button { Text = "Create layouts" }, 118);
@@ -148,10 +172,8 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         _titleBlockSelectorPreview.Activated += (_, _) => ToggleTitleBlockGallery();
         _titleBlockPreviewTray.SelectedIndexChanged += OnTitleBlockSelectionChanged;
         _titleBlockPreviewTray.SelectionCommitted += (_, _) => HideTitleBlockGallery();
-        _namedViewSelectorPreview.Activated += (_, _) => ToggleNamedViewGallery();
         _namedViewPreviewTray.SelectedIndexChanged += OnNamedViewSelectionChanged;
         _namedViewPreviewTray.SelectionCommitted += (_, _) => HideNamedViewGallery();
-        _projectInformationEditor.Changed += (_, _) => RefreshPreview();
         _previewGrid.SelectedRowsChanged += OnPreviewSelectionChanged;
         _displayModePicker.Opened += (_, _) =>
         {
@@ -182,23 +204,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             Items =
             {
                 Header(),
-                new StackLayoutItem(new TabControl
-                {
-                    Pages =
-                    {
-                        new TabPage { Text = "Layouts", Content = CreateLayoutsTab() },
-                        new TabPage
-                        {
-                            Text = "Project Info",
-                            Content = new Scrollable
-                            {
-                                Border = BorderType.None,
-                                ExpandContentWidth = true,
-                                Content = _projectInformationEditor,
-                            },
-                        },
-                    },
-                }, true),
+                new StackLayoutItem(CreateLayoutsTab(), true),
                 _status,
                 new TableLayout
                 {
@@ -222,19 +228,32 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         {
             new TableLayout
             {
-                Spacing = new Size(FoundryTheme.Space3, FoundryTheme.Space3),
+                Spacing = new Size(FoundryTheme.Space3, 0),
                 Rows =
                 {
                     new TableRow(
-                        new TableCell(Card("Batch", CreateBatchEditor()), true),
-                        new TableCell(Card("Page size", CreatePaperEditor()), true),
-                        new TableCell(Card("Layout", CreateLayoutEditor()), true)),
-                    new TableRow(
-                        new TableCell(Card("Details", CreateDetailEditor()), true),
-                        new TableCell(Card("Title block", CreateTitleBlockEditor()), true),
-                        new TableCell(Card("View", CreateNamedViewEditor()), true)),
+                        new TableCell(new StackLayout
+                        {
+                            Spacing = FoundryTheme.Space3,
+                            Items =
+                            {
+                                Card("Batch", CreateBatchEditor()),
+                                Card("Details", CreateDetailEditor()),
+                            },
+                        }, true),
+                        new TableCell(new StackLayout
+                        {
+                            Spacing = FoundryTheme.Space3,
+                            Items =
+                            {
+                                Card("Page size", CreatePaperEditor()),
+                                Card("Title block", CreateTitleBlockEditor()),
+                            },
+                        }, true),
+                        new TableCell(Card("Layout & views", CreateLayoutEditor()), true)),
                 },
             },
+            _layoutGroupChipScroll,
             new StackLayout
             {
                 Orientation = Orientation.Horizontal,
@@ -245,7 +264,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                     _countLabel,
                     _selectionHint,
                     new StackLayoutItem(null, true),
-                    _editAllButton,
+                    _clearSelectionButton,
                 },
             },
             new StackLayoutItem(_previewGrid, true),
@@ -276,6 +295,13 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         Items =
         {
             _layoutSelectorPreview,
+            new Label
+            {
+                Text = "Assign a named view independently to each detail.",
+                TextColor = FoundryTheme.MutedText,
+                Wrap = WrapMode.Word,
+            },
+            _detailViewAssignmentsHost,
         },
     };
 
@@ -328,16 +354,6 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         },
     };
 
-    private Control CreateNamedViewEditor() => new StackLayout
-    {
-        Spacing = FoundryTheme.Space2,
-        HorizontalContentAlignment = HorizontalAlignment.Stretch,
-        Items =
-        {
-            _namedViewSelectorPreview,
-        },
-    };
-
     private GridView CreatePreviewGrid()
     {
         var grid = new GridView
@@ -369,16 +385,18 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             (int)_startStepper.Value,
             (int)_stepStepper.Value,
             CreationSpecs: _drafts.Select(draft => draft.ToSpec()).ToArray(),
-            ProjectData: _projectInformationEditor.Value);
+            ProjectData: _snapshot.ProjectInfo);
     }
 
-    private void RefreshPreview()
+    private void RefreshPreview(bool refreshDetailAssignments = true)
     {
         if (_updatingPaper || _folders.Count == 0) return;
-        var selectedRows = SelectedDraftIndices();
+        var selectedDraftIds = SelectedDraftIds().ToHashSet();
         var plan = new BatchCreateSheetsPlanner().Plan(Request(), _snapshot);
         var changes = plan.Changes.OfType<CreateSheetFromTemplateChange>().ToArray();
-        var rows = changes.Select((change, index) => new CreationPreviewRow(
+        var allRows = changes.Select((change, index) => new CreationPreviewRow(
+            _drafts[index].DraftId,
+            LayoutGroupKey.For(_drafts[index].Layout),
             (index + 1).ToString(),
             change.Name,
             change.Template.Name,
@@ -389,11 +407,19 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                 : change.UseDedicatedDetailLayer ? ".details" : "Active layer",
             DisplayModeSummary(change.Template),
             change.Template.TitleBlock?.InstanceDefinitionName ?? "None")).ToArray();
+        EnsureActiveGroupExists();
+        _visiblePreviewRows.Clear();
+        _visiblePreviewRows.AddRange(allRows.Where(row =>
+            _activeGroupFilter is null || row.GroupKey == _activeGroupFilter));
         _updatingPreviewSelection = true;
         try
         {
-            _previewGrid.DataStore = rows;
-            _previewGrid.SelectedRows = selectedRows.Where(index => index < rows.Length).ToArray();
+            _previewGrid.DataStore = _visiblePreviewRows.ToArray();
+            _previewGrid.SelectedRows = _visiblePreviewRows
+                .Select((row, index) => (row, index))
+                .Where(item => selectedDraftIds.Contains(item.row.DraftId))
+                .Select(item => item.index)
+                .ToArray();
         }
         finally
         {
@@ -401,7 +427,9 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         }
         CreatedCount = changes.Length;
         _countLabel.Text = $"Layouts to create  ·  {CreatedCount}";
+        RefreshGroupChips();
         UpdateSelectionHint();
+        if (refreshDetailAssignments) RefreshDetailAssignments();
         var pickerError = PickerError();
         var diagnostics = string.Join(" ", plan.Diagnostics
             .Where(item => item.Severity is DiagnosticSeverity.Error or DiagnosticSeverity.Warning)
@@ -418,8 +446,6 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
 
     private string? PickerError()
     {
-        if (_projectInformationEditor.ValidationError is { } metadataError)
-            return metadataError;
         if (!string.Equals(_displayModePicker.Text.Trim(), InheritDisplayMode, StringComparison.OrdinalIgnoreCase) &&
             !_snapshot.DisplayModes.Values.Any(name => string.Equals(
                 name, _displayModePicker.Text.Trim(), StringComparison.OrdinalIgnoreCase)))
@@ -473,19 +499,29 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             pair.Value, _displayModePicker.Text.Trim(), StringComparison.OrdinalIgnoreCase)).Key;
         var titleBlock = _titleBlockChoices[Math.Max(0, _titleBlockPreviewTray.SelectedIndex)];
         return new CreationDraft(
+            Guid.NewGuid(),
             _layoutChoices[Math.Max(0, _layoutPreviewTray.SelectedIndex)],
             CurrentPaper(),
             displayModeId == Guid.Empty ? null : displayModeId,
             _dedicatedDetailLayerCheck.Checked == true,
             titleBlock,
-            _namedViewChoices[Math.Max(0, _namedViewPreviewTray.SelectedIndex)].Name);
+            DefaultNamedViews(_layoutChoices[Math.Max(0, _layoutPreviewTray.SelectedIndex)]));
     }
 
     private void ApplyLayoutToTargets()
     {
         if (_updatingEditors) return;
         var layout = _layoutChoices[Math.Max(0, _layoutPreviewTray.SelectedIndex)];
-        ApplyToTargets(draft => draft with { Layout = layout });
+        var selected = SelectedDraftIds().ToHashSet();
+        foreach (var index in TargetDraftIndices())
+            _drafts[index] = _drafts[index] with
+            {
+                Layout = layout,
+                NamedViewsByDetail = DefaultNamedViews(layout),
+            };
+        _activeGroupFilter = LayoutGroupKey.For(layout);
+        RefreshPreview();
+        if (selected.Count > 0) SelectDrafts(selected);
     }
 
     private void OnLayoutSelectionChanged(object? sender, EventArgs eventArgs)
@@ -1086,7 +1122,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         _selectionHint.Text = selectedCount == 0
             ? "No rows selected — property changes apply to all."
             : $"{selectedCount} selected — property changes apply only to selected rows.";
-        _editAllButton.Visible = selectedCount > 0;
+        _clearSelectionButton.Visible = selectedCount > 0;
     }
 
     private void LoadEditors(CreationDraft draft)

@@ -6,6 +6,7 @@ namespace RhinoLayoutFoundry.UI;
 internal enum FoundryDialogButtonStyle
 {
     Secondary,
+    Primary,
     Destructive,
 }
 
@@ -110,17 +111,22 @@ internal sealed class FoundryDialogButton : Drawable
     {
         var graphics = eventArgs.Graphics;
         var bounds = new RectangleF(0.5f, 0.5f, Math.Max(0, Width - 1), Math.Max(0, Height - 1));
-        if (_style == FoundryDialogButtonStyle.Destructive)
+        if (_style is FoundryDialogButtonStyle.Primary or FoundryDialogButtonStyle.Destructive)
         {
+            var accent = _style == FoundryDialogButtonStyle.Destructive
+                ? FoundryTheme.DangerAccent
+                : FoundryTheme.PrimaryActionBackground;
             graphics.FillRectangle(
                 Enabled
-                    ? FoundryTheme.DangerAccent
-                    : FoundryTheme.WithAlpha(FoundryTheme.DangerAccent, 80),
+                    ? accent
+                    : FoundryTheme.WithAlpha(accent, 80),
                 bounds);
             if (Enabled && (_hovered || _pressed))
             {
                 graphics.FillRectangle(
-                    FoundryTheme.WithAlpha(_pressed ? Colors.Black : Colors.White, 28),
+                    FoundryTheme.WithAlpha(
+                        FoundryTheme.IsDarkMode ? Colors.Black : Colors.White,
+                        _pressed ? 32 : 20),
                     bounds);
             }
         }
@@ -142,9 +148,11 @@ internal sealed class FoundryDialogButton : Drawable
 
         var textColor = !Enabled
             ? FoundryTheme.MutedText
-            : _style == FoundryDialogButtonStyle.Destructive
-                ? Colors.White
-                : FoundryTheme.PrimaryText;
+            : _style == FoundryDialogButtonStyle.Primary
+                ? FoundryTheme.PrimaryActionText
+                : _style == FoundryDialogButtonStyle.Destructive
+                    ? Colors.White
+                    : FoundryTheme.PrimaryText;
         var textSize = graphics.MeasureString(_font, _text);
         graphics.DrawText(
             _font,
@@ -159,7 +167,7 @@ internal sealed class FoundryDialogButton : Drawable
                 new Pen(
                     _style == FoundryDialogButtonStyle.Destructive
                         ? FoundryTheme.WithAlpha(Colors.White, 190)
-                        : FoundryTheme.SelectionAccent,
+                        : FoundryTheme.WithAlpha(FoundryTheme.PrimaryText, 190),
                     1),
                 2.5f,
                 2.5f,

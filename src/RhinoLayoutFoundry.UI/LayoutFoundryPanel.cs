@@ -293,6 +293,7 @@ public sealed class LayoutFoundryPanel : Panel
                 },
                 _folderDraftStrip,
                 new StackLayoutItem(_viewHost, expand: true),
+                CreateViewModeBar(),
                 _statusLabel,
             },
         };
@@ -630,7 +631,8 @@ public sealed class LayoutFoundryPanel : Panel
             context.Value.Revision,
             dialog.FileName,
             review.ImportMode,
-            review.ConflictResolutions));
+            review.ConflictResolutions,
+            review.ImportProjectInformation));
         _statusLabel.Text = result.Succeeded
             ? $"Imported {result.LayoutCount} layout{(result.LayoutCount == 1 ? string.Empty : "s")}."
             : result.ErrorMessage ?? "Layout package import failed.";
@@ -806,19 +808,30 @@ public sealed class LayoutFoundryPanel : Panel
                 _filterKindField,
                 _clearFilterButton,
                 new StackLayoutItem(null, expand: true),
-                _listViewButton,
-                _thumbnailViewButton,
-                _canvasViewButton,
-                new Panel
-                {
-                    Width = 1,
-                    Height = 20,
-                    BackgroundColor = FoundryTheme.CanvasBorder,
-                },
-                _fullscreenButton,
             },
         };
     }
+
+    private Control CreateViewModeBar() => new StackLayout
+    {
+        Orientation = Orientation.Horizontal,
+        Padding = new Padding(0, FoundryTheme.Space2, 0, 0),
+        Spacing = FoundryTheme.Space1,
+        VerticalContentAlignment = VerticalAlignment.Center,
+        Items =
+        {
+            _fullscreenButton,
+            new Panel
+            {
+                Width = 1,
+                Height = 20,
+                BackgroundColor = FoundryTheme.CanvasBorder,
+            },
+            _listViewButton,
+            _thumbnailViewButton,
+            _canvasViewButton,
+        },
+    };
 
     private void CreateHierarchyContextMenu()
     {

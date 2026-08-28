@@ -84,7 +84,8 @@ public sealed record LayoutCreationSpec(
     Guid? TitleBlockSourceInstanceObjectId = null,
     BuiltInTitleBlockKind? BuiltInTitleBlock = null,
     string? NamedView = null,
-    bool UseDedicatedDetailLayer = true);
+    bool UseDedicatedDetailLayer = true,
+    IReadOnlyList<string?>? NamedViewsByDetail = null);
 
 public sealed record BatchCreateSheetsRequest(
     uint DocumentRuntimeSerialNumber,
@@ -117,7 +118,8 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
         UpdateProjectInformationPlanner.Validate(request.ProjectData ?? snapshot.ProjectInfo, diagnostics);
 
         var templates = snapshot.Templates.ToDictionary(item => item.Id);
-        var expanded = new List<(Guid DraftId, SheetTemplateRecipe Template, bool UseDedicatedDetailLayer)>();
+        var expanded = new List<(Guid DraftId, SheetTemplateRecipe Template,
+            IReadOnlyDictionary<Guid, string> NamedViewAssignments, bool UseDedicatedDetailLayer)>();
         if (hasCreationSpecs)
         {
             foreach (var spec in request.CreationSpecs!)
@@ -129,15 +131,16 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
                     continue;
                 }
 
-                var template = ResolveTemplate(spec, templates, snapshot, diagnostics);
-                if (template is null)
+                var resolved = ResolveTemplate(spec, templates, snapshot, diagnostics);
+                if (resolved is null)
                 {
                     continue;
                 }
 
-                ValidateTemplate(template, snapshot, request.NamedViewAssignments, diagnostics);
+                ValidateTemplate(resolved.Template, snapshot, resolved.NamedViewAssignments, diagnostics);
                 for (var index = 0; index < spec.Quantity; index++)
-                    expanded.Add((Guid.NewGuid(), template, spec.UseDedicatedDetailLayer));
+                    expanded.Add((Guid.NewGuid(), resolved.Template, resolved.NamedViewAssignments,
+                        spec.UseDedicatedDetailLayer));
             }
         }
         else foreach (var item in request.TemplateQuantities)
@@ -154,7 +157,8 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
             }
             ValidateTemplate(template, snapshot, request.NamedViewAssignments, diagnostics);
             for (var index = 0; index < item.Quantity; index++)
-                expanded.Add((Guid.NewGuid(), template, true));
+                expanded.Add((Guid.NewGuid(), template,
+                    request.NamedViewAssignments ?? new Dictionary<Guid, string>(), true));
         }
 
         var pattern = request.NamingPattern?.Trim() ?? string.Empty;
@@ -166,7 +170,7 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
         var namingItems = expanded.Select(item => new NamingItem(
             item.DraftId,
             item.Template.Name,
-            Tokens(snapshot, destination?.Name, item.Template, request.NamedViewAssignments))).ToArray();
+            Tokens(snapshot, destination?.Name, item.Template, item.NamedViewAssignments))).ToArray();
         var naming = NamingEngine.Preview(new NamingRequest(
             pattern.Length == 0 ? expanded.FirstOrDefault().Template?.DefaultNamingPattern ?? string.Empty : pattern,
             namingItems,
@@ -192,7 +196,7 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
                     naming.Entries[index].ProposedName,
                     nextOrder + index,
                     expanded[index].Template,
-                    request.NamedViewAssignments ?? new Dictionary<Guid, string>(),
+                    expanded[index].NamedViewAssignments,
                     expanded[index].UseDedicatedDetailLayer,
                     (request.Start + index * request.Step).ToString(CultureInfo.InvariantCulture),
                     request.ProjectData ?? snapshot.ProjectInfo));
@@ -204,7 +208,7 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
             $"Create {changes.Count} layouts", changes, diagnostics);
     }
 
-    private static SheetTemplateRecipe? ResolveTemplate(
+    private static ResolvedCreationSpec? ResolveTemplate(
         LayoutCreationSpec spec,
         IReadOnlyDictionary<Guid, SheetTemplateRecipe> templates,
         DocumentSnapshot snapshot,
@@ -292,8 +296,34 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
             Bottom = slot.Bottom * verticalScale,
             Top = slot.Top * verticalScale,
             DisplayModeId = spec.DetailDisplayModeId ?? slot.DisplayModeId,
-            DefaultNamedView = string.IsNullOrWhiteSpace(spec.NamedView) ? slot.DefaultNamedView : spec.NamedView,
         }).ToArray();
+
+        var namedViewAssignments = new Dictionary<Guid, string>();
+        if (spec.NamedViewsByDetail is not null)
+        {
+            if (spec.NamedViewsByDetail.Count != details.Length)
+            {
+                diagnostics.Add(CaptureSheetTemplatePlanner.Error(
+                    "template.named_view_assignment_count",
+                    $"Layout '{source.Name}' has {details.Length} details but received " +
+                    $"{spec.NamedViewsByDetail.Count} named-view assignments."));
+            }
+            else
+            {
+                for (var index = 0; index < details.Length; index++)
+                {
+                    var namedView = spec.NamedViewsByDetail[index]?.Trim();
+                    if (!string.IsNullOrWhiteSpace(namedView))
+                        namedViewAssignments[details[index].Id] = namedView;
+                }
+            }
+        }
+        else if (!string.IsNullOrWhiteSpace(spec.NamedView))
+        {
+            var namedView = spec.NamedView.Trim();
+            foreach (var detail in details)
+                namedViewAssignments[detail.Id] = namedView;
+        }
 
         if (adaptiveTitleBlock is not null)
         {
@@ -307,14 +337,19 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
             }).ToArray();
         }
 
-        return source with
+        var template = source with
         {
             Id = Guid.NewGuid(),
             Paper = spec.Paper,
             DetailSlots = details,
             TitleBlock = titleBlock,
         };
+        return new ResolvedCreationSpec(template, namedViewAssignments);
     }
+
+    private sealed record ResolvedCreationSpec(
+        SheetTemplateRecipe Template,
+        IReadOnlyDictionary<Guid, string> NamedViewAssignments);
 
     private static SheetTemplateRecipe BuiltInTemplate(BuiltInLayoutKind kind, PaperRecipe paper)
     {

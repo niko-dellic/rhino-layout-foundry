@@ -17,6 +17,8 @@ public sealed class ObserverFoundryPanel : Panel
     private readonly Label _zoomLabel;
     private readonly FoundryToolbarIconButton _navigatorButton;
     private readonly FoundryToolbarIconButton _namedViewsButton;
+    private readonly FoundryToolbarIconButton _nestedPackingButton;
+    private readonly FoundryToolbarIconButton _compactPackingButton;
     private readonly PixelLayout _canvasOverlay;
     private readonly Control _canvasToolbar;
     private readonly UITimer _overlayLayoutTimer;
@@ -67,6 +69,13 @@ public sealed class ObserverFoundryPanel : Panel
         _navigatorButton = ToolbarToggleButton(FoundryViewIcons.Navigator(), "Show or hide the Navigator");
         _navigatorButton.Checked = true;
         _namedViewsButton = ToolbarToggleButton(FoundryViewIcons.NamedViews(), "Show or hide Named views");
+        _nestedPackingButton = ToolbarToggleButton(
+            FoundryViewIcons.NestedPacking(),
+            "Nest child folder containers inside their parent folders");
+        _nestedPackingButton.Checked = true;
+        _compactPackingButton = ToolbarToggleButton(
+            FoundryViewIcons.CompactPacking(),
+            "Hide folder containers and tightly pack every layout");
         var openButton = ToolbarButton(FoundryViewIcons.OpenSelection(), "Open the selected layout or detail in Rhino");
         fitButton.Click += (_, _) => _canvas.FitAll();
         focusButton.Click += (_, _) => _canvas.FocusSelection();
@@ -75,6 +84,8 @@ public sealed class ObserverFoundryPanel : Panel
         zoomInButton.Click += (_, _) => _canvas.Zoom(1.2);
         _navigatorButton.Click += (_, _) => ApplySidebarVisibility();
         _namedViewsButton.Click += (_, _) => ApplySidebarVisibility();
+        _nestedPackingButton.Click += (_, _) => SetPackingMode(ObserverPackingMode.NestedFolders);
+        _compactPackingButton.Click += (_, _) => SetPackingMode(ObserverPackingMode.CompactSheets);
         openButton.Click += (_, _) => NavigateSelection();
 
         _canvasToolbar = new StackLayout
@@ -89,6 +100,9 @@ public sealed class ObserverFoundryPanel : Panel
                 fitButton,
                 focusButton,
                 tidyButton,
+                ToolbarSeparator(),
+                _nestedPackingButton,
+                _compactPackingButton,
                 ToolbarSeparator(),
                 zoomOutButton,
                 zoomInButton,
@@ -247,6 +261,17 @@ public sealed class ObserverFoundryPanel : Panel
         _canvas.SetNavigatorVisible(_navigatorButton.Checked);
         _canvas.SetNamedViewsVisible(_namedViewsButton.Checked);
         UpdateCanvasOverlayLayout();
+    }
+
+    private void SetPackingMode(ObserverPackingMode packingMode)
+    {
+        _nestedPackingButton.Checked = packingMode == ObserverPackingMode.NestedFolders;
+        _compactPackingButton.Checked = packingMode == ObserverPackingMode.CompactSheets;
+        _canvas.SetPackingMode(packingMode, fit: true);
+        _status.Text = packingMode == ObserverPackingMode.NestedFolders
+            ? "Nested packing: child folders are contained inside their parent folders."
+            : "Compact packing: layouts are tightly arranged without folder containers.";
+        QueueVisiblePreviews();
     }
 
     private void UpdateCanvasOverlayLayout()
@@ -735,6 +760,12 @@ public sealed class ObserverFoundryPanel : Panel
     private async Task TidyAsync()
     {
         if (!_snapshot.HasDocument) return;
+        if (_canvas.PackingMode == ObserverPackingMode.CompactSheets)
+        {
+            _canvas.FitAll();
+            _status.Text = "Compact packing is already automatically tidy.";
+            return;
+        }
         var selected = LayoutFoundryUiHost.Selection.Selected;
         var sheetIds = selected.Where(key => key.Kind == OverviewNodeKind.Sheet).Select(key => key.Id).ToHashSet();
         var folderIds = selected.Where(key => key.Kind == OverviewNodeKind.Folder).Select(key => key.Id).ToHashSet();

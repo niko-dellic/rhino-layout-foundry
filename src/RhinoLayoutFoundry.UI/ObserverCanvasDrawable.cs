@@ -31,6 +31,7 @@ internal sealed class ObserverCanvasDrawable : Drawable
     private OverviewFilterProjection _filter = new(false, new HashSet<OverviewNodeKey>(), new HashSet<Guid>());
     private ObserverBoardLayout _layout = ObserverBoardLayout.Empty;
     private ObserverSpatialIndex _spatialIndex = new(ObserverBoardLayout.Empty);
+    private ObserverPackingMode _packingMode = ObserverPackingMode.NestedFolders;
     private ObserverCamera _camera = ObserverCamera.Default;
     private HashSet<OverviewNodeKey> _selection = [];
     private DragMode _dragMode;
@@ -95,12 +96,23 @@ internal sealed class ObserverCanvasDrawable : Drawable
     internal ObserverCamera Camera => _camera;
     internal ObserverBoardLayout BoardLayout => _layout;
     internal ObserverSnapshot Snapshot => _snapshot;
+    internal ObserverPackingMode PackingMode => _packingMode;
     internal bool ExitWorkspaceOnEscape { get; set; }
+
+    internal void SetPackingMode(ObserverPackingMode packingMode, bool fit)
+    {
+        if (_packingMode == packingMode) return;
+        _packingMode = packingMode;
+        _layout = new ObserverPlacementPlanner().Arrange(_snapshot, _packingMode);
+        _spatialIndex = new ObserverSpatialIndex(_layout);
+        if (fit && !_layout.Bounds.IsEmpty) FitAll();
+        else Invalidate();
+    }
 
     internal void SetSnapshot(ObserverSnapshot snapshot, bool fit)
     {
         _snapshot = snapshot ?? ObserverSnapshot.NoDocument;
-        _layout = new ObserverPlacementPlanner().Arrange(_snapshot);
+        _layout = new ObserverPlacementPlanner().Arrange(_snapshot, _packingMode);
         _spatialIndex = new ObserverSpatialIndex(_layout);
         var folderIds = _snapshot.Folders.Select(folder => folder.Id).ToHashSet();
         _collapsedNavigatorFolders.RemoveWhere(id => !folderIds.Contains(id));
@@ -613,6 +625,7 @@ internal sealed class ObserverCanvasDrawable : Drawable
 
             var emphasized = row.IsDraft || !_filter.IsActive || _filter.Emphasizes(row.Key) || selected;
             var disclosureX = 8 + row.Depth * 16;
+            DrawNavigatorConnectors(graphics, row, y, disclosureX);
             if (row.CanExpand)
             {
                 DrawOverlayText(
@@ -671,6 +684,50 @@ internal sealed class ObserverCanvasDrawable : Drawable
                 2,
                 thumbHeight);
         }
+    }
+
+    private static void DrawNavigatorConnectors(
+        Graphics graphics,
+        CanvasNavigatorRow row,
+        float rowTop,
+        float disclosureX)
+    {
+        if (row.Depth <= 0) return;
+        var rowMiddle = rowTop + NavigatorRowHeight / 2f;
+        var continuations = row.AncestorContinuations ?? [];
+        for (var index = 0; index < continuations.Count; index++)
+        {
+            if (!continuations[index]) continue;
+            var x = 16 + index * 16;
+            DrawNavigatorConnectorLine(graphics, x, rowTop, x, rowTop + NavigatorRowHeight);
+        }
+
+        var branchX = row.Depth * 16;
+        DrawNavigatorConnectorLine(
+            graphics,
+            branchX,
+            rowTop,
+            branchX,
+            row.HasNextSibling ? rowTop + NavigatorRowHeight : rowMiddle);
+        DrawNavigatorConnectorLine(
+            graphics,
+            branchX,
+            rowMiddle,
+            row.CanExpand ? disclosureX - 2 : disclosureX + 13,
+            rowMiddle);
+    }
+
+    private static void DrawNavigatorConnectorLine(
+        Graphics graphics,
+        float x1,
+        float y1,
+        float x2,
+        float y2)
+    {
+        using var halo = new Pen(FoundryTheme.WithAlpha(Colors.Black, 190), 3);
+        using var line = new Pen(FoundryTheme.WithAlpha(FoundryTheme.MutedText, 145), 1);
+        graphics.DrawLine(halo, x1, y1, x2, y2);
+        graphics.DrawLine(line, x1, y1, x2, y2);
     }
 
     private void DrawNamedViews(Graphics graphics, ObserverSize viewport)
@@ -941,11 +998,19 @@ internal sealed class ObserverCanvasDrawable : Drawable
         }
 
         var result = _navigatorRows.ToList();
+        var parent = _navigatorRows[parentIndex];
+        var draftContinuations = parent.Depth == 0
+            ? Array.Empty<bool>()
+            : [.. parent.AncestorContinuations ?? [], parent.HasNextSibling];
+        var draftHasNextSibling = insertionIndex < _navigatorRows.Length &&
+                                  _navigatorRows[insertionIndex].Depth == parentDepth + 1;
         result.Insert(insertionIndex, new CanvasNavigatorRow(
             new OverviewNodeKey(OverviewNodeKind.Folder, draft.Id),
             draft.Name,
             parentDepth + 1,
-            IsDraft: true));
+            IsDraft: true,
+            HasNextSibling: draftHasNextSibling,
+            AncestorContinuations: draftContinuations));
         return result.ToArray();
     }
 
@@ -1036,7 +1101,11 @@ internal sealed class ObserverCanvasDrawable : Drawable
         var rows = new List<CanvasNavigatorRow>();
         var visited = new HashSet<Guid>();
 
-        void AddFolder(ObserverFolderSnapshot folder, int depth)
+        void AddFolder(
+            ObserverFolderSnapshot folder,
+            int depth,
+            bool hasNextSibling,
+            IReadOnlyList<bool> ancestorContinuations)
         {
             if (!visited.Add(folder.Id)) return;
             var childFolders = folders.Values.Where(candidate => candidate.ParentId == folder.Id)
@@ -1054,29 +1123,53 @@ internal sealed class ObserverCanvasDrawable : Drawable
                 folder.Name,
                 depth,
                 CanExpand: canExpand,
-                IsExpanded: expanded));
+                IsExpanded: expanded,
+                HasNextSibling: hasNextSibling,
+                AncestorContinuations: ancestorContinuations));
             if (!expanded) return;
+            var childCount = childFolders.Length + childSheets.Length;
+            var childIndex = 0;
+            var childContinuations = depth == 0
+                ? Array.Empty<bool>()
+                : [.. ancestorContinuations, hasNextSibling];
             foreach (var child in childFolders)
-                AddFolder(child, depth + 1);
+            {
+                AddFolder(
+                    child,
+                    depth + 1,
+                    childIndex < childCount - 1,
+                    childContinuations);
+                childIndex++;
+            }
             foreach (var sheet in childSheets)
             {
                 var sheetExpanded = _expandedNavigatorSheets.Contains(sheet.PageViewId);
+                var sheetHasNextSibling = childIndex < childCount - 1;
                 rows.Add(new CanvasNavigatorRow(
                     new OverviewNodeKey(OverviewNodeKind.Sheet, sheet.PageViewId),
                     sheet.Name,
                     depth + 1,
                     CanExpand: sheet.Details.Count > 0,
-                    IsExpanded: sheetExpanded));
+                    IsExpanded: sheetExpanded,
+                    HasNextSibling: sheetHasNextSibling,
+                    AncestorContinuations: childContinuations));
+                childIndex++;
                 if (!sheetExpanded) continue;
-                foreach (var detail in sheet.Details)
+                bool[] detailContinuations = [.. childContinuations, sheetHasNextSibling];
+                for (var detailIndex = 0; detailIndex < sheet.Details.Count; detailIndex++)
+                {
+                    var detail = sheet.Details[detailIndex];
                     rows.Add(new CanvasNavigatorRow(
                         new OverviewNodeKey(OverviewNodeKind.Detail, detail.DetailViewportId),
                         detail.Name,
-                        depth + 2));
+                        depth + 2,
+                        HasNextSibling: detailIndex < sheet.Details.Count - 1,
+                        AncestorContinuations: detailContinuations));
+                }
             }
         }
 
-        AddFolder(root, 0);
+        AddFolder(root, 0, false, []);
         return rows.ToArray();
     }
 
@@ -1163,7 +1256,9 @@ internal sealed class ObserverCanvasDrawable : Drawable
                 ? DragMode.Reorder
                 : detail is not null
                     ? DragMode.Detail
-                    : DragMode.Sheets;
+                    : _packingMode == ObserverPackingMode.CompactSheets
+                        ? DragMode.CompactSheet
+                        : DragMode.Sheets;
         }
         else
         {
@@ -1702,6 +1797,7 @@ internal sealed class ObserverCanvasDrawable : Drawable
 
     private void NudgeSelection(ObserverPoint delta)
     {
+        if (_packingMode == ObserverPackingMode.CompactSheets) return;
         var state = _snapshot.CanvasState;
         var selectedFolders = _selection
             .Where(key => key.Kind == OverviewNodeKind.Folder)
@@ -1833,7 +1929,9 @@ internal sealed class ObserverCanvasDrawable : Drawable
         int Depth,
         bool IsDraft = false,
         bool CanExpand = false,
-        bool IsExpanded = false);
+        bool IsExpanded = false,
+        bool HasNextSibling = false,
+        IReadOnlyList<bool>? AncestorContinuations = null);
 
     private sealed record NavigatorFolderDraft(
         Guid Id,
@@ -1847,6 +1945,7 @@ internal sealed class ObserverCanvasDrawable : Drawable
         ContextOrPan,
         Pan,
         Sheets,
+        CompactSheet,
         Folder,
         Reorder,
         Detail,
