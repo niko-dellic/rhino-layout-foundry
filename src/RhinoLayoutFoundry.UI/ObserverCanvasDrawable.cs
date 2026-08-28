@@ -12,7 +12,7 @@ internal sealed class ObserverCanvasDrawable : Drawable
     private const double RightPanActivationDistance = 5;
     private const int NavigatorWidth = 260;
     private const int NavigatorTop = 38;
-    private const int NavigatorHeaderHeight = 28;
+    private const int NavigatorHeaderHeight = 0;
     private const int NavigatorRowHeight = 24;
     private const int NamedViewsWidth = 224;
     private const int NamedViewsTop = 38;
@@ -36,6 +36,7 @@ internal sealed class ObserverCanvasDrawable : Drawable
     private Color _gridColor = FoundryTheme.CanvasGridColor;
     private double _gridOpacity = FoundryTheme.DefaultCanvasGridOpacity;
     private HashSet<OverviewNodeKey> _selection = [];
+    private OverviewNodeKey? _selectionAnchor;
     private DragMode _dragMode;
     private ObserverPoint _pressScreen;
     private ObserverPoint _pressWorld;
@@ -148,6 +149,8 @@ internal sealed class ObserverCanvasDrawable : Drawable
             _navigatorFolderDraft = null;
         ClampNavigatorScroll();
         _selection.RemoveWhere(key => !ContainsKey(key));
+        if (_selectionAnchor is { } anchor && !_selection.Contains(anchor))
+            _selectionAnchor = _selection.Count == 1 ? _selection.Single() : null;
         if (fit && !_layout.Bounds.IsEmpty)
         {
             FitAll();
@@ -232,9 +235,16 @@ internal sealed class ObserverCanvasDrawable : Drawable
         Invalidate();
     }
 
-    internal void SetSelection(IEnumerable<OverviewNodeKey> selection)
+    internal void SetSelection(
+        IEnumerable<OverviewNodeKey> selection,
+        OverviewNodeKey? anchor = null)
     {
         _selection = selection.Where(ContainsKey).ToHashSet();
+        _selectionAnchor = anchor is { } candidate && _selection.Contains(candidate)
+            ? candidate
+            : _selection.Count == 1
+                ? _selection.Single()
+                : null;
         foreach (var detailId in _selection
                      .Where(key => key.Kind == OverviewNodeKind.Detail)
                      .Select(key => key.Id))
@@ -618,27 +628,6 @@ internal sealed class ObserverCanvasDrawable : Drawable
         var visibleCount = NavigatorVisibleRowCount(viewport);
         ClampNavigatorScroll(rows.Length, visibleCount);
 
-        var renderedRowCount = Math.Min(rows.Length, visibleCount);
-        var surfaceBounds = new RectangleF(
-            0.5f,
-            NavigatorTop + 0.5f,
-            NavigatorWidth - 1,
-            NavigatorHeaderHeight + renderedRowCount * NavigatorRowHeight - 1);
-        using (var surface = GraphicsPath.GetRoundRect(surfaceBounds, 8))
-        {
-            graphics.FillPath(FoundryTheme.CanvasOverlayBackground, surface);
-            graphics.DrawPath(
-                new Pen(FoundryTheme.WithAlpha(FoundryTheme.CanvasBorder, 205), 1),
-                surface);
-        }
-
-        DrawOverlayText(
-            graphics,
-            _folderFont,
-            FoundryTheme.PrimaryText,
-            8,
-            NavigatorTop + 5,
-            "Navigator");
         for (var visibleIndex = 0; visibleIndex < visibleCount; visibleIndex++)
         {
             var rowIndex = _navigatorScrollRow + visibleIndex;
@@ -674,19 +663,7 @@ internal sealed class ObserverCanvasDrawable : Drawable
             var rowColor = emphasized
                 ? FoundryTheme.PrimaryText
                 : FoundryTheme.WithAlpha(FoundryTheme.MutedText, 80);
-            var iconBounds = new RectangleF(disclosureX + 16, y + 5, 14, 14);
-            switch (row.Key.Kind)
-            {
-                case OverviewNodeKind.Folder:
-                    FoundryHierarchyIcons.DrawFolder(graphics, rowColor, iconBounds);
-                    break;
-                case OverviewNodeKind.Sheet:
-                    FoundryHierarchyIcons.DrawLayout(graphics, rowColor, iconBounds);
-                    break;
-                case OverviewNodeKind.Detail:
-                    FoundryHierarchyIcons.DrawDetail(graphics, rowColor, iconBounds);
-                    break;
-            }
+            DrawNavigatorIcon(graphics, row, rowColor, disclosureX + 14, y + 3);
             DrawOverlayText(
                 graphics,
                 _sheetFont,
@@ -718,6 +695,43 @@ internal sealed class ObserverCanvasDrawable : Drawable
                 thumbY,
                 2,
                 thumbHeight);
+        }
+    }
+
+    private static void DrawNavigatorIcon(
+        Graphics graphics,
+        CanvasNavigatorRow row,
+        Color iconColor,
+        float x,
+        float y)
+    {
+        var badgeBounds = new RectangleF(x, y, 18, 18);
+        using (var badge = GraphicsPath.GetRoundRect(badgeBounds, 3))
+        {
+            graphics.FillPath(FoundryTheme.CanvasOverlayBackground, badge);
+            graphics.DrawPath(
+                new Pen(FoundryTheme.WithAlpha(FoundryTheme.CanvasBorder, 190), 1),
+                badge);
+        }
+
+        var iconBounds = new RectangleF(x + 2, y + 2, 14, 14);
+        if (row.IsDocumentRoot)
+        {
+            FoundryHierarchyIcons.DrawRhino(graphics, iconColor, iconBounds);
+            return;
+        }
+
+        switch (row.Key.Kind)
+        {
+            case OverviewNodeKind.Folder:
+                FoundryHierarchyIcons.DrawFolder(graphics, iconColor, iconBounds);
+                break;
+            case OverviewNodeKind.Sheet:
+                FoundryHierarchyIcons.DrawLayout(graphics, iconColor, iconBounds);
+                break;
+            case OverviewNodeKind.Detail:
+                FoundryHierarchyIcons.DrawDetail(graphics, iconColor, iconBounds);
+                break;
         }
     }
 
@@ -1172,8 +1186,11 @@ internal sealed class ObserverCanvasDrawable : Drawable
             var expanded = !_collapsedNavigatorFolders.Contains(folder.Id);
             rows.Add(new CanvasNavigatorRow(
                 new OverviewNodeKey(OverviewNodeKind.Folder, folder.Id),
-                folder.Name,
+                folder.Id == snapshot.RootFolderId
+                    ? DocumentRootLabel(snapshot.DocumentName)
+                    : folder.Name,
                 depth,
+                IsDocumentRoot: folder.Id == snapshot.RootFolderId,
                 CanExpand: canExpand,
                 IsExpanded: expanded,
                 HasNextSibling: hasNextSibling,
@@ -1223,6 +1240,16 @@ internal sealed class ObserverCanvasDrawable : Drawable
 
         AddFolder(root, 0, false, []);
         return rows.ToArray();
+    }
+
+    private static string DocumentRootLabel(string documentName)
+    {
+        var name = string.IsNullOrWhiteSpace(documentName)
+            ? "Untitled Rhino document"
+            : documentName;
+        return name.EndsWith(".3dm", StringComparison.OrdinalIgnoreCase)
+            ? name
+            : $"{name}.3dm";
     }
 
     private void OnMouseDown(object? sender, MouseEventArgs eventArgs)
@@ -1286,7 +1313,7 @@ internal sealed class ObserverCanvasDrawable : Drawable
             if (IsNavigatorDisclosureHit(eventArgs.Location, navigatorRow))
                 ToggleNavigatorRow(navigatorRow);
             else if (!navigatorRow.IsDraft)
-                SelectKey(navigatorRow.Key, eventArgs.Modifiers);
+                SelectNavigatorKey(navigatorRow.Key, eventArgs.Modifiers);
             eventArgs.Handled = true;
             Invalidate();
             return;
@@ -1815,6 +1842,29 @@ internal sealed class ObserverCanvasDrawable : Drawable
         SelectionRequested?.Invoke(this, new ObserverSelectionRequestedEventArgs(keys.ToArray(), key));
     }
 
+    private void SelectNavigatorKey(OverviewNodeKey key, Keys modifiers)
+    {
+        if (!modifiers.HasFlag(Keys.Shift))
+        {
+            SelectKey(key, modifiers);
+            return;
+        }
+
+        var visibleKeys = NavigatorRowsForDisplay()
+            .Where(row => !row.IsDraft)
+            .Select(row => row.Key)
+            .ToArray();
+        var selection = new OverviewSelectionModel();
+        selection.Replace(_selection, _selectionAnchor);
+        selection.SelectRange(
+            visibleKeys,
+            key,
+            additive: modifiers.HasFlag(Keys.Application) || modifiers.HasFlag(Keys.Control));
+        SelectionRequested?.Invoke(
+            this,
+            new ObserverSelectionRequestedEventArgs(selection.Selected.ToArray(), selection.Anchor));
+    }
+
     private static bool IsAdditive(Keys modifiers) =>
         modifiers.HasFlag(Keys.Application) || modifiers.HasFlag(Keys.Control) || modifiers.HasFlag(Keys.Shift);
 
@@ -2001,6 +2051,7 @@ internal sealed class ObserverCanvasDrawable : Drawable
         string Label,
         int Depth,
         bool IsDraft = false,
+        bool IsDocumentRoot = false,
         bool CanExpand = false,
         bool IsExpanded = false,
         bool HasNextSibling = false,

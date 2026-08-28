@@ -130,6 +130,7 @@ public sealed class ObserverFoundryPanel : Panel
         {
             Visible = false,
         };
+        _canvas.MouseDown += (_, _) => DismissGridAppearanceTray();
         _overlayLayoutTimer = new UITimer { Interval = 0.04 };
         _overlayLayoutTimer.Elapsed += (_, _) =>
         {
@@ -311,6 +312,13 @@ public sealed class ObserverFoundryPanel : Panel
         UpdateCanvasOverlayLayout();
     }
 
+    private void DismissGridAppearanceTray()
+    {
+        if (!_gridAppearanceTray.Visible) return;
+        _gridAppearanceButton.Checked = false;
+        ApplyGridAppearanceTrayVisibility();
+    }
+
     private void UpdateCanvasOverlayLayout()
     {
         var clientSize = _canvasOverlay.ClientSize;
@@ -490,10 +498,13 @@ public sealed class ObserverFoundryPanel : Panel
         {
             _pendingInitialFitDocumentSerial = null;
         }
-        _canvas.SetSelection(LayoutFoundryUiHost.Selection.DocumentRuntimeSerialNumber ==
-                             (_snapshot.HasDocument ? _snapshot.DocumentRuntimeSerialNumber : null)
-            ? LayoutFoundryUiHost.Selection.Selected
-            : []);
+        var selectionMatchesDocument = LayoutFoundryUiHost.Selection.DocumentRuntimeSerialNumber ==
+                                       (_snapshot.HasDocument
+                                           ? _snapshot.DocumentRuntimeSerialNumber
+                                           : null);
+        _canvas.SetSelection(
+            selectionMatchesDocument ? LayoutFoundryUiHost.Selection.Selected : [],
+            selectionMatchesDocument ? LayoutFoundryUiHost.Selection.Anchor : null);
         PopulateNavigator();
         // The shared Layout Foundry footer owns persistent document totals.
         // This local row is reserved for operation feedback and errors.
@@ -579,7 +590,7 @@ public sealed class ObserverFoundryPanel : Panel
     {
         if (eventArgs.DocumentRuntimeSerialNumber !=
             (_snapshot.HasDocument ? _snapshot.DocumentRuntimeSerialNumber : null)) return;
-        _canvas.SetSelection(eventArgs.Selection);
+        _canvas.SetSelection(eventArgs.Selection, eventArgs.Anchor);
         if (!ReferenceEquals(eventArgs.Source, this)) PopulateNavigator();
     }
 

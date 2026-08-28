@@ -6,8 +6,8 @@ namespace RhinoLayoutFoundry.UI;
 internal sealed class CanvasGridTray : Panel
 {
     private readonly Action<Color, double> _appearanceChanged;
-    private readonly ColorPicker _colorPicker;
-    private readonly Slider _opacitySlider;
+    private readonly FoundryColorField _colorPicker;
+    private readonly FoundrySlider _opacitySlider;
     private readonly Label _opacityLabel;
 
     internal CanvasGridTray(
@@ -17,24 +17,15 @@ internal sealed class CanvasGridTray : Panel
     {
         _appearanceChanged = appearanceChanged ??
                              throw new ArgumentNullException(nameof(appearanceChanged));
-        Size = new Size(300, 126);
+        Size = new Size(300, 142);
         Padding = new Padding(1);
         BackgroundColor = FoundryTheme.WithAlpha(FoundryTheme.CanvasBorder, 190);
 
-        _colorPicker = new ColorPicker
-        {
-            Value = Opaque(color),
-            AllowAlpha = false,
-            Width = 170,
-        };
-        _opacitySlider = new Slider
-        {
-            MinValue = 0,
-            MaxValue = 100,
-            Value = (int)Math.Round(Math.Clamp(opacity, 0, 1) * 100),
-            TickFrequency = 5,
-            Width = 170,
-        };
+        _colorPicker = new FoundryColorField(Opaque(color));
+        _opacitySlider = new FoundrySlider(
+            0,
+            100,
+            (int)Math.Round(Math.Clamp(opacity, 0, 1) * 100));
         _opacityLabel = FoundryTheme.MutedLabel();
         _opacityLabel.Width = 38;
         _opacityLabel.TextAlignment = TextAlignment.Right;
@@ -47,13 +38,13 @@ internal sealed class CanvasGridTray : Panel
             PublishAppearance();
         };
 
-        var reset = new Button
+        var reset = new FoundryDialogButton(
+            "Reset",
+            FoundryDialogButtonStyle.Secondary,
+            58)
         {
-            Text = "Reset",
             ToolTip = "Restore the default grid color and opacity",
-            MinimumSize = new Size(50, 24),
         };
-        reset.Width = 50;
         reset.Click += (_, _) =>
         {
             _colorPicker.Value = FoundryTheme.CanvasGridColor;

@@ -70,7 +70,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         _titleBlockChoices = TitleBlockChoices(snapshot);
         _namedViewChoices = NamedViewChoices(snapshot);
         Title = "Create layouts";
-        MinimumSize = new Size(1080, 760);
+        MinimumSize = new Size(1360, 760);
         Resizable = true;
         Padding = new Padding(FoundryTheme.Space4);
         BackgroundColor = FoundryTheme.PanelBackground;
@@ -141,10 +141,11 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         _clearSelectionButton = new FoundryToolbarIconButton(
             FoundryViewIcons.ClearSelection(),
             "Clear row selection and edit all layouts");
-        _clearSelectionButton.Visible = false;
+        _clearSelectionButton.Enabled = false;
         _clearSelectionButton.Click += (_, _) => ClearPreviewSelection();
         _status = FoundryTheme.MutedLabel();
         _status.Wrap = WrapMode.Word;
+        _status.Visible = false;
         _createButton = new FoundryDialogButton(
             "Create layouts",
             FoundryDialogButtonStyle.Primary,
@@ -236,24 +237,10 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                 Rows =
                 {
                     new TableRow(
-                        new TableCell(new StackLayout
-                        {
-                            Spacing = FoundryTheme.Space3,
-                            Items =
-                            {
-                                Card("Batch", CreateBatchEditor()),
-                                Card("Details", CreateDetailEditor()),
-                            },
-                        }, true),
-                        new TableCell(new StackLayout
-                        {
-                            Spacing = FoundryTheme.Space3,
-                            Items =
-                            {
-                                Card("Page size", CreatePaperEditor()),
-                                Card("Title block", CreateTitleBlockEditor()),
-                            },
-                        }, true),
+                        new TableCell(Card("Batch", CreateBatchEditor())),
+                        new TableCell(Card("Page size", CreatePaperEditor())),
+                        new TableCell(Card("Details", CreateDetailEditor())),
+                        new TableCell(Card("Title block", CreateTitleBlockEditor())),
                         new TableCell(Card("Layout && views", CreateLayoutEditor()), true)),
                 },
             },
@@ -451,8 +438,9 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         var pickerError = PickerError();
         var diagnostics = string.Join(" ", plan.Diagnostics
             .Where(item => item.Severity is DiagnosticSeverity.Error or DiagnosticSeverity.Warning)
+            .Where(item => item.Code != "batch.undo_unavailable")
             .Select(item => item.Message));
-        _status.Text = pickerError ?? diagnostics;
+        SetStatus(pickerError ?? diagnostics);
         _createButton.Text = CreatedCount == 1 ? "Create layout" : $"Create {CreatedCount} layouts";
         _createButton.Enabled = plan.CanApply && pickerError is null;
     }
@@ -477,15 +465,15 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         {
             _createButton.Enabled = false;
             _createButton.Text = "Creating…";
-            _status.Text = $"Creating {CreatedCount} layout{(CreatedCount == 1 ? string.Empty : "s")}…";
+            SetStatus($"Creating {CreatedCount} layout{(CreatedCount == 1 ? string.Empty : "s")}…");
             var result = await LayoutFoundryUiHost.BatchCreateSheetsAsync(Request());
             if (!result.Succeeded)
             {
                 RefreshPreview();
                 var message = string.Join(" ", result.Diagnostics.Select(item => item.Message));
-                _status.Text = string.IsNullOrWhiteSpace(message)
+                SetStatus(string.IsNullOrWhiteSpace(message)
                     ? "Rhino did not create the layouts. Review the settings and try again."
-                    : message;
+                    : message);
                 MessageBox.Show(this, _status.Text, "Create layouts", MessageBoxType.Error);
                 return;
             }
@@ -495,9 +483,15 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         catch (Exception exception)
         {
             RefreshPreview();
-            _status.Text = $"Layout creation failed: {exception.Message}";
+            SetStatus($"Layout creation failed: {exception.Message}");
             MessageBox.Show(this, _status.Text, "Create layouts", MessageBoxType.Error);
         }
+    }
+
+    private void SetStatus(string? message)
+    {
+        _status.Text = message ?? string.Empty;
+        _status.Visible = !string.IsNullOrWhiteSpace(_status.Text);
     }
 
     private void ResizeDrafts()
@@ -1181,7 +1175,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                 ? "No rows selected — property changes apply to all."
                 : $"No rows selected — property changes apply to {ActiveGroupLabel()}."
             : $"{selectedCount} selected — property changes apply only to selected rows.";
-        _clearSelectionButton.Visible = selectedCount > 0;
+        _clearSelectionButton.Enabled = selectedCount > 0;
     }
 
     private void EnsureActiveGroupExists()
