@@ -12,7 +12,7 @@ internal sealed class CaptureTemplateDialog : Dialog
     private readonly TextBox _patternBox;
     private readonly DropDown _titleBlockDropDown;
     private readonly Label _statusLabel;
-    private readonly Button _captureButton;
+    private readonly FoundryDialogButton _captureButton;
 
     internal CaptureTemplateDialog(
         Guid sourcePageViewId,
@@ -38,14 +38,18 @@ internal sealed class CaptureTemplateDialog : Dialog
         _statusLabel = FoundryTheme.MutedLabel(
             "Paper size, detail rectangles, cameras, scales, display modes, and metadata will be captured.");
         _statusLabel.Wrap = WrapMode.Word;
-        _captureButton = FoundryTheme.ConfigureButton(new Button { Text = "Capture template" }, 120);
-        var cancel = FoundryTheme.ConfigureButton(new Button { Text = "Cancel" });
+        _captureButton = new FoundryDialogButton(
+            "Capture template",
+            FoundryDialogButtonStyle.Primary,
+            120);
+        var cancel = new FoundryDialogButton(
+            "Cancel",
+            FoundryDialogButtonStyle.Secondary);
         cancel.Click += (_, _) => Close();
         _captureButton.Click += async (_, _) => await CaptureAsync();
         _nameBox.TextChanged += (_, _) => UpdateEnabled();
         _patternBox.TextChanged += (_, _) => UpdateEnabled();
-        DefaultButton = _captureButton;
-        AbortButton = cancel;
+        FoundryDialogActions.Bind(this, _captureButton, cancel);
 
         Content = new StackLayout
         {
@@ -95,7 +99,11 @@ internal sealed class CaptureTemplateDialog : Dialog
     private static Control Field(string label, Control control) => new StackLayout
     {
         Spacing = FoundryTheme.Space1,
-        Items = { new Label { Text = label, Font = SystemFonts.Bold() }, control },
+        Items =
+        {
+            new Label { Text = label, Font = SystemFonts.Bold(), TextColor = FoundryTheme.SecondaryText },
+            new FoundryFormField(control),
+        },
     };
 
     private static Control Header(string title, string subtitle) => new StackLayout

@@ -18,7 +18,13 @@ internal static class FoundryTheme
 
     internal static Color PrimaryText => SystemColors.ControlText;
 
-    internal static Color MutedText => SystemColors.DisabledText;
+    internal static Color SecondaryText => IsDarkMode
+        ? Color.FromArgb(161, 161, 170, 255)
+        : Color.FromArgb(82, 82, 91, 255);
+
+    internal static Color MutedText => IsDarkMode
+        ? Color.FromArgb(113, 113, 122, 255)
+        : Color.FromArgb(113, 113, 122, 255);
 
     internal static bool IsDarkMode
     {
@@ -45,6 +51,27 @@ internal static class FoundryTheme
         ? Color.FromArgb(82, 82, 91, 255)
         : Color.FromArgb(212, 212, 216, 255);
 
+    // Opaque chrome for canvas overlays that can sit above white sheet previews.
+    internal static Color CanvasOverlayBackground => IsDarkMode
+        ? Color.FromArgb(36, 36, 36, 255)
+        : Color.FromArgb(250, 250, 250, 255);
+
+    internal static Color InputBackground => IsDarkMode
+        ? Color.FromArgb(36, 36, 36, 255)
+        : Color.FromArgb(255, 255, 255, 255);
+
+    internal static Color ToolbarActiveBackground => IsDarkMode
+        ? Color.FromArgb(21, 21, 21, 255)
+        : Color.FromArgb(228, 228, 231, 255);
+
+    internal static Color ToolbarButtonBackground => IsDarkMode
+        ? Color.FromArgb(36, 36, 36, 255)
+        : Color.FromArgb(250, 250, 250, 255);
+
+    internal static Color ToolbarGroupBackground => IsDarkMode
+        ? Color.FromArgb(42, 42, 42, 255)
+        : Color.FromArgb(244, 244, 245, 255);
+
     internal static Color HierarchyFolderBackground => IsDarkMode
         ? Color.FromArgb(34, 34, 37, 255)
         : Color.FromArgb(250, 250, 250, 255);
@@ -53,9 +80,15 @@ internal static class FoundryTheme
         ? Color.FromArgb(39, 39, 42, 255)
         : Color.FromArgb(244, 244, 245, 255);
 
-    internal static Color CanvasGrid => IsDarkMode
-        ? Color.FromArgb(161, 161, 170, 30)
-        : Color.FromArgb(113, 113, 122, 26);
+    internal const double DefaultCanvasGridOpacity = 0.22;
+
+    internal static Color CanvasGridColor => IsDarkMode
+        ? Color.FromArgb(161, 161, 170, 255)
+        : Color.FromArgb(82, 82, 91, 255);
+
+    internal static Color CanvasGrid => WithAlpha(
+        CanvasGridColor,
+        (int)Math.Round(DefaultCanvasGridOpacity * 255));
 
     internal static Color SelectionAccent => RhinoColor(
         () => AppearanceSettings.SelectedObjectColor,
@@ -64,16 +97,6 @@ internal static class FoundryTheme
     internal static Color DangerAccent => IsDarkMode
         ? Color.FromArgb(239, 68, 68, 255)
         : Color.FromArgb(220, 38, 38, 255);
-
-    // Neutral shadcn-style primary actions. SelectionAccent remains reserved
-    // for selection/focus affordances instead of becoming a large color block.
-    internal static Color PrimaryActionBackground => IsDarkMode
-        ? Color.FromArgb(250, 250, 250, 255)
-        : Color.FromArgb(24, 24, 27, 255);
-
-    internal static Color PrimaryActionText => IsDarkMode
-        ? Color.FromArgb(24, 24, 27, 255)
-        : Color.FromArgb(250, 250, 250, 255);
 
     internal static Color SelectionWindowStroke(bool crossing) => RhinoColor(
         () => crossing
@@ -93,26 +116,6 @@ internal static class FoundryTheme
     internal static Font BrandFont => SystemFonts.Bold(9);
 
     internal static Font EmptyTitleFont => SystemFonts.Bold(13);
-
-    internal static Button ConfigureButton(Button button, int minimumWidth = 0)
-    {
-        button.MinimumSize = new Size(minimumWidth, 28);
-        return button;
-    }
-
-    internal static Button ConfigureIconButton(Button button)
-    {
-        button.MinimumSize = new Size(28, 28);
-        button.Width = 28;
-        return button;
-    }
-
-    internal static Button ConfigureToolbarButton(Button button)
-    {
-        button.MinimumSize = new Size(24, 24);
-        button.Width = 24;
-        return button;
-    }
 
     internal static Label MutedLabel(string text = "")
     {

@@ -33,12 +33,7 @@ internal sealed class ProjectInformationDialog : Dialog
             _status.Text = _editor.ValidationError ?? string.Empty;
             _save.Enabled = _editor.ValidationError is null;
         };
-        KeyDown += (_, eventArgs) =>
-        {
-            if (eventArgs.Key != Keys.Escape) return;
-            eventArgs.Handled = true;
-            Close();
-        };
+        FoundryDialogActions.Bind(this, _save, cancel);
         Content = new StackLayout
         {
             Spacing = FoundryTheme.Space4,

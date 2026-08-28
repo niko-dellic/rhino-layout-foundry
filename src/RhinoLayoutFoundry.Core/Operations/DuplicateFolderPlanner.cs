@@ -33,7 +33,7 @@ public sealed class DuplicateFolderPlanner : IOperationPlanner<DuplicateFolderRe
             var name = UniqueCopyName(source.Name, parentId, snapshot.Folders.Values);
             var descendants = Descendants(source.Id, snapshot.Folders);
             var map = descendants.ToDictionary(id => id, _ => Guid.NewGuid());
-            changes.Add(new DuplicateFolderChange(source.Id, parentId, source.Name, name, map));
+            changes.Add(new DuplicateFolderChange(source.Id, parentId, parentId, source.Name, name, map));
             if (snapshot.Sheets.Values.Any(sheet => descendants.Contains(sheet.FolderId)))
                 diagnostics.Add(new Diagnostic("folder.duplicate_undo_unavailable", DiagnosticSeverity.Warning,
                     "Rhino does not expose native Undo for duplicated layouts. Foundry removes the entire copy if duplication fails."));

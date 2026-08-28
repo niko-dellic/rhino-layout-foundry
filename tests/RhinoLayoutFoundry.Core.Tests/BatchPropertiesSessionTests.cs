@@ -16,7 +16,7 @@ public sealed class BatchPropertiesSessionTests
 
         Assert.True(session.IsDirty);
         Assert.Equal("420 × 297 mm", session.StagedValues[BatchPropertyKind.PaperSize]);
-        Assert.Single(session.Targets.Where(target => target.Included));
+        Assert.Single(session.Targets, target => target.Included);
     }
 
     [Fact]

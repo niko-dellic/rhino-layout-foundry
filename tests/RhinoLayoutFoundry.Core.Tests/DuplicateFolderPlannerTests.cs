@@ -23,7 +23,7 @@ public sealed class DuplicateFolderPlannerTests
         var change = (DuplicateFolderChange)plan.Changes.Single();
         Assert.Equal("Plans copy", change.NewName);
         Assert.Equal(2, change.FolderIdMap.Count);
-        Assert.False(change.FolderIdMap.Values.Contains(Guid.Empty));
+        Assert.DoesNotContain(Guid.Empty, change.FolderIdMap.Values);
     }
 
     [Fact]

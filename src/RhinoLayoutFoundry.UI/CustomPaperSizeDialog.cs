@@ -28,8 +28,13 @@ internal sealed class CustomPaperSizeDialog : Dialog
                 unit => string.Equals(unit, unitSystem, StringComparison.OrdinalIgnoreCase))),
         };
         _status = FoundryTheme.MutedLabel();
-        var cancel = FoundryTheme.ConfigureButton(new Button { Text = "Cancel" });
-        var apply = FoundryTheme.ConfigureButton(new Button { Text = "Apply" }, 84);
+        var cancel = new FoundryDialogButton(
+            "Cancel",
+            FoundryDialogButtonStyle.Secondary);
+        var apply = new FoundryDialogButton(
+            "Apply",
+            FoundryDialogButtonStyle.Primary,
+            84);
         cancel.Click += (_, _) => Close();
         apply.Click += (_, _) =>
         {
@@ -42,8 +47,7 @@ internal sealed class CustomPaperSizeDialog : Dialog
             Accepted = true;
             Close();
         };
-        DefaultButton = apply;
-        AbortButton = cancel;
+        FoundryDialogActions.Bind(this, apply, cancel);
 
         Content = new StackLayout
         {
@@ -62,9 +66,9 @@ internal sealed class CustomPaperSizeDialog : Dialog
                     Spacing = new Size(FoundryTheme.Space3, FoundryTheme.Space2),
                     Rows =
                     {
-                        new TableRow(new Label { Text = "Width" }, _width),
-                        new TableRow(new Label { Text = "Height" }, _height),
-                        new TableRow(new Label { Text = "Units" }, _units),
+                        new TableRow(new Label { Text = "Width" }, new FoundryFormField(_width)),
+                        new TableRow(new Label { Text = "Height" }, new FoundryFormField(_height)),
+                        new TableRow(new Label { Text = "Units" }, new FoundryFormField(_units)),
                     },
                 },
                 _status,

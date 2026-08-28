@@ -58,6 +58,7 @@ public sealed record DeleteFolderChange(
 
 public sealed record DuplicateFolderChange(
     Guid SourceFolderId,
+    Guid ExpectedParentFolderId,
     Guid DestinationParentFolderId,
     string ExpectedName,
     string NewName,
@@ -71,7 +72,11 @@ public sealed record DeleteSheetChange(
 public sealed record DuplicateSheetChange(
     Guid PageViewId,
     Guid ExpectedFolderId,
+    Guid DestinationFolderId,
     string ExpectedName) : OperationChange;
+
+public sealed record PlacePastedHierarchyOnCanvasChange(
+    ObserverPointRecord TargetOrigin) : OperationChange;
 
 public sealed record MoveSheetChange(
     Guid PageViewId,

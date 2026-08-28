@@ -44,12 +44,12 @@ public sealed class HierarchySelectionOperationsTests
             1,
             [Folder(TestSnapshots.ChildFolderId), Sheet(TestSnapshots.SheetTwoId)]), snapshot);
 
-        Assert.Equal(1, selection.FolderRootIds.Count);
-        Assert.Equal(1, selection.StandaloneSheetPageViewIds.Count);
-        Assert.Equal(1, selection.FolderSheetPageViewIds.Count);
+        Assert.Single(selection.FolderRootIds);
+        Assert.Single(selection.StandaloneSheetPageViewIds);
+        Assert.Single(selection.FolderSheetPageViewIds);
         Assert.True(plan.CanApply);
-        Assert.True(plan.Changes.Any(change => change is DeleteFolderChange));
-        Assert.True(plan.Changes.Any(change => change is DeleteSheetChange));
+        Assert.Contains(plan.Changes, change => change is DeleteFolderChange);
+        Assert.Contains(plan.Changes, change => change is DeleteSheetChange);
     }
 
     [Fact]

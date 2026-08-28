@@ -53,6 +53,7 @@ internal sealed class ThumbnailFoundryPanel : Panel
         _densityLabel = FoundryTheme.MutedLabel();
         _densityLabel.Width = 92;
         _status = FoundryTheme.MutedLabel();
+        _status.Visible = false;
         _thumbnailTimer = new UITimer { Interval = 0.06 };
         _invalidationTimer = new UITimer { Interval = 0.12 };
         _resizeTimer = new UITimer { Interval = 0.12 };
@@ -65,6 +66,7 @@ internal sealed class ThumbnailFoundryPanel : Panel
         _scrollable.Scroll += (_, _) => QueueVisiblePreviews();
         _scrollable.SizeChanged += (_, _) =>
         {
+            _grid.SetPresentationReady(false);
             _resizeTimer.Stop();
             _resizeTimer.Start();
         };
@@ -77,9 +79,11 @@ internal sealed class ThumbnailFoundryPanel : Panel
         _grid.NavigationRequested += (_, eventArgs) =>
         {
             var result = LayoutFoundryUiHost.Navigate(eventArgs.Target);
-            _status.Text = result.Succeeded ? string.Empty : result.Message;
+            SetStatus(result.Succeeded ? string.Empty : result.Message);
         };
         _grid.ContextRequested += (_, eventArgs) => ShowContextMenu(eventArgs.ControlPoint);
+        _grid.CopyRequested += (_, _) => CopySelection();
+        _grid.PasteRequested += async (_, _) => await PasteSelectionAsync();
 
         Content = new StackLayout
         {
@@ -95,13 +99,6 @@ internal sealed class ThumbnailFoundryPanel : Panel
                     VerticalContentAlignment = VerticalAlignment.Center,
                     Items =
                     {
-                        new Label
-                        {
-                            Text = "Page thumbnails",
-                            Font = SystemFonts.Bold(11),
-                            TextColor = FoundryTheme.PrimaryText,
-                        },
-                        new StackLayoutItem(null, true),
                         smaller,
                         _sizeSlider,
                         larger,
@@ -118,7 +115,10 @@ internal sealed class ThumbnailFoundryPanel : Panel
         _resizeTimer.Elapsed += (_, _) =>
         {
             _resizeTimer.Stop();
+            if (_scrollable.Size.Width <= 2 || _scrollable.Size.Height <= 2) return;
             ApplyGridSize();
+            _grid.SetPresentationReady(true);
+            QueueVisiblePreviews();
         };
         Load += OnLoaded;
         UnLoad += OnUnloaded;
@@ -129,6 +129,13 @@ internal sealed class ThumbnailFoundryPanel : Panel
         new(image, toolTip);
 
     internal void FocusContent() => _grid.Focus();
+
+    internal void PrepareForDisplay()
+    {
+        _grid.SetPresentationReady(false);
+        _resizeTimer.Stop();
+        _resizeTimer.Start();
+    }
 
     internal void SetFilter(OverviewFilterProjection projection)
     {
@@ -145,6 +152,7 @@ internal sealed class ThumbnailFoundryPanel : Panel
         _isLoaded = true;
         LayoutFoundryUiHost.OverviewChanged += OnOverviewChanged;
         LayoutFoundryUiHost.Selection.Changed += OnSharedSelectionChanged;
+        PrepareForDisplay();
         RefreshSnapshot();
     }
 
@@ -266,7 +274,17 @@ internal sealed class ThumbnailFoundryPanel : Panel
     private void ShowContextMenu(PointF location)
     {
         var selection = SelectedSheets();
-        if (selection.Length == 0) return;
+        if (selection.Length == 0)
+        {
+            var pasteOnly = new ButtonMenuItem
+            {
+                Text = "Paste",
+                Enabled = HierarchyClipboard.CanPasteCurrentDocument(),
+            };
+            pasteOnly.Click += async (_, _) => await PasteSelectionAsync();
+            new ContextMenu(pasteOnly).Show(_grid, location);
+            return;
+        }
 
         var open = new ButtonMenuItem { Text = "Open in Rhino", Enabled = selection.Length == 1 };
         var properties = new ButtonMenuItem
@@ -283,6 +301,12 @@ internal sealed class ThumbnailFoundryPanel : Panel
         };
         var include = new ButtonMenuItem { Text = "Enable for Printing" };
         var exclude = new ButtonMenuItem { Text = "Disable from Printing" };
+        var copy = new ButtonMenuItem { Text = "Copy", Enabled = selection.Length > 0 };
+        var paste = new ButtonMenuItem
+        {
+            Text = "Paste",
+            Enabled = HierarchyClipboard.CanPasteCurrentDocument(),
+        };
 
         open.Click += (_, _) => OpenSelectedSheet();
         properties.Click += (_, _) => OpenBatchProperties();
@@ -290,10 +314,15 @@ internal sealed class ThumbnailFoundryPanel : Panel
         delete.Click += (_, _) => RequestDeleteSelection();
         include.Click += async (_, _) => await SetPrintInclusionAsync(true);
         exclude.Click += async (_, _) => await SetPrintInclusionAsync(false);
+        copy.Click += (_, _) => CopySelection();
+        paste.Click += async (_, _) => await PasteSelectionAsync();
 
         new ContextMenu(
             open,
             properties,
+            new SeparatorMenuItem(),
+            copy,
+            paste,
             new SeparatorMenuItem(),
             duplicate,
             delete,
@@ -312,7 +341,7 @@ internal sealed class ThumbnailFoundryPanel : Panel
         var selection = SelectedSheets();
         if (selection.Length != 1) return;
         var result = LayoutFoundryUiHost.Navigate(new OverviewNavigationTarget(selection[0].Id));
-        _status.Text = result.Succeeded ? string.Empty : result.Message;
+        SetStatus(result.Succeeded ? string.Empty : result.Message);
     }
 
     private void OpenBatchProperties()
@@ -322,7 +351,7 @@ internal sealed class ThumbnailFoundryPanel : Panel
         var targets = BatchTargetResolver.Resolve(snapshot, SelectedSheets());
         if (targets.Count == 0)
         {
-            _status.Text = "The selection does not contain any layouts.";
+            SetStatus("The selection does not contain any layouts.");
             return;
         }
 
@@ -336,10 +365,22 @@ internal sealed class ThumbnailFoundryPanel : Panel
         var selection = SelectedSheets();
         if (selection.Length == 0) return;
         var result = await LayoutFoundryUiHost.DuplicateSelectionAsync(selection);
-        _status.Text = ResultMessage(
-            result,
-            $"Duplicated {selection.Length} layout{(selection.Length == 1 ? string.Empty : "s")}.");
         if (result.Succeeded) RefreshSnapshot();
+        SetStatus(ResultMessage(
+            result,
+            $"Duplicated {selection.Length} layout{(selection.Length == 1 ? string.Empty : "s")}."));
+    }
+
+    private void CopySelection()
+    {
+        SetStatus(HierarchyClipboard.CopyCurrentSelection().Message);
+    }
+
+    private async Task PasteSelectionAsync()
+    {
+        var result = await HierarchyClipboard.PasteAsync();
+        if (result.Succeeded) RefreshSnapshot();
+        SetStatus(result.Message);
     }
 
     private void RequestDeleteSelection()
@@ -356,10 +397,10 @@ internal sealed class ThumbnailFoundryPanel : Panel
         var selection = SelectedSheets();
         if (selection.Length == 0) return;
         var result = await LayoutFoundryUiHost.SetPrintInclusionAsync(selection, include);
-        _status.Text = ResultMessage(
-            result,
-            include ? "Enabled for printing." : "Disabled from printing.");
         if (result.Succeeded) RefreshSnapshot();
+        SetStatus(ResultMessage(
+            result,
+            include ? "Enabled for printing." : "Disabled from printing."));
     }
 
     private static string ResultMessage(OperationResult result, string success) =>
@@ -372,11 +413,13 @@ internal sealed class ThumbnailFoundryPanel : Panel
         _densityLabel.Text = _grid.GridLayout.Columns == 1
             ? "1 per row"
             : $"{_grid.GridLayout.Columns} per row";
-        _status.Text = !_snapshot.HasDocument
-            ? "No active Rhino document"
-            : _filter.IsActive
-                ? $"{_grid.Snapshot.Sheets.Count} of {_snapshot.Sheets.Count} layouts"
-                : $"{_snapshot.Sheets.Count} layouts  ·  {_snapshot.Sheets.Sum(sheet => sheet.Details.Count)} details";
+        SetStatus(_snapshot.HasDocument ? string.Empty : "No active Rhino document");
+    }
+
+    private void SetStatus(string? message)
+    {
+        _status.Text = message ?? string.Empty;
+        _status.Visible = !string.IsNullOrWhiteSpace(_status.Text);
     }
 
     private void QueueVisiblePreviews()

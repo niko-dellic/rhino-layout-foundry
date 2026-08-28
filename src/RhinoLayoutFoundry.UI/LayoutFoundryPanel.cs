@@ -22,11 +22,13 @@ public sealed class LayoutFoundryPanel : Panel
     private readonly FoundryToolbarField _searchField;
     private readonly FoundryToolbarField _filterKindField;
     private readonly TextBox _renameTextBox;
-    private readonly Button _renameButton;
+    private readonly FoundryFormField _renameField;
+    private readonly FoundryDialogButton _renameButton;
     private readonly Label _folderDraftDestinationLabel;
     private readonly TextBox _folderDraftTextBox;
-    private readonly Button _folderDraftCreateButton;
-    private readonly Button _folderDraftCancelButton;
+    private readonly FoundryFormField _folderDraftField;
+    private readonly FoundryDialogButton _folderDraftCreateButton;
+    private readonly FoundryDialogButton _folderDraftCancelButton;
     private readonly Panel _folderDraftStrip;
     private readonly FoundryToolbarIconButton _manageButton;
     private readonly FoundryToolbarIconButton _addFolderButton;
@@ -38,6 +40,7 @@ public sealed class LayoutFoundryPanel : Panel
     private readonly FoundryToolbarIconButton _listViewButton;
     private readonly FoundryToolbarIconButton _thumbnailViewButton;
     private readonly FoundryToolbarIconButton _canvasViewButton;
+    private readonly FoundryToolbarButtonGroup _viewModeButtonGroup;
     private readonly FoundryToolbarIconButton _fullscreenButton;
     private readonly bool _usesMacSafeHierarchy = OperatingSystem.IsMacOS();
     private readonly TreeGridView _treeGrid;
@@ -63,6 +66,8 @@ public sealed class LayoutFoundryPanel : Panel
     private ButtonMenuItem _newFolderMenuItem = null!;
     private ButtonMenuItem _newPageMenuItem = null!;
     private ButtonMenuItem _duplicateSelectionMenuItem = null!;
+    private ButtonMenuItem _copySelectionMenuItem = null!;
+    private ButtonMenuItem _pasteSelectionMenuItem = null!;
     private ButtonMenuItem _deleteSelectionMenuItem = null!;
     private ButtonMenuItem _renamePageMenuItem = null!;
     private ButtonMenuItem _newDetailMenuItem = null!;
@@ -127,7 +132,7 @@ public sealed class LayoutFoundryPanel : Panel
         _emptyDescriptionLabel.TextAlignment = TextAlignment.Center;
         _summaryLabel = FoundryTheme.MutedLabel();
         _statusLabel = FoundryTheme.MutedLabel();
-        _statusLabel.TextAlignment = TextAlignment.Right;
+        _statusLabel.TextAlignment = TextAlignment.Left;
 
         _filterTextBox = new TextBox
         {
@@ -147,14 +152,14 @@ public sealed class LayoutFoundryPanel : Panel
         var searchInput = new StackLayout
         {
             Orientation = Orientation.Horizontal,
-            Spacing = FoundryTheme.Space1,
+            Spacing = FoundryTheme.Space2,
             VerticalContentAlignment = VerticalAlignment.Center,
             Items =
             {
                 new ImageView
                 {
                     Image = FoundryViewIcons.Search(),
-                    Size = new Size(16, 16),
+                    Size = new Size(18, 18),
                 },
                 new StackLayoutItem(_filterTextBox, expand: true),
             },
@@ -171,14 +176,19 @@ public sealed class LayoutFoundryPanel : Panel
         {
             PlaceholderText = "Sheet name",
         };
-        _renameButton = FoundryTheme.ConfigureButton(new Button
-        {
-            Text = "Rename",
-        });
+        _renameField = new FoundryFormField(_renameTextBox);
+        _renameButton = new FoundryDialogButton(
+            "Rename",
+            FoundryDialogButtonStyle.Secondary);
         _folderDraftDestinationLabel = FoundryTheme.MutedLabel();
         _folderDraftTextBox = new TextBox { PlaceholderText = "Folder name" };
-        _folderDraftCreateButton = FoundryTheme.ConfigureButton(new Button { Text = "Create" });
-        _folderDraftCancelButton = FoundryTheme.ConfigureButton(new Button { Text = "Cancel" });
+        _folderDraftField = new FoundryFormField(_folderDraftTextBox);
+        _folderDraftCreateButton = new FoundryDialogButton(
+            "Create",
+            FoundryDialogButtonStyle.Secondary);
+        _folderDraftCancelButton = new FoundryDialogButton(
+            "Cancel",
+            FoundryDialogButtonStyle.Secondary);
         _folderDraftStrip = FoundryTheme.Surface(
             CreateFolderDraftContent(),
             new Padding(FoundryTheme.Space2));
@@ -237,6 +247,10 @@ public sealed class LayoutFoundryPanel : Panel
             FoundryViewIcons.ThumbnailStack(),
             "Thumbnail view (page grid)",
             isToggle: true);
+        _viewModeButtonGroup = new FoundryToolbarButtonGroup(
+            _listViewButton,
+            _thumbnailViewButton,
+            _canvasViewButton);
         _fullscreenButton = new FoundryToolbarIconButton(
             FoundryViewIcons.Fullscreen(),
             "Expand the current view to a maximized workspace");
@@ -259,12 +273,12 @@ public sealed class LayoutFoundryPanel : Panel
 
         _managementView = new StackLayout
         {
-            Spacing = FoundryTheme.Space3,
+            Spacing = FoundryTheme.Space2,
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Items =
             {
                 new StackLayoutItem(_contentHost, expand: true),
-                CreateFooter(),
+                _renameActions,
             },
         };
         _thumbnailView = new ThumbnailFoundryPanel();
@@ -293,8 +307,7 @@ public sealed class LayoutFoundryPanel : Panel
                 },
                 _folderDraftStrip,
                 new StackLayoutItem(_viewHost, expand: true),
-                CreateViewModeBar(),
-                _statusLabel,
+                CreateBottomBar(),
             },
         };
         _deleteConfirmationOverlay = new DeleteConfirmationOverlay();
@@ -652,6 +665,8 @@ public sealed class LayoutFoundryPanel : Panel
         };
         if (!ReferenceEquals(_viewHost.Content, next))
             _viewHost.Content = next;
+        if (mode == FoundryPanelViewMode.Thumbnail)
+            _thumbnailView.PrepareForDisplay();
         UpdateViewModeButtons(mode);
         if (_fullscreenWindow is not null)
             _fullscreenWindow.Title = $"Layout Foundry — {ViewModeLabel(mode)}";
@@ -775,7 +790,7 @@ public sealed class LayoutFoundryPanel : Panel
 
     private Control CreateToolbarContent()
     {
-        _searchField.Width = _responsiveLayout.StackToolbar ? 180 : 240;
+        _searchField.Width = _responsiveLayout.StackToolbar ? 240 : 320;
         _filterKindField.Width = _responsiveLayout.StackToolbar ? 84 : 96;
         return new StackLayout
         {
@@ -803,7 +818,12 @@ public sealed class LayoutFoundryPanel : Panel
                 },
                 _importButton,
                 _exportButton,
-                new StackLayoutItem(null, expand: true),
+                new Panel
+                {
+                    Width = 1,
+                    Height = 20,
+                    BackgroundColor = FoundryTheme.CanvasBorder,
+                },
                 _searchField,
                 _filterKindField,
                 _clearFilterButton,
@@ -812,10 +832,10 @@ public sealed class LayoutFoundryPanel : Panel
         };
     }
 
-    private Control CreateViewModeBar() => new StackLayout
+    private Control CreateBottomBar() => new StackLayout
     {
         Orientation = Orientation.Horizontal,
-        Padding = new Padding(0, FoundryTheme.Space2, 0, 0),
+        Padding = new Padding(0, FoundryTheme.Space1, 0, 0),
         Spacing = FoundryTheme.Space1,
         VerticalContentAlignment = VerticalAlignment.Center,
         Items =
@@ -827,9 +847,9 @@ public sealed class LayoutFoundryPanel : Panel
                 Height = 20,
                 BackgroundColor = FoundryTheme.CanvasBorder,
             },
-            _listViewButton,
-            _thumbnailViewButton,
-            _canvasViewButton,
+            _viewModeButtonGroup,
+            new StackLayoutItem(_statusLabel, expand: true),
+            _summaryLabel,
         },
     };
 
@@ -839,6 +859,8 @@ public sealed class LayoutFoundryPanel : Panel
         _newFolderMenuItem = new ButtonMenuItem { Text = "New Folder" };
         _newPageMenuItem = new ButtonMenuItem { Text = "New Layout…" };
         _duplicateSelectionMenuItem = new ButtonMenuItem { Text = "Duplicate" };
+        _copySelectionMenuItem = new ButtonMenuItem { Text = "Copy" };
+        _pasteSelectionMenuItem = new ButtonMenuItem { Text = "Paste" };
         _deleteSelectionMenuItem = new ButtonMenuItem { Text = "Delete…" };
         _renamePageMenuItem = new ButtonMenuItem { Text = "Rename" };
         _newDetailMenuItem = new ButtonMenuItem { Text = "New Detail" };
@@ -852,6 +874,8 @@ public sealed class LayoutFoundryPanel : Panel
             BeginInlineCreation(InlineDraftKind.Folder, _contextDestinationFolderId);
         _newPageMenuItem.Click += (_, _) => QueueOpenCreateLayouts(_contextDestinationFolderId);
         _duplicateSelectionMenuItem.Click += async (_, _) => await DuplicateSelectionAsync();
+        _copySelectionMenuItem.Click += (_, _) => CopySelection();
+        _pasteSelectionMenuItem.Click += async (_, _) => await PasteSelectionAsync();
         _deleteSelectionMenuItem.Click += (_, _) => RequestDeleteSelection(SelectedKeys());
         _renamePageMenuItem.Click += (_, _) => BeginInlineSheetRename();
         _newDetailMenuItem.Click += (_, _) => RunSelectedSheetCommand(LayoutSheetCommand.NewDetail);
@@ -865,6 +889,10 @@ public sealed class LayoutFoundryPanel : Panel
             new SeparatorMenuItem(),
             _newFolderMenuItem,
             _newPageMenuItem,
+            new SeparatorMenuItem(),
+            _copySelectionMenuItem,
+            _pasteSelectionMenuItem,
+            new SeparatorMenuItem(),
             _duplicateSelectionMenuItem,
             _deleteSelectionMenuItem,
             _renamePageMenuItem,
@@ -907,7 +935,7 @@ public sealed class LayoutFoundryPanel : Panel
                 VerticalContentAlignment = VerticalAlignment.Center,
                 Items =
                 {
-                    new StackLayoutItem(_renameTextBox, expand: true),
+                    new StackLayoutItem(_renameField, expand: true),
                     _renameButton,
                 },
             },
@@ -924,7 +952,7 @@ public sealed class LayoutFoundryPanel : Panel
                 Items =
                 {
                     _folderDraftDestinationLabel,
-                    _folderDraftTextBox,
+                    _folderDraftField,
                     new StackLayout
                     {
                         Orientation = Orientation.Horizontal,
@@ -948,29 +976,9 @@ public sealed class LayoutFoundryPanel : Panel
             Items =
             {
                 _folderDraftDestinationLabel,
-                new StackLayoutItem(_folderDraftTextBox, expand: true),
+                new StackLayoutItem(_folderDraftField, expand: true),
                 _folderDraftCancelButton,
                 _folderDraftCreateButton,
-            },
-        };
-    }
-
-    private Control CreateFooter()
-    {
-        return new StackLayout
-        {
-            Spacing = FoundryTheme.Space2,
-            HorizontalContentAlignment = HorizontalAlignment.Stretch,
-            Items =
-            {
-                _renameActions,
-                new TableLayout
-                {
-                    Rows =
-                    {
-                        new TableRow(new TableCell(_summaryLabel, scaleWidth: true)),
-                    },
-                },
             },
         };
     }
@@ -1043,7 +1051,17 @@ public sealed class LayoutFoundryPanel : Panel
 
     private void OnTreeKeyDown(object? sender, KeyEventArgs eventArgs)
     {
-        if (eventArgs.Key == Keys.Enter)
+        if (_inlineDraft is null && HierarchyClipboard.IsCopyShortcut(eventArgs))
+        {
+            CopySelection();
+            eventArgs.Handled = true;
+        }
+        else if (_inlineDraft is null && HierarchyClipboard.IsPasteShortcut(eventArgs))
+        {
+            _ = PasteSelectionAsync();
+            eventArgs.Handled = true;
+        }
+        else if (eventArgs.Key == Keys.Enter)
         {
             if (_inlineDraft is not null)
             {
@@ -1194,6 +1212,18 @@ public sealed class LayoutFoundryPanel : Panel
 
         _statusLabel.Text = $"Duplicated {keys.Length} selected item{(keys.Length == 1 ? string.Empty : "s")}.";
         RefreshOverview();
+    }
+
+    private void CopySelection()
+    {
+        _statusLabel.Text = HierarchyClipboard.CopyCurrentSelection().Message;
+    }
+
+    private async Task PasteSelectionAsync()
+    {
+        var result = await HierarchyClipboard.PasteAsync();
+        _statusLabel.Text = result.Message;
+        if (result.Succeeded) RefreshOverview();
     }
 
     private void OnDeleteSelectionRequested(
@@ -2305,6 +2335,10 @@ public sealed class LayoutFoundryPanel : Panel
             : $"New Layout in {destinationName}…";
         _duplicateSelectionMenuItem.Visible = selectionCount > 0 && !isDocumentContext;
         _duplicateSelectionMenuItem.Enabled = selectionCount > 0 && !isDocumentContext;
+        _copySelectionMenuItem.Visible = selectionCount > 0 && !isDocumentContext;
+        _copySelectionMenuItem.Enabled = selectionCount > 0 && !isDocumentContext;
+        _pasteSelectionMenuItem.Visible = true;
+        _pasteSelectionMenuItem.Enabled = HierarchyClipboard.CanPasteCurrentDocument();
         _deleteSelectionMenuItem.Visible = selectionCount > 0 && !isDocumentContext;
         _deleteSelectionMenuItem.Enabled = selectionCount > 0 && !isDocumentContext;
         _duplicateSelectionMenuItem.Text = folder is not null

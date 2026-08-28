@@ -64,9 +64,10 @@ public sealed class OverviewRowPresentationTests
         Assert.Equal(
             "📁  Plans  ·  2 sheets",
             OverviewRowPresentation.Create(folder, useMacSafeSingleColumn: true).PrimaryText);
-        Assert.True(
-            OverviewRowPresentation.Create(sheet, useMacSafeSingleColumn: true).PrimaryText
-                .StartsWith("▣  A101", StringComparison.Ordinal));
+        Assert.StartsWith(
+            "▣  A101",
+            OverviewRowPresentation.Create(sheet, useMacSafeSingleColumn: true).PrimaryText,
+            StringComparison.Ordinal);
         Assert.Equal(
             "⌗  Plan viewport  ·  Detail viewport",
             OverviewRowPresentation.Create(detail, useMacSafeSingleColumn: true).PrimaryText);

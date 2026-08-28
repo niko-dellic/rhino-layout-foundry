@@ -213,6 +213,18 @@ internal static class FoundryViewIcons
         graphics.DrawRectangle(pen, 8.5f, 8, 6, 5);
     });
 
+    internal static Icon GridAppearance() => NewIcon(graphics =>
+    {
+        var color = FoundryTheme.PrimaryText;
+        var muted = FoundryTheme.WithAlpha(color, 135);
+        foreach (var x in new[] { 2.5f, 7f, 11.5f })
+        foreach (var y in new[] { 2.5f, 7f, 11.5f })
+            graphics.FillEllipse(muted, x, y, 1.5f, 1.5f);
+
+        graphics.DrawEllipse(new Pen(color, Emphasis), 9.25f, 9.25f, 5.25f, 5.25f);
+        graphics.FillEllipse(color, 11.1f, 11.1f, 1.6f, 1.6f);
+    });
+
     internal static Icon ZoomOut() => ZoomGlyph(includePlus: false);
 
     internal static Icon ZoomIn() => ZoomGlyph(includePlus: true);
@@ -283,6 +295,13 @@ internal static class FoundryViewIcons
         graphics.FillEllipse(color, 2.25f, 7.25f, 1.5f, 1.5f);
         graphics.FillEllipse(color, 7.25f, 7.25f, 1.5f, 1.5f);
         graphics.FillEllipse(color, 12.25f, 7.25f, 1.5f, 1.5f);
+    });
+
+    internal static Icon ChevronDown() => NewIcon(graphics =>
+    {
+        var pen = new Pen(FoundryTheme.PrimaryText, Emphasis);
+        graphics.DrawLine(pen, 4, 6, 8, 10);
+        graphics.DrawLine(pen, 8, 10, 12, 6);
     });
 
     private static Icon ZoomGlyph(bool includePlus) => NewIcon(graphics =>

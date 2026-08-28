@@ -14,6 +14,7 @@ internal sealed class ThumbnailGridDrawable : Drawable
     private ThumbnailGridLayout _layout = ThumbnailGridLayout.Create(0, 1, 190);
     private HashSet<OverviewNodeKey> _selection = [];
     private Guid? _selectionAnchor;
+    private bool _presentationReady;
 
     internal ThumbnailGridDrawable()
         : base(true)
@@ -29,9 +30,18 @@ internal sealed class ThumbnailGridDrawable : Drawable
     internal event EventHandler<ThumbnailGridSelectionEventArgs>? SelectionRequested;
     internal event EventHandler<ThumbnailGridNavigationEventArgs>? NavigationRequested;
     internal event EventHandler<ThumbnailGridContextEventArgs>? ContextRequested;
+    internal event EventHandler? CopyRequested;
+    internal event EventHandler? PasteRequested;
 
     internal ThumbnailGridLayout GridLayout => _layout;
     internal ObserverSnapshot Snapshot => _snapshot;
+
+    internal void SetPresentationReady(bool ready)
+    {
+        if (_presentationReady == ready) return;
+        _presentationReady = ready;
+        Invalidate();
+    }
 
     internal void SetSnapshot(
         ObserverSnapshot snapshot,
@@ -66,9 +76,11 @@ internal sealed class ThumbnailGridDrawable : Drawable
     }
 
     internal IReadOnlyList<ObserverSheetSnapshot> VisibleSheets(Rectangle visibleRect, int overscanRows = 1) =>
-        _layout.VisibleIndices(visibleRect.Top, visibleRect.Bottom, overscanRows)
-            .Select(index => _snapshot.Sheets[index])
-            .ToArray();
+        !_presentationReady
+            ? []
+            : _layout.VisibleIndices(visibleRect.Top, visibleRect.Bottom, overscanRows)
+                .Select(index => _snapshot.Sheets[index])
+                .ToArray();
 
     internal void SetPreview(OverviewThumbnailKey key, Bitmap bitmap)
     {
@@ -114,6 +126,7 @@ internal sealed class ThumbnailGridDrawable : Drawable
         var graphics = eventArgs.Graphics;
         graphics.AntiAlias = true;
         graphics.FillRectangle(FoundryTheme.PanelBackground, eventArgs.ClipRectangle);
+        if (!_presentationReady) return;
         if (!_snapshot.HasDocument)
         {
             DrawEmpty(graphics, "Open a Rhino document to browse layout thumbnails.");
@@ -216,11 +229,18 @@ internal sealed class ThumbnailGridDrawable : Drawable
 
     private void OnMouseDown(object? sender, MouseEventArgs eventArgs)
     {
+        if (!_presentationReady) return;
         if (eventArgs.Buttons.HasFlag(MouseButtons.Alternate))
         {
             Focus();
             var contextIndex = HitIndex(eventArgs.Location);
-            if (contextIndex is null) return;
+            if (contextIndex is null)
+            {
+                SelectionRequested?.Invoke(this, new ThumbnailGridSelectionEventArgs([], null));
+                ContextRequested?.Invoke(this, new ThumbnailGridContextEventArgs(eventArgs.Location));
+                eventArgs.Handled = true;
+                return;
+            }
 
             var contextSheet = _snapshot.Sheets[contextIndex.Value];
             var contextKey = new OverviewNodeKey(OverviewNodeKind.Sheet, contextSheet.PageViewId);
@@ -276,6 +296,7 @@ internal sealed class ThumbnailGridDrawable : Drawable
 
     private void OnMouseDoubleClick(object? sender, MouseEventArgs eventArgs)
     {
+        if (!_presentationReady) return;
         var index = HitIndex(eventArgs.Location);
         if (index is null) return;
         NavigationRequested?.Invoke(
@@ -287,6 +308,19 @@ internal sealed class ThumbnailGridDrawable : Drawable
 
     private void OnKeyDown(object? sender, KeyEventArgs eventArgs)
     {
+        if (!_presentationReady) return;
+        if (HierarchyClipboard.IsCopyShortcut(eventArgs))
+        {
+            CopyRequested?.Invoke(this, EventArgs.Empty);
+            eventArgs.Handled = true;
+            return;
+        }
+        if (HierarchyClipboard.IsPasteShortcut(eventArgs))
+        {
+            PasteRequested?.Invoke(this, EventArgs.Empty);
+            eventArgs.Handled = true;
+            return;
+        }
         if (_snapshot.Sheets.Count == 0) return;
         var selectedId = _selection.FirstOrDefault(key => key.Kind == OverviewNodeKind.Sheet).Id;
         var index = selectedId == Guid.Empty

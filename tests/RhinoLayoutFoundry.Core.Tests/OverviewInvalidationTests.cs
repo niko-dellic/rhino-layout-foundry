@@ -30,6 +30,6 @@ public sealed class OverviewInvalidationTests
         var merged = new OverviewInvalidation(1, OverviewInvalidationKind.Metadata)
             .Merge(new OverviewInvalidation(2, OverviewInvalidationKind.Diagnostics));
 
-        Assert.Equal<uint?>(null, merged.DocumentRuntimeSerialNumber);
+        Assert.Null(merged.DocumentRuntimeSerialNumber);
     }
 }

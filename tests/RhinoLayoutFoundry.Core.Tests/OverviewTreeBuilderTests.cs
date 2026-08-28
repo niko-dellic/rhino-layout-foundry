@@ -16,7 +16,7 @@ public sealed class OverviewTreeBuilderTests
         Assert.Equal("A-001", root.Children[0].Children[0].Label);
         Assert.Equal("Main Plan", root.Children[0].Children[0].Children[0].Label);
         Assert.Equal("A-100", root.Children[1].Label);
-        Assert.False(Flatten(roots).Any(node => node.Label == "Unorganized"));
+        Assert.DoesNotContain(Flatten(roots), node => node.Label == "Unorganized");
     }
 
     [Fact]
@@ -65,7 +65,7 @@ public sealed class OverviewTreeBuilderTests
             new OverviewTreeFilter(null, OverviewFilterKind.Sheets));
 
         Assert.Equal(2, Flatten(roots).Count(node => node.Key.Kind == OverviewNodeKind.Sheet));
-        Assert.False(Flatten(roots).Any(node => node.Key.Kind == OverviewNodeKind.Detail));
+        Assert.DoesNotContain(Flatten(roots), node => node.Key.Kind == OverviewNodeKind.Detail);
     }
 
     [Fact]
@@ -75,7 +75,7 @@ public sealed class OverviewTreeBuilderTests
             CreateOverview(),
             new OverviewTreeFilter(null, OverviewFilterKind.Details));
 
-        Assert.Single(Flatten(roots).Where(node => node.Key.Kind == OverviewNodeKind.Sheet));
+        Assert.Single(Flatten(roots), node => node.Key.Kind == OverviewNodeKind.Sheet);
         Assert.Equal(2, Flatten(roots).Count(node => node.Key.Kind == OverviewNodeKind.Detail));
     }
 

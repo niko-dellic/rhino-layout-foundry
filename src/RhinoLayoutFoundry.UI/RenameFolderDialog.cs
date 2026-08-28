@@ -6,7 +6,7 @@ namespace RhinoLayoutFoundry.UI;
 internal sealed class RenameFolderDialog : Dialog
 {
     private readonly TextBox _nameTextBox;
-    private readonly Button _renameButton;
+    private readonly FoundryDialogButton _renameButton;
 
     internal RenameFolderDialog(string currentName)
     {
@@ -17,12 +17,16 @@ internal sealed class RenameFolderDialog : Dialog
         BackgroundColor = FoundryTheme.PanelBackground;
 
         _nameTextBox = new TextBox { Text = currentName };
-        _renameButton = FoundryTheme.ConfigureButton(new Button
+        _renameButton = new FoundryDialogButton(
+            "Rename",
+            FoundryDialogButtonStyle.Primary,
+            80)
         {
-            Text = "Rename",
             Enabled = false,
-        }, minimumWidth: 80);
-        var cancelButton = FoundryTheme.ConfigureButton(new Button { Text = "Cancel" });
+        };
+        var cancelButton = new FoundryDialogButton(
+            "Cancel",
+            FoundryDialogButtonStyle.Secondary);
 
         _nameTextBox.TextChanged += (_, _) =>
             _renameButton.Enabled = !string.IsNullOrWhiteSpace(_nameTextBox.Text) &&
@@ -37,8 +41,7 @@ internal sealed class RenameFolderDialog : Dialog
         };
         _renameButton.Click += (_, _) => Accept();
         cancelButton.Click += (_, _) => Close();
-        DefaultButton = _renameButton;
-        AbortButton = cancelButton;
+        FoundryDialogActions.Bind(this, _renameButton, cancelButton);
 
         Content = new StackLayout
         {
@@ -52,7 +55,7 @@ internal sealed class RenameFolderDialog : Dialog
                     Font = SystemFonts.Bold(15),
                     TextColor = FoundryTheme.PrimaryText,
                 },
-                _nameTextBox,
+                new FoundryFormField(_nameTextBox),
                 new TableLayout
                 {
                     Spacing = new Size(FoundryTheme.Space2, 0),

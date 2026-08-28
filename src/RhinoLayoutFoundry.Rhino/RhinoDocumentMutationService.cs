@@ -5,6 +5,7 @@ using Rhino.DocObjects;
 using Rhino.Geometry;
 using RhinoLayoutFoundry.Core.Diagnostics;
 using RhinoLayoutFoundry.Core.Domain;
+using RhinoLayoutFoundry.Core.Observer;
 using RhinoLayoutFoundry.Core.Operations;
 using RhinoLayoutFoundry.Core.Overview;
 
@@ -96,7 +97,7 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
                 ApplyDeleteTemplates(document, plan, plan.Changes.Cast<DeleteSheetTemplateChange>().ToArray()),
             _ when plan.Changes.All(change => change is DeleteFolderChange or DeleteSheetChange) =>
                 ApplyDeleteHierarchySelection(document, plan),
-            _ when plan.Changes.All(change => change is DuplicateFolderChange or DuplicateSheetChange) =>
+            _ when plan.Changes.All(change => change is DuplicateFolderChange or DuplicateSheetChange or PlacePastedHierarchyOnCanvasChange) =>
                 ApplyDuplicateHierarchySelection(document, plan),
             _ when plan.Changes.All(change => change is CreateSheetFromTemplateChange) =>
                 ApplyTemplateBatch(document, plan, plan.Changes.Cast<CreateSheetFromTemplateChange>().ToArray()),
@@ -741,14 +742,16 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
     {
         var beforeState = _stateStore.Get(document);
         var source = beforeState.Folders.FirstOrDefault(folder => folder.Id == duplicate.SourceFolderId);
-        if (source is null || source.ParentId != duplicate.DestinationParentFolderId ||
+        if (source is null || source.ParentId != duplicate.ExpectedParentFolderId ||
             !string.Equals(source.Name, duplicate.ExpectedName, StringComparison.Ordinal))
             return Failure("folder.before_value_changed", "The folder changed before duplication.");
         var sourceIds = FolderDescendants(source.Id, beforeState.Folders);
         if (!sourceIds.SetEquals(duplicate.FolderIdMap.Keys) ||
             duplicate.FolderIdMap.Values.Any(id => id == Guid.Empty || beforeState.Folders.Any(folder => folder.Id == id)))
             return Failure("folder.duplicate_plan_invalid", "The folder duplication plan is invalid.");
-        if (beforeState.Folders.Any(folder => folder.ParentId == source.ParentId &&
+        if (beforeState.Folders.All(folder => folder.Id != duplicate.DestinationParentFolderId))
+            return Failure("folder.destination_missing", "The destination folder no longer exists.");
+        if (beforeState.Folders.Any(folder => folder.ParentId == duplicate.DestinationParentFolderId &&
                 string.Equals(folder.Name, duplicate.NewName, StringComparison.OrdinalIgnoreCase)))
             return Failure("folder.duplicate_name", $"A folder named '{duplicate.NewName}' already exists.");
 
@@ -756,14 +759,14 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
         try
         {
             var folders = beforeState.Folders.ToList();
-            var nextRootOrder = folders.Where(folder => folder.ParentId == source.ParentId)
+            var nextRootOrder = folders.Where(folder => folder.ParentId == duplicate.DestinationParentFolderId)
                 .Select(folder => folder.Order).DefaultIfEmpty(-1).Max() + 1;
             foreach (var oldFolder in beforeState.Folders.Where(folder => sourceIds.Contains(folder.Id)))
             {
                 folders.Add(new FolderRecord(
                     duplicate.FolderIdMap[oldFolder.Id],
                     oldFolder.Id == source.Id
-                        ? source.ParentId
+                        ? duplicate.DestinationParentFolderId
                         : duplicate.FolderIdMap[oldFolder.ParentId!.Value],
                     oldFolder.Id == source.Id ? duplicate.NewName : oldFolder.Name,
                     oldFolder.Id == source.Id ? nextRootOrder : oldFolder.Order));
@@ -819,6 +822,7 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
         var beforeState = WithCurrentPageRecords(document, storedState);
         var folderChanges = plan.Changes.OfType<DuplicateFolderChange>().ToArray();
         var sheetChanges = plan.Changes.OfType<DuplicateSheetChange>().ToArray();
+        var placement = plan.Changes.OfType<PlacePastedHierarchyOnCanvasChange>().SingleOrDefault();
         var sourceFolderIds = new HashSet<Guid>();
         var newFolderIds = folderChanges.SelectMany(change => change.FolderIdMap.Values).ToArray();
         if (newFolderIds.Any(id => id == Guid.Empty) || newFolderIds.Distinct().Count() != newFolderIds.Length ||
@@ -829,24 +833,26 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
         foreach (var duplicate in folderChanges)
         {
             var source = beforeState.Folders.FirstOrDefault(folder => folder.Id == duplicate.SourceFolderId);
-            if (source is null || source.ParentId != duplicate.DestinationParentFolderId ||
+            if (source is null || source.ParentId != duplicate.ExpectedParentFolderId ||
                 !string.Equals(source.Name, duplicate.ExpectedName, StringComparison.Ordinal))
                 return Failure("folder.before_value_changed", $"The folder '{duplicate.ExpectedName}' changed before duplication.");
+            if (folders.All(folder => folder.Id != duplicate.DestinationParentFolderId))
+                return Failure("folder.destination_missing", "The paste destination no longer exists.");
             var sourceIds = FolderDescendants(source.Id, beforeState.Folders);
             if (!sourceIds.SetEquals(duplicate.FolderIdMap.Keys) || sourceIds.Any(id => !sourceFolderIds.Add(id)))
                 return Failure("selection.duplicate_plan_invalid", "The selected folder hierarchy changed before duplication.");
-            if (folders.Any(folder => folder.ParentId == source.ParentId &&
+            if (folders.Any(folder => folder.ParentId == duplicate.DestinationParentFolderId &&
                     string.Equals(folder.Name, duplicate.NewName, StringComparison.OrdinalIgnoreCase)))
                 return Failure("folder.duplicate_name", $"A folder named '{duplicate.NewName}' already exists.");
 
-            var nextRootOrder = folders.Where(folder => folder.ParentId == source.ParentId)
+            var nextRootOrder = folders.Where(folder => folder.ParentId == duplicate.DestinationParentFolderId)
                 .Select(folder => folder.Order).DefaultIfEmpty(-1).Max() + 1;
             foreach (var oldFolder in beforeState.Folders.Where(folder => sourceIds.Contains(folder.Id)))
             {
                 folders.Add(new FolderRecord(
                     duplicate.FolderIdMap[oldFolder.Id],
                     oldFolder.Id == source.Id
-                        ? source.ParentId
+                        ? duplicate.DestinationParentFolderId
                         : duplicate.FolderIdMap[oldFolder.ParentId!.Value],
                     oldFolder.Id == source.Id ? duplicate.NewName : oldFolder.Name,
                     oldFolder.Id == source.Id ? nextRootOrder : oldFolder.Order));
@@ -858,6 +864,8 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
             if (!beforeState.Sheets.TryGetValue(duplicate.PageViewId, out var record) ||
                 record.FolderId != duplicate.ExpectedFolderId || sourceFolderIds.Contains(record.FolderId))
                 return Failure("selection.changed", $"The layout '{duplicate.ExpectedName}' moved before duplication.");
+            if (folders.All(folder => folder.Id != duplicate.DestinationFolderId))
+                return Failure("folder.destination_missing", "The paste destination no longer exists.");
         }
 
         var createdPages = new List<RhinoPageView>();
@@ -865,6 +873,7 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
         {
             var sheets = beforeState.Sheets.ToDictionary(pair => pair.Key, pair => pair.Value);
             var pages = document.Views.GetPageViews().ToDictionary(page => page.MainViewport.Id);
+            var duplicatedSheetIds = new Dictionary<Guid, Guid>();
 
             foreach (var duplicate in folderChanges)
             {
@@ -874,6 +883,7 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
                              .OrderBy(sheet => sheet.FolderId).ThenBy(sheet => sheet.Order))
                 {
                     var copy = DuplicatePage(document, pages, sourceSheet, createdPages);
+                    duplicatedSheetIds[sourceSheet.PageViewId] = copy.MainViewport.Id;
                     sheets[copy.MainViewport.Id] = DuplicateSheetRecord(
                         document,
                         sourceSheet,
@@ -890,17 +900,32 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
                     !string.Equals(sourcePage.PageName, duplicate.ExpectedName, StringComparison.Ordinal))
                     throw new InvalidOperationException($"The layout '{duplicate.ExpectedName}' changed before duplication.");
                 var copy = DuplicatePage(document, pages, sourceSheet, createdPages);
-                var nextOrder = sheets.Values.Where(sheet => sheet.FolderId == sourceSheet.FolderId)
+                duplicatedSheetIds[sourceSheet.PageViewId] = copy.MainViewport.Id;
+                var nextOrder = sheets.Values.Where(sheet => sheet.FolderId == duplicate.DestinationFolderId)
                     .Select(sheet => sheet.Order).DefaultIfEmpty(-1).Max() + 1;
                 sheets[copy.MainViewport.Id] = DuplicateSheetRecord(
                     document,
                     sourceSheet,
                     copy,
-                    sourceSheet.FolderId,
+                    duplicate.DestinationFolderId,
                     nextOrder);
             }
 
-            _stateStore.Set(document, beforeState with { Folders = folders, Sheets = sheets });
+            var afterState = beforeState with { Folders = folders, Sheets = sheets };
+            if (placement is not null)
+            {
+                afterState = afterState with
+                {
+                    ObserverCanvas = PlacePastedHierarchy(
+                        document,
+                        afterState,
+                        folderChanges,
+                        duplicatedSheetIds,
+                        placement.TargetOrigin),
+                };
+            }
+
+            _stateStore.Set(document, afterState);
             document.Modified = true;
             _revisionTracker.Bump(document);
             document.Views.Redraw();
@@ -913,6 +938,51 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
             return Failure("selection.duplicate_failed",
                 $"Duplication failed and every incomplete copy was removed: {exception.Message}");
         }
+    }
+
+    private ObserverCanvasState PlacePastedHierarchy(
+        RhinoDoc document,
+        DocumentState state,
+        IReadOnlyList<DuplicateFolderChange> folderChanges,
+        IReadOnlyDictionary<Guid, Guid> duplicatedSheetIds,
+        ObserverPointRecord targetOrigin)
+    {
+        var origins = state.Canvas.FolderOrigins.ToDictionary(pair => pair.Key, pair => pair.Value);
+        var placements = state.Canvas.SheetPlacements.ToDictionary(pair => pair.Key, pair => pair.Value);
+        foreach (var folderMap in folderChanges.Select(change => change.FolderIdMap))
+        {
+            foreach (var pair in folderMap)
+                if (state.Canvas.FolderOrigins.TryGetValue(pair.Key, out var origin))
+                    origins[pair.Value] = origin;
+        }
+        foreach (var pair in duplicatedSheetIds)
+            if (state.Canvas.SheetPlacements.TryGetValue(pair.Key, out var sheetPlacement))
+                placements[pair.Value] = sheetPlacement;
+
+        var canvas = state.Canvas with { FolderOrigins = origins, SheetPlacements = placements };
+        var tentative = state with { ObserverCanvas = canvas };
+        var snapshot = RhinoDocumentObserverSnapshotProvider.Capture(
+            document,
+            tentative,
+            _revisionTracker.Current(document));
+        var topFolderIds = folderChanges
+            .Select(change => change.FolderIdMap[change.SourceFolderId])
+            .ToArray();
+        var coveredSourceSheetIds = folderChanges
+            .SelectMany(change => change.FolderIdMap.Keys)
+            .SelectMany(folderId => state.Sheets.Values
+                .Where(sheet => sheet.FolderId == folderId)
+                .Select(sheet => sheet.PageViewId))
+            .ToHashSet();
+        var standaloneSheetIds = duplicatedSheetIds
+            .Where(pair => !coveredSourceSheetIds.Contains(pair.Key))
+            .Select(pair => pair.Value)
+            .ToArray();
+        return new PasteCanvasPlacementPlanner().Place(
+            snapshot,
+            topFolderIds,
+            standaloneSheetIds,
+            targetOrigin);
     }
 
     private static DocumentState WithCurrentPageRecords(RhinoDoc document, DocumentState state)

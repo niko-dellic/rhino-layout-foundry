@@ -299,7 +299,7 @@ internal sealed class ProjectInformationEditor : Panel
             {
                 Text = label,
                 Font = SystemFonts.Bold(9),
-                TextColor = FoundryTheme.MutedText,
+                TextColor = FoundryTheme.SecondaryText,
                 TextAlignment = TextAlignment.Left,
             },
             content,

@@ -98,6 +98,7 @@ Each open 3DM is represented by an explicit, collapsible project-root row above 
 - Create, rename, reorder, nest, and remove folders.
 - Drag sheets between folders or use a move command.
 - Duplicate and Delete operate on any multiselection of folders, sheets, or detail rows. Selecting a detail targets its containing sheet. Folder descendants are normalized so a selected folder and a selected child are processed exactly once.
+- Copy and Paste use the platform shortcuts (`Cmd+C`/`Cmd+V` on macOS and `Ctrl+C`/`Ctrl+V` on Windows) in Hierarchy, Thumbnail, Canvas, and Canvas Navigator. The private clipboard payload is valid only for the same open 3DM; copying a folder includes its complete subtree, and paste targets the focused folder or the containing folder of the focused layout/detail. Empty view space targets the project root, while Canvas paste preserves the copied board organization and anchors it at the focused board point.
 - Deleting a non-empty folder recursively deletes its nested folders and Rhino sheets only after a warning that enumerates the affected counts. A metadata-only folder deletion remains undoable; Rhino layout deletion is explicitly reported as non-undoable.
 - Moving a sheet across a folder boundary previews any change caused by live folder-scoped display rules and commits the move and rule reconciliation atomically.
 

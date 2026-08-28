@@ -131,7 +131,8 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
                     continue;
                 }
 
-                var resolved = ResolveTemplate(spec, templates, snapshot, diagnostics);
+                var resolved = ResolveTemplate(
+                    spec, templates, snapshot, request.NamedViewAssignments, diagnostics);
                 if (resolved is null)
                 {
                     continue;
@@ -212,6 +213,7 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
         LayoutCreationSpec spec,
         IReadOnlyDictionary<Guid, SheetTemplateRecipe> templates,
         DocumentSnapshot snapshot,
+        IReadOnlyDictionary<Guid, string>? legacyNamedViewAssignments,
         ICollection<Diagnostic> diagnostics)
     {
         if (spec.Paper.Width <= 0 || spec.Paper.Height <= 0 || string.IsNullOrWhiteSpace(spec.Paper.UnitSystem))
@@ -323,6 +325,15 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
             var namedView = spec.NamedView.Trim();
             foreach (var detail in details)
                 namedViewAssignments[detail.Id] = namedView;
+        }
+        else if (legacyNamedViewAssignments is not null)
+        {
+            foreach (var detail in details)
+            {
+                var namedView = legacyNamedViewAssignments.GetValueOrDefault(detail.Id)?.Trim();
+                if (!string.IsNullOrWhiteSpace(namedView))
+                    namedViewAssignments[detail.Id] = namedView;
+            }
         }
 
         if (adaptiveTitleBlock is not null)

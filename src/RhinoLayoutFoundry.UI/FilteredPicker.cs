@@ -7,7 +7,7 @@ internal sealed class FilteredPicker : Panel
 {
     private readonly string[] _allLabels;
     private readonly TextBox _textBox;
-    private readonly Button _toggleButton;
+    private readonly FoundryToolbarIconButton _toggleButton;
     private readonly ListBox _results;
     private Form? _resultsPopup;
     private bool _settingValue;
@@ -18,7 +18,9 @@ internal sealed class FilteredPicker : Panel
             .OrderBy(label => label, StringComparer.OrdinalIgnoreCase)
             .ToArray();
         _textBox = new TextBox { PlaceholderText = placeholder };
-        _toggleButton = new Button { Text = "⌄", Width = 30, ToolTip = "Show matching choices" };
+        _toggleButton = new FoundryToolbarIconButton(
+            FoundryViewIcons.ChevronDown(),
+            "Show matching choices");
         _results = new ListBox { DataStore = _allLabels, Height = 112 };
         _textBox.TextChanged += (_, _) =>
         {
@@ -59,7 +61,7 @@ internal sealed class FilteredPicker : Panel
                 {
                     Orientation = Orientation.Horizontal,
                     Spacing = 0,
-                    Items = { new StackLayoutItem(_textBox, true), _toggleButton },
+                    Items = { new StackLayoutItem(new FoundryFormField(_textBox), true), _toggleButton },
                 },
             },
         };

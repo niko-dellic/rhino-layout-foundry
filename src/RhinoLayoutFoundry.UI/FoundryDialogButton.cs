@@ -11,8 +11,8 @@ internal enum FoundryDialogButtonStyle
 }
 
 /// <summary>
-/// Flat dialog action used where native raised buttons would conflict with the
-/// lightweight Foundry chrome. It retains mouse, keyboard and focus behavior.
+/// Quiet-outline dialog and inline action with shared mouse, keyboard, focus,
+/// disabled, and destructive states.
 /// </summary>
 internal sealed class FoundryDialogButton : Drawable
 {
@@ -97,6 +97,13 @@ internal sealed class FoundryDialogButton : Drawable
 
     internal event EventHandler? Click;
 
+    internal void PerformClick()
+    {
+        if (!Enabled) return;
+        Click?.Invoke(this, EventArgs.Empty);
+        Invalidate();
+    }
+
     internal string Text
     {
         get => _text;
@@ -111,48 +118,26 @@ internal sealed class FoundryDialogButton : Drawable
     {
         var graphics = eventArgs.Graphics;
         var bounds = new RectangleF(0.5f, 0.5f, Math.Max(0, Width - 1), Math.Max(0, Height - 1));
-        if (_style is FoundryDialogButtonStyle.Primary or FoundryDialogButtonStyle.Destructive)
+        using var outline = GraphicsPath.GetRoundRect(bounds, 6);
+        var destructive = _style == FoundryDialogButtonStyle.Destructive;
+        if (Enabled && (_hovered || _pressed))
         {
-            var accent = _style == FoundryDialogButtonStyle.Destructive
-                ? FoundryTheme.DangerAccent
-                : FoundryTheme.PrimaryActionBackground;
-            graphics.FillRectangle(
-                Enabled
-                    ? accent
-                    : FoundryTheme.WithAlpha(accent, 80),
-                bounds);
-            if (Enabled && (_hovered || _pressed))
-            {
-                graphics.FillRectangle(
-                    FoundryTheme.WithAlpha(
-                        FoundryTheme.IsDarkMode ? Colors.Black : Colors.White,
-                        _pressed ? 32 : 20),
-                    bounds);
-            }
+            var fill = destructive
+                ? FoundryTheme.WithAlpha(FoundryTheme.DangerAccent, _pressed ? 42 : 24)
+                : FoundryTheme.WithAlpha(FoundryTheme.CanvasSubtleSurface, _pressed ? 205 : 135);
+            graphics.FillPath(fill, outline);
         }
-        else
-        {
-            if (Enabled && (_hovered || _pressed))
-            {
-                graphics.FillRectangle(
-                    FoundryTheme.WithAlpha(
-                        FoundryTheme.CanvasSubtleSurface,
-                        _pressed ? 190 : 120),
-                    bounds);
-            }
 
-            graphics.DrawRectangle(
-                new Pen(FoundryTheme.WithAlpha(FoundryTheme.CanvasBorder, Enabled ? 190 : 85), 1),
-                bounds);
-        }
+        var border = destructive
+            ? FoundryTheme.WithAlpha(FoundryTheme.DangerAccent, Enabled ? 175 : 72)
+            : FoundryTheme.WithAlpha(FoundryTheme.CanvasBorder, Enabled ? 205 : 80);
+        graphics.DrawPath(new Pen(border, 1), outline);
 
         var textColor = !Enabled
             ? FoundryTheme.MutedText
-            : _style == FoundryDialogButtonStyle.Primary
-                ? FoundryTheme.PrimaryActionText
-                : _style == FoundryDialogButtonStyle.Destructive
-                    ? Colors.White
-                    : FoundryTheme.PrimaryText;
+            : destructive
+                ? FoundryTheme.DangerAccent
+                : FoundryTheme.PrimaryText;
         var textSize = graphics.MeasureString(_font, _text);
         graphics.DrawText(
             _font,
@@ -163,16 +148,12 @@ internal sealed class FoundryDialogButton : Drawable
 
         if (Enabled && HasFocus && _showFocusRing)
         {
-            graphics.DrawRectangle(
-                new Pen(
-                    _style == FoundryDialogButtonStyle.Destructive
-                        ? FoundryTheme.WithAlpha(Colors.White, 190)
-                        : FoundryTheme.WithAlpha(FoundryTheme.PrimaryText, 190),
-                    1),
-                2.5f,
-                2.5f,
-                Math.Max(0, Width - 5),
-                Math.Max(0, Height - 5));
+            using var focus = GraphicsPath.GetRoundRect(
+                new RectangleF(2.5f, 2.5f, Math.Max(0, Width - 5), Math.Max(0, Height - 5)),
+                4);
+            graphics.DrawPath(
+                new Pen(FoundryTheme.WithAlpha(destructive ? FoundryTheme.DangerAccent : FoundryTheme.PrimaryText, 165), 1),
+                focus);
         }
     }
 }

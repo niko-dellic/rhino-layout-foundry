@@ -14,11 +14,12 @@ public sealed class ObserverFoundryPanel : Panel
     private readonly ObserverCanvasDrawable _canvas;
     private readonly GridView _navigator;
     private readonly Label _status;
-    private readonly Label _zoomLabel;
     private readonly FoundryToolbarIconButton _navigatorButton;
     private readonly FoundryToolbarIconButton _namedViewsButton;
     private readonly FoundryToolbarIconButton _nestedPackingButton;
     private readonly FoundryToolbarIconButton _compactPackingButton;
+    private readonly FoundryToolbarIconButton _gridAppearanceButton;
+    private readonly CanvasGridTray _gridAppearanceTray;
     private readonly PixelLayout _canvasOverlay;
     private readonly Control _canvasToolbar;
     private readonly UITimer _overlayLayoutTimer;
@@ -57,13 +58,16 @@ public sealed class ObserverFoundryPanel : Panel
         _canvas = new ObserverCanvasDrawable();
         _navigator = CreateNavigator();
         _status = FoundryTheme.MutedLabel();
-        _zoomLabel = FoundryTheme.MutedLabel("100%");
-        _zoomLabel.Width = 54;
-        _zoomLabel.TextAlignment = TextAlignment.Right;
+        _status.Visible = false;
+        _status.TextChanged += (_, _) =>
+            _status.Visible = !string.IsNullOrWhiteSpace(_status.Text);
 
         var fitButton = ToolbarButton(FoundryViewIcons.FitAll(), "Fit all layouts in the canvas");
         var focusButton = ToolbarButton(FoundryViewIcons.FocusSelection(), "Focus the current selection");
         var tidyButton = ToolbarButton(FoundryViewIcons.Tidy(), "Tidy the selected layouts or folders, or the whole board");
+        _gridAppearanceButton = ToolbarToggleButton(
+            FoundryViewIcons.GridAppearance(),
+            "Adjust the canvas grid color and opacity");
         var zoomOutButton = ToolbarButton(FoundryViewIcons.ZoomOut(), "Zoom out");
         var zoomInButton = ToolbarButton(FoundryViewIcons.ZoomIn(), "Zoom in");
         _navigatorButton = ToolbarToggleButton(FoundryViewIcons.Navigator(), "Show or hide the Navigator");
@@ -80,6 +84,7 @@ public sealed class ObserverFoundryPanel : Panel
         fitButton.Click += (_, _) => _canvas.FitAll();
         focusButton.Click += (_, _) => _canvas.FocusSelection();
         tidyButton.Click += async (_, _) => await TidyAsync();
+        _gridAppearanceButton.Click += (_, _) => ApplyGridAppearanceTrayVisibility();
         zoomOutButton.Click += (_, _) => _canvas.Zoom(1 / 1.2);
         zoomInButton.Click += (_, _) => _canvas.Zoom(1.2);
         _navigatorButton.Click += (_, _) => ApplySidebarVisibility();
@@ -104,9 +109,10 @@ public sealed class ObserverFoundryPanel : Panel
                 _nestedPackingButton,
                 _compactPackingButton,
                 ToolbarSeparator(),
+                _gridAppearanceButton,
+                ToolbarSeparator(),
                 zoomOutButton,
                 zoomInButton,
-                _zoomLabel,
                 new StackLayoutItem(null, true),
                 _namedViewsButton,
                 openButton,
@@ -117,6 +123,13 @@ public sealed class ObserverFoundryPanel : Panel
         {
             BackgroundColor = FoundryTheme.CanvasBackground,
         };
+        _gridAppearanceTray = new CanvasGridTray(
+            _canvas.GridColor,
+            _canvas.GridOpacity,
+            (color, opacity) => _canvas.SetGridAppearance(color, opacity))
+        {
+            Visible = false,
+        };
         _overlayLayoutTimer = new UITimer { Interval = 0.04 };
         _overlayLayoutTimer.Elapsed += (_, _) =>
         {
@@ -125,6 +138,7 @@ public sealed class ObserverFoundryPanel : Panel
         };
         _canvasOverlay.Add(_canvas, 0, 0);
         _canvasOverlay.Add(_canvasToolbar, 0, 0);
+        _canvasOverlay.Add(_gridAppearanceTray, 0, 36);
         _canvasOverlay.SizeChanged += (_, _) => QueueCanvasOverlayLayout();
         ApplySidebarVisibility();
         Content = new StackLayout
@@ -141,7 +155,6 @@ public sealed class ObserverFoundryPanel : Panel
 
         _canvas.ViewChanged += (_, _) =>
         {
-            _zoomLabel.Text = $"{_canvas.Camera.Zoom * 100:0}%";
             RememberCurrentCamera(_snapshot.DocumentRuntimeSerialNumber);
             QueueVisiblePreviews();
         };
@@ -165,12 +178,18 @@ public sealed class ObserverFoundryPanel : Panel
         _canvas.AssignNamedViewToSelectionRequested += async (_, eventArgs) =>
             await AssignSelectedNamedViewAsync(eventArgs.NamedViewName);
         _canvas.NamedViewPreviewsRequested += (_, _) => QueueNamedViewPreviews();
-        _canvas.ContextRequested += (_, eventArgs) => ShowContextMenu(eventArgs.ControlPoint);
+        _canvas.ContextRequested += (_, eventArgs) => ShowContextMenu(
+            eventArgs.ControlPoint,
+            eventArgs.DestinationFolderId,
+            new ObserverPointRecord(eventArgs.WorldPoint.X, eventArgs.WorldPoint.Y));
         _canvas.DeleteRequested += (_, _) => RequestDeleteSelection();
         _canvas.TidyRequested += async (_, _) => await TidyAsync();
         _canvas.ExitWorkspaceRequested += (_, _) => ExitFullscreenRequested?.Invoke(this, EventArgs.Empty);
         _canvas.FolderDraftRequested += async (_, eventArgs) =>
             await CommitNavigatorFolderDraftAsync(eventArgs);
+        _canvas.CopyRequested += (_, _) => CopySelection();
+        _canvas.PasteRequested += async (_, eventArgs) =>
+            await PasteSelectionAsync(eventArgs.DestinationFolderId, eventArgs.TargetOrigin);
 
         _navigator.SelectedRowsChanged += OnNavigatorSelectionChanged;
         _navigator.CellFormatting += (_, eventArgs) =>
@@ -186,6 +205,18 @@ public sealed class ObserverFoundryPanel : Panel
         _navigator.CellDoubleClick += (_, _) => _canvas.FocusSelection();
         _navigator.KeyDown += (_, eventArgs) =>
         {
+            if (HierarchyClipboard.IsCopyShortcut(eventArgs))
+            {
+                CopySelection();
+                eventArgs.Handled = true;
+                return;
+            }
+            if (HierarchyClipboard.IsPasteShortcut(eventArgs))
+            {
+                _ = PasteSelectionAsync();
+                eventArgs.Handled = true;
+                return;
+            }
             if (eventArgs.Key != Keys.F)
                 return;
 
@@ -274,6 +305,12 @@ public sealed class ObserverFoundryPanel : Panel
         QueueVisiblePreviews();
     }
 
+    private void ApplyGridAppearanceTrayVisibility()
+    {
+        _gridAppearanceTray.Visible = _gridAppearanceButton.Checked;
+        UpdateCanvasOverlayLayout();
+    }
+
     private void UpdateCanvasOverlayLayout()
     {
         var clientSize = _canvasOverlay.ClientSize;
@@ -283,6 +320,11 @@ public sealed class ObserverFoundryPanel : Panel
         _canvas.Size = clientSize;
         _canvasToolbar.Size = new Size(clientSize.Width, 28);
         _canvasOverlay.Move(_canvasToolbar, 0, 0);
+        var trayX = Math.Clamp(
+            _gridAppearanceButton.Location.X,
+            0,
+            Math.Max(0, clientSize.Width - _gridAppearanceTray.Width));
+        _canvasOverlay.Move(_gridAppearanceTray, trayX, 36);
         TryApplyPendingInitialFit(clientSize);
         QueueNamedViewPreviews();
     }
@@ -291,18 +333,6 @@ public sealed class ObserverFoundryPanel : Panel
     {
         _overlayLayoutTimer.Stop();
         _overlayLayoutTimer.Start();
-    }
-
-    private static Button ToolbarButton(string text, string toolTip)
-    {
-        var button = FoundryTheme.ConfigureToolbarButton(new Button { Text = text, ToolTip = toolTip });
-        if (text.Length > 1)
-        {
-            button.Width = -1;
-            button.MinimumSize = new Size(44, 24);
-        }
-
-        return button;
     }
 
     private static FoundryToolbarIconButton ToolbarButton(Image image, string toolTip) =>
@@ -317,56 +347,6 @@ public sealed class ObserverFoundryPanel : Panel
         Height = 18,
         BackgroundColor = FoundryTheme.CanvasBorder,
     };
-
-    private static Control Sidebar(
-        string title,
-        Control content,
-        string collapseIcon,
-        string collapseToolTip,
-        Action collapse)
-    {
-        var collapseButton = FoundryTheme.ConfigureToolbarButton(new Button
-        {
-            Text = collapseIcon,
-            ToolTip = collapseToolTip,
-        });
-        collapseButton.Click += (_, _) => collapse();
-        var surface = new Panel
-        {
-            Padding = new Padding(FoundryTheme.Space2),
-            BackgroundColor = FoundryTheme.ContentBackground,
-            Content = new StackLayout
-            {
-                Spacing = FoundryTheme.Space2,
-                Items =
-                {
-                    new TableLayout
-                    {
-                        Rows =
-                        {
-                            new TableRow(
-                                new Label
-                                {
-                                    Text = title,
-                                    Font = SystemFonts.Bold(10),
-                                    TextColor = FoundryTheme.PrimaryText,
-                                },
-                                new TableCell(null, true),
-                                collapseButton),
-                        },
-                    },
-                    new StackLayoutItem(content, true),
-                },
-            },
-        };
-        return new Panel
-        {
-            Width = 210,
-            Padding = new Padding(1),
-            BackgroundColor = FoundryTheme.CanvasBorder,
-            Content = surface,
-        };
-    }
 
     private static GridView CreateNavigator()
     {
@@ -515,9 +495,9 @@ public sealed class ObserverFoundryPanel : Panel
             ? LayoutFoundryUiHost.Selection.Selected
             : []);
         PopulateNavigator();
-        _status.Text = !_snapshot.HasDocument
-            ? "No active Rhino document"
-            : $"{_snapshot.Sheets.Count} layouts  ·  {_snapshot.Sheets.Sum(sheet => sheet.Details.Count)} details  ·  {_snapshot.NamedViews.Count} named views";
+        // The shared Layout Foundry footer owns persistent document totals.
+        // This local row is reserved for operation feedback and errors.
+        _status.Text = string.Empty;
         if (_pendingInitialFitDocumentSerial is not null)
         {
             TryApplyPendingInitialFit(_canvasOverlay.ClientSize);
@@ -893,13 +873,18 @@ public sealed class ObserverFoundryPanel : Panel
         if (dialog.Succeeded) RefreshSnapshot(fit: false);
     }
 
-    private void ShowContextMenu(PointF location)
+    private void ShowContextMenu(
+        PointF location,
+        Guid? pasteDestinationFolderId,
+        ObserverPointRecord pasteTargetOrigin)
     {
         var selection = LayoutFoundryUiHost.Selection.Selected.ToArray();
         var open = new ButtonMenuItem { Text = "Open in Rhino" };
         var properties = new ButtonMenuItem { Text = "Batch Properties…" };
         var duplicate = new ButtonMenuItem { Text = selection.Length > 1 ? "Duplicate Items" : "Duplicate" };
         var delete = new ButtonMenuItem { Text = selection.Length > 1 ? "Delete Items…" : "Delete…" };
+        var copy = new ButtonMenuItem { Text = "Copy" };
+        var paste = new ButtonMenuItem { Text = "Paste" };
         var include = new ButtonMenuItem { Text = "Enable for Printing" };
         var exclude = new ButtonMenuItem { Text = "Disable from Printing" };
         var move = BuildMoveMenu(selection);
@@ -916,6 +901,9 @@ public sealed class ObserverFoundryPanel : Panel
         properties.Enabled = selection.Length > 0;
         duplicate.Enabled = selection.Length > 0 && selection.All(key => key.Kind != OverviewNodeKind.Detail);
         delete.Enabled = duplicate.Enabled;
+        copy.Enabled = selection.Length > 0 &&
+                       selection.All(key => !(key.Kind == OverviewNodeKind.Folder && key.Id == _snapshot.RootFolderId));
+        paste.Enabled = HierarchyClipboard.CanPasteCurrentDocument();
         include.Enabled = selection.Length > 0;
         exclude.Enabled = selection.Length > 0;
         moveEarlier.Enabled = moveLater.Enabled = selection.Length == 1 &&
@@ -924,6 +912,10 @@ public sealed class ObserverFoundryPanel : Panel
         properties.Click += (_, _) => OpenBatchProperties();
         duplicate.Click += async (_, _) => await DuplicateSelectionAsync();
         delete.Click += (_, _) => RequestDeleteSelection();
+        copy.Click += (_, _) => CopySelection();
+        paste.Click += async (_, _) => await PasteSelectionAsync(
+            pasteDestinationFolderId ?? _snapshot.RootFolderId,
+            pasteTargetOrigin);
         include.Click += async (_, _) => await SetPrintInclusionAsync(true);
         exclude.Click += async (_, _) => await SetPrintInclusionAsync(false);
         moveEarlier.Click += async (_, _) => await ReorderSelectionByStepAsync(-1);
@@ -933,6 +925,9 @@ public sealed class ObserverFoundryPanel : Panel
         var menu = new ContextMenu(
             open,
             properties,
+            new SeparatorMenuItem(),
+            copy,
+            paste,
             new SeparatorMenuItem(),
             duplicate,
             delete,
@@ -1055,6 +1050,21 @@ public sealed class ObserverFoundryPanel : Panel
         _status.Text = ResultMessage(result, $"Duplicated {selection.Length} item{(selection.Length == 1 ? string.Empty : "s")}.");
         if (result.Succeeded) RefreshSnapshot(fit: false);
     }
+
+    private void CopySelection()
+    {
+        _status.Text = HierarchyClipboard.CopyCurrentSelection().Message;
+    }
+
+    private async Task PasteSelectionAsync(
+        Guid? destinationFolderId = null,
+        ObserverPointRecord? targetOrigin = null)
+    {
+        var result = await HierarchyClipboard.PasteAsync(destinationFolderId, targetOrigin);
+        _status.Text = result.Message;
+        if (result.Succeeded) RefreshSnapshot(fit: false);
+    }
+
 
     private void RequestDeleteSelection()
     {

@@ -12,7 +12,7 @@ internal sealed class DetailPropertiesDialog : Dialog
     private readonly FilteredPicker _displayModePicker;
     private readonly Label _review;
     private readonly Label _status;
-    private readonly Button _applyButton;
+    private readonly FoundryDialogButton _applyButton;
 
     internal DetailPropertiesDialog(DocumentSnapshot snapshot, IReadOnlyList<Guid> detailViewportIds)
     {
@@ -50,11 +50,16 @@ internal sealed class DetailPropertiesDialog : Dialog
         _review.Wrap = WrapMode.Word;
         _status = FoundryTheme.MutedLabel();
         _status.Wrap = WrapMode.Word;
-        _applyButton = FoundryTheme.ConfigureButton(new Button { Text = "Apply changes" }, 112);
+        _applyButton = new FoundryDialogButton(
+            "Apply changes",
+            FoundryDialogButtonStyle.Primary,
+            112);
         _applyButton.Click += async (_, _) => await ApplyAsync();
-        var cancel = FoundryTheme.ConfigureButton(new Button { Text = "Cancel" });
+        var cancel = new FoundryDialogButton(
+            "Cancel",
+            FoundryDialogButtonStyle.Secondary);
         cancel.Click += (_, _) => Close();
-        AbortButton = cancel;
+        FoundryDialogActions.Bind(this, _applyButton, cancel);
 
         Content = new StackLayout
         {

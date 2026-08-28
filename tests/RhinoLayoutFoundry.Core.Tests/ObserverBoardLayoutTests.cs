@@ -68,8 +68,8 @@ public sealed class ObserverBoardLayoutTests
         var visible = index.QuerySheets(first.Bounds.Inflate(1));
 
         Assert.Contains(visible, card => card.Sheet.PageViewId == first.Sheet.PageViewId);
-        Assert.False(visible.Any(card =>
-            card.Sheet.PageViewId != first.Sheet.PageViewId && !card.Bounds.Intersects(first.Bounds.Inflate(1))));
+        Assert.DoesNotContain(visible, card =>
+            card.Sheet.PageViewId != first.Sheet.PageViewId && !card.Bounds.Intersects(first.Bounds.Inflate(1)));
     }
 
     [Fact]

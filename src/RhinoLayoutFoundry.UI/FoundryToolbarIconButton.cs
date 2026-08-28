@@ -4,8 +4,8 @@ using Eto.Forms;
 namespace RhinoLayoutFoundry.UI;
 
 /// <summary>
-/// Shared, borderless icon button used by Foundry toolbars. Toggle buttons use
-/// the Rhino selection accent as a compact active-state underline.
+/// Shared quiet-outline icon button used by Foundry toolbars. Active toggles
+/// use a neutral surface instead of a separate accent underline.
 /// </summary>
 internal sealed class FoundryToolbarIconButton : Drawable
 {
@@ -15,6 +15,7 @@ internal sealed class FoundryToolbarIconButton : Drawable
     private bool _hovered;
     private bool _pressed;
     private bool _showFocusRing;
+    private bool _isGrouped;
 
     internal FoundryToolbarIconButton(
         Image image,
@@ -24,7 +25,7 @@ internal sealed class FoundryToolbarIconButton : Drawable
     {
         _image = image ?? throw new ArgumentNullException(nameof(image));
         _isToggle = isToggle;
-        Size = new Size(28, 28);
+        Size = new Size(32, 32);
         BackgroundColor = Colors.Transparent;
         CanFocus = true;
         ToolTip = toolTip;
@@ -111,6 +112,17 @@ internal sealed class FoundryToolbarIconButton : Drawable
         }
     }
 
+    internal bool IsGrouped
+    {
+        get => _isGrouped;
+        set
+        {
+            if (_isGrouped == value) return;
+            _isGrouped = value;
+            Invalidate();
+        }
+    }
+
     private void Activate()
     {
         if (_isToggle) Checked = !Checked;
@@ -120,14 +132,32 @@ internal sealed class FoundryToolbarIconButton : Drawable
 
     private void OnPaint(object? sender, PaintEventArgs eventArgs)
     {
-        if (Enabled && (_hovered || _pressed))
+        var bounds = new RectangleF(0.5f, 0.5f, Math.Max(0, Width - 1), Math.Max(0, Height - 1));
+        using var outline = GraphicsPath.GetRoundRect(bounds, 6);
+        if (Checked)
         {
-            eventArgs.Graphics.FillRectangle(
-                FoundryTheme.WithAlpha(FoundryTheme.CanvasSubtleSurface, _pressed ? 150 : 90),
-                1,
-                1,
-                Math.Max(0, Width - 2),
-                Math.Max(0, Height - 2));
+            eventArgs.Graphics.FillPath(FoundryTheme.ToolbarActiveBackground, outline);
+        }
+        else if (!IsGrouped)
+        {
+            eventArgs.Graphics.FillPath(FoundryTheme.ToolbarButtonBackground, outline);
+        }
+
+        if (!Checked && Enabled && (_hovered || _pressed))
+        {
+            eventArgs.Graphics.FillPath(
+                FoundryTheme.WithAlpha(FoundryTheme.CanvasSubtleSurface, _pressed ? 205 : 135),
+                outline);
+        }
+        if (!IsGrouped || Checked)
+        {
+            eventArgs.Graphics.DrawPath(
+                new Pen(
+                    Checked
+                        ? FoundryTheme.WithAlpha(FoundryTheme.SecondaryText, Enabled ? 215 : 80)
+                        : FoundryTheme.WithAlpha(FoundryTheme.CanvasBorder, Enabled ? 175 : 70),
+                    1),
+                outline);
         }
 
         var imageSize = _image.Size;
@@ -145,24 +175,14 @@ internal sealed class FoundryToolbarIconButton : Drawable
                 imageSize.Height);
         }
 
-        if (Checked)
-        {
-            eventArgs.Graphics.FillRectangle(
-                FoundryTheme.SelectionAccent,
-                5,
-                Height - 2,
-                Math.Max(0, Width - 10),
-                2);
-        }
-
         if (Enabled && HasFocus && _showFocusRing)
         {
-            eventArgs.Graphics.DrawRectangle(
-                new Pen(FoundryTheme.WithAlpha(FoundryTheme.SelectionAccent, 150), 1),
-                1.5f,
-                1.5f,
-                Math.Max(0, Width - 3),
-                Math.Max(0, Height - 3));
+            using var focus = GraphicsPath.GetRoundRect(
+                new RectangleF(2.5f, 2.5f, Math.Max(0, Width - 5), Math.Max(0, Height - 5)),
+                4);
+            eventArgs.Graphics.DrawPath(
+                new Pen(FoundryTheme.WithAlpha(FoundryTheme.PrimaryText, 155), 1),
+                focus);
         }
     }
 }

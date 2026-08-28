@@ -461,6 +461,38 @@ public static class LayoutFoundryUiHost
         }
     }
 
+    public static async Task<OperationResult> PasteSelectionAsync(
+        uint sourceDocumentRuntimeSerialNumber,
+        IReadOnlyList<OverviewNodeKey> selection,
+        Guid destinationFolderId,
+        ObserverPointRecord? canvasTargetOrigin = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (_snapshotProvider is null || _mutationService is null)
+            return UnavailableResult("Foundry is not connected to an active Rhino plug-in.");
+        try
+        {
+            var snapshot = _snapshotProvider.Capture();
+            var plan = new PasteHierarchySelectionPlanner().Plan(
+                new PasteHierarchySelectionRequest(
+                    sourceDocumentRuntimeSerialNumber,
+                    snapshot.Revision,
+                    destinationFolderId,
+                    selection,
+                    canvasTargetOrigin),
+                snapshot);
+            return await ApplyHierarchyPlanAsync(
+                plan,
+                snapshot.DocumentRuntimeSerialNumber,
+                selection.Select(item => item.Id).Append(destinationFolderId).ToHashSet(),
+                cancellationToken);
+        }
+        catch (InvalidOperationException exception)
+        {
+            return UnavailableResult(exception.Message);
+        }
+    }
+
     public static async Task<OperationResult> DeleteSelectionAsync(
         IReadOnlyList<OverviewNodeKey> selection,
         CancellationToken cancellationToken = default)

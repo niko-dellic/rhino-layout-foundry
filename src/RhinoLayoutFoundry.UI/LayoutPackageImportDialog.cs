@@ -7,7 +7,7 @@ namespace RhinoLayoutFoundry.UI;
 internal sealed class LayoutPackageImportDialog : Dialog
 {
     private readonly DropDown _mode;
-    private readonly CheckBox _importProjectInformation;
+    private readonly FoundryCheckBox _importProjectInformation;
     private readonly Label _projectInformationHelp;
     private readonly Dictionary<string, DropDown> _resolutionControls = new(StringComparer.Ordinal);
 
@@ -26,10 +26,8 @@ internal sealed class LayoutPackageImportDialog : Dialog
             SelectedIndex = 0,
             Width = 280,
         };
-        _importProjectInformation = new CheckBox
+        _importProjectInformation = new FoundryCheckBox("Import project information")
         {
-            Text = "Import project information",
-            Checked = false,
             ToolTip = "Include project, firm, issue-default, revision, custom-field, and logo data from this package.",
         };
         _projectInformationHelp = FoundryTheme.MutedLabel();
@@ -68,13 +66,18 @@ internal sealed class LayoutPackageImportDialog : Dialog
                                 FoundryTheme.MutedLabel(conflict.Message),
                             },
                         }, scaleWidth: true),
-                        choice),
+                        new FoundryFormField(choice)),
                 },
             });
         }
 
-        var apply = FoundryTheme.ConfigureButton(new Button { Text = "Import" }, 88);
-        var cancel = FoundryTheme.ConfigureButton(new Button { Text = "Cancel" });
+        var apply = new FoundryDialogButton(
+            "Import",
+            FoundryDialogButtonStyle.Primary,
+            88);
+        var cancel = new FoundryDialogButton(
+            "Cancel",
+            FoundryDialogButtonStyle.Secondary);
         apply.Click += (_, _) =>
         {
             if (ImportMode == LayoutPackageImportMode.Replace)
@@ -92,8 +95,7 @@ internal sealed class LayoutPackageImportDialog : Dialog
             Close();
         };
         cancel.Click += (_, _) => Close();
-        DefaultButton = apply;
-        AbortButton = cancel;
+        FoundryDialogActions.Bind(this, apply, cancel);
 
         var warnings = preflight.Warnings.Count == 0
             ? "No preflight warnings."
@@ -115,7 +117,7 @@ internal sealed class LayoutPackageImportDialog : Dialog
                     Orientation = Orientation.Horizontal,
                     Spacing = FoundryTheme.Space2,
                     VerticalContentAlignment = VerticalAlignment.Center,
-                    Items = { new Label { Text = "Import mode" }, _mode },
+                    Items = { new Label { Text = "Import mode" }, new FoundryFormField(_mode) },
                 },
                 FoundryTheme.Surface(new StackLayout
                 {

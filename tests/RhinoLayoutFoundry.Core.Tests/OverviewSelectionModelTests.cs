@@ -81,6 +81,6 @@ public sealed class OverviewSelectionModelTests
 
         selection.Toggle(SheetOne);
         Assert.Empty(selection.Selected);
-        Assert.Equal<OverviewNodeKey?>(null, selection.Anchor);
+        Assert.Null(selection.Anchor);
     }
 }

@@ -293,6 +293,39 @@ public sealed class SheetTemplatePlannerTests
     }
 
     [Fact]
+    public void PerDetailAssignmentsTakePrecedenceOverLegacyRequestAssignments()
+    {
+        var template = Template("Captured", 420, 297);
+        var slot = template.DetailSlots.Single();
+        var snapshot = WithTemplates(TestSnapshots.Create(), [template]) with
+        {
+            NamedViewNames = new HashSet<string>(["Legacy", "Per detail"],
+                StringComparer.OrdinalIgnoreCase),
+        };
+        var plan = new BatchCreateSheetsPlanner().Plan(new BatchCreateSheetsRequest(
+            42,
+            1,
+            TestSnapshots.RootFolderId,
+            [],
+            "Priority {index}",
+            1,
+            1,
+            NamedViewAssignments: new Dictionary<Guid, string> { [slot.Id] = "Legacy" },
+            CreationSpecs:
+            [
+                new LayoutCreationSpec(
+                    1,
+                    new PaperRecipe(420, 297, "Millimeters"),
+                    TemplateId: template.Id,
+                    NamedViewsByDetail: ["Per detail"]),
+            ]), snapshot);
+
+        Assert.True(plan.CanApply);
+        var change = Assert.IsType<CreateSheetFromTemplateChange>(Assert.Single(plan.Changes));
+        Assert.Equal("Per detail", change.NamedViewAssignments[slot.Id]);
+    }
+
+    [Fact]
     public void CapturedTemplateIsScaledToSelectedPaperSize()
     {
         var template = Template("A3", 420, 297);

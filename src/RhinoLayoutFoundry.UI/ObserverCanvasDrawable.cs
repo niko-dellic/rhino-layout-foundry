@@ -33,6 +33,8 @@ internal sealed class ObserverCanvasDrawable : Drawable
     private ObserverSpatialIndex _spatialIndex = new(ObserverBoardLayout.Empty);
     private ObserverPackingMode _packingMode = ObserverPackingMode.NestedFolders;
     private ObserverCamera _camera = ObserverCamera.Default;
+    private Color _gridColor = FoundryTheme.CanvasGridColor;
+    private double _gridOpacity = FoundryTheme.DefaultCanvasGridOpacity;
     private HashSet<OverviewNodeKey> _selection = [];
     private DragMode _dragMode;
     private ObserverPoint _pressScreen;
@@ -56,6 +58,7 @@ internal sealed class ObserverCanvasDrawable : Drawable
     private string? _selectedNamedView;
     private string? _dragNamedView;
     private Guid? _hoverDetailId;
+    private bool _hasCanvasPastePoint;
 
     internal ObserverCanvasDrawable()
         : base(true)
@@ -92,12 +95,23 @@ internal sealed class ObserverCanvasDrawable : Drawable
     internal event EventHandler? TidyRequested;
     internal event EventHandler? ExitWorkspaceRequested;
     internal event EventHandler<ObserverFolderDraftRequestedEventArgs>? FolderDraftRequested;
+    internal event EventHandler? CopyRequested;
+    internal event EventHandler<ObserverPasteRequestedEventArgs>? PasteRequested;
 
     internal ObserverCamera Camera => _camera;
     internal ObserverBoardLayout BoardLayout => _layout;
     internal ObserverSnapshot Snapshot => _snapshot;
     internal ObserverPackingMode PackingMode => _packingMode;
+    internal Color GridColor => _gridColor;
+    internal double GridOpacity => _gridOpacity;
     internal bool ExitWorkspaceOnEscape { get; set; }
+
+    internal void SetGridAppearance(Color color, double opacity)
+    {
+        _gridColor = Color.FromArgb(color.Rb, color.Gb, color.Bb, 255);
+        _gridOpacity = Math.Clamp(opacity, 0, 1);
+        Invalidate();
+    }
 
     internal void SetPackingMode(ObserverPackingMode packingMode, bool fit)
     {
@@ -374,17 +388,24 @@ internal sealed class ObserverCanvasDrawable : Drawable
 
     private void DrawGrid(Graphics graphics, ObserverSize viewport)
     {
-        if (_camera.Zoom < 0.18) return;
+        if (_camera.Zoom < 0.18 || _gridOpacity <= 0) return;
         var spacing = 40d;
         var visible = _camera.VisibleWorld(viewport);
         var startX = Math.Floor(visible.Left / spacing) * spacing;
         var startY = Math.Floor(visible.Top / spacing) * spacing;
-        var color = FoundryTheme.CanvasGrid;
+        var color = FoundryTheme.WithAlpha(_gridColor, (int)Math.Round(_gridOpacity * 255));
+        const float dotSize = 1.5f;
+        const float dotRadius = dotSize / 2;
         for (var x = startX; x <= visible.Right; x += spacing)
         for (var y = startY; y <= visible.Bottom; y += spacing)
         {
             var point = _camera.WorldToScreen(new ObserverPoint(x, y), viewport);
-            graphics.FillRectangle(color, (float)point.X, (float)point.Y, 1, 1);
+            graphics.FillEllipse(
+                color,
+                (float)point.X - dotRadius,
+                (float)point.Y - dotRadius,
+                dotSize,
+                dotSize);
         }
     }
 
@@ -597,6 +618,20 @@ internal sealed class ObserverCanvasDrawable : Drawable
         var visibleCount = NavigatorVisibleRowCount(viewport);
         ClampNavigatorScroll(rows.Length, visibleCount);
 
+        var renderedRowCount = Math.Min(rows.Length, visibleCount);
+        var surfaceBounds = new RectangleF(
+            0.5f,
+            NavigatorTop + 0.5f,
+            NavigatorWidth - 1,
+            NavigatorHeaderHeight + renderedRowCount * NavigatorRowHeight - 1);
+        using (var surface = GraphicsPath.GetRoundRect(surfaceBounds, 8))
+        {
+            graphics.FillPath(FoundryTheme.CanvasOverlayBackground, surface);
+            graphics.DrawPath(
+                new Pen(FoundryTheme.WithAlpha(FoundryTheme.CanvasBorder, 205), 1),
+                surface);
+        }
+
         DrawOverlayText(
             graphics,
             _folderFont,
@@ -801,6 +836,26 @@ internal sealed class ObserverCanvasDrawable : Drawable
     {
         var list = NamedViewsListToggleBounds(left);
         var thumbnails = NamedViewsThumbnailToggleBounds(left);
+        var group = new RectangleF(
+            list.Left - 3,
+            list.Top - 3,
+            thumbnails.Right - list.Left + 6,
+            Math.Max(list.Height, thumbnails.Height) + 6);
+        using (var groupPath = GraphicsPath.GetRoundRect(group, 7))
+        {
+            graphics.FillPath(FoundryTheme.ToolbarGroupBackground, groupPath);
+            graphics.DrawPath(
+                new Pen(FoundryTheme.WithAlpha(FoundryTheme.CanvasBorder, 75), 1),
+                groupPath);
+        }
+        var active = _namedViewsThumbnailMode ? thumbnails : list;
+        using (var activePath = GraphicsPath.GetRoundRect(active, 5))
+        {
+            graphics.FillPath(FoundryTheme.ToolbarActiveBackground, activePath);
+            graphics.DrawPath(
+                new Pen(FoundryTheme.WithAlpha(FoundryTheme.SecondaryText, 205), 1),
+                activePath);
+        }
         var listColor = _namedViewsThumbnailMode ? FoundryTheme.MutedText : FoundryTheme.PrimaryText;
         var thumbnailColor = _namedViewsThumbnailMode ? FoundryTheme.PrimaryText : FoundryTheme.MutedText;
         using var listPen = new Pen(listColor, 1);
@@ -815,9 +870,6 @@ internal sealed class ObserverCanvasDrawable : Drawable
                 thumbnails.Top + 4 + row * 7,
                 5,
                 5);
-        var active = _namedViewsThumbnailMode ? thumbnails : list;
-        graphics.FillRectangle(FoundryTheme.SelectionAccent, active.Left + 3, active.Bottom - 1,
-            active.Width - 6, 2);
     }
 
     private void DrawNamedViewList(Graphics graphics, float left, IReadOnlyList<string> names)
@@ -1240,6 +1292,8 @@ internal sealed class ObserverCanvasDrawable : Drawable
             return;
         }
 
+        _hasCanvasPastePoint = true;
+
         var card = _spatialIndex.HitSheet(_pressWorld);
         if (card is not null)
         {
@@ -1371,7 +1425,8 @@ internal sealed class ObserverCanvasDrawable : Drawable
                 ResetDrag();
                 ContextRequested?.Invoke(this, new ObserverContextRequestedEventArgs(
                     _contextWorld,
-                    contextPoint));
+                    contextPoint,
+                    HitFolderBody(_contextWorld)?.Folder.Id));
             }
             else
             {
@@ -1574,6 +1629,24 @@ internal sealed class ObserverCanvasDrawable : Drawable
                 return;
             }
 
+            return;
+        }
+
+        if (HierarchyClipboard.IsCopyShortcut(eventArgs))
+        {
+            CopyRequested?.Invoke(this, EventArgs.Empty);
+            eventArgs.Handled = true;
+            return;
+        }
+        if (HierarchyClipboard.IsPasteShortcut(eventArgs))
+        {
+            var destination = _hasCanvasPastePoint ? HitFolderBody(_pressWorld)?.Folder.Id : null;
+            PasteRequested?.Invoke(this, new ObserverPasteRequestedEventArgs(
+                destination,
+                _hasCanvasPastePoint
+                    ? new ObserverPointRecord(_pressWorld.X, _pressWorld.Y)
+                    : null));
+            eventArgs.Handled = true;
             return;
         }
 
@@ -2059,12 +2132,25 @@ internal sealed class ObserverNamedViewRequestedEventArgs : EventArgs
 
 internal sealed class ObserverContextRequestedEventArgs : EventArgs
 {
-    internal ObserverContextRequestedEventArgs(ObserverPoint worldPoint, PointF controlPoint)
+    internal ObserverContextRequestedEventArgs(
+        ObserverPoint worldPoint,
+        PointF controlPoint,
+        Guid? destinationFolderId)
     {
         WorldPoint = worldPoint;
         ControlPoint = controlPoint;
+        DestinationFolderId = destinationFolderId;
     }
 
     internal ObserverPoint WorldPoint { get; }
     internal PointF ControlPoint { get; }
+    internal Guid? DestinationFolderId { get; }
+}
+
+internal sealed class ObserverPasteRequestedEventArgs(
+    Guid? destinationFolderId,
+    ObserverPointRecord? targetOrigin) : EventArgs
+{
+    internal Guid? DestinationFolderId { get; } = destinationFolderId;
+    internal ObserverPointRecord? TargetOrigin { get; } = targetOrigin;
 }

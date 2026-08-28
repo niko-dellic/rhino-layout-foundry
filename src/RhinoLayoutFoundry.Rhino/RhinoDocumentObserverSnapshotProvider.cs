@@ -27,6 +27,17 @@ internal sealed class RhinoDocumentObserverSnapshotProvider : IDocumentObserverS
             state = DocumentState.Empty();
         }
 
+        return Capture(document, state, _revisionTracker.Current(document));
+    }
+
+    internal static ObserverSnapshot Capture(
+        RhinoDoc document,
+        DocumentState state,
+        long revision)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        ArgumentNullException.ThrowIfNull(state);
+
         var documentName = string.IsNullOrWhiteSpace(document.Name)
             ? "Untitled Rhino document"
             : Path.GetFileNameWithoutExtension(document.Name);
@@ -38,7 +49,6 @@ internal sealed class RhinoDocumentObserverSnapshotProvider : IDocumentObserverS
                 folder.Id == state.RootFolderId ? documentName : folder.Name,
                 folder.Order))
             .ToArray();
-        var revision = _revisionTracker.Current(document);
         var sheets = document.Views.GetPageViews()
             .OrderBy(page => page.PageNumber)
             .Select(page =>
