@@ -753,6 +753,38 @@ public static class LayoutFoundryUiHost
         }
     }
 
+    public static async Task<OperationResult> UpdateProjectInformationAsync(
+        ProjectInformation information,
+        CancellationToken cancellationToken = default)
+    {
+        if (_snapshotProvider is null || _mutationService is null)
+            return UnavailableResult("Foundry is not connected to an active Rhino plug-in.");
+        try
+        {
+            var snapshot = _snapshotProvider.Capture();
+            var plan = new UpdateProjectInformationPlanner().Plan(
+                new UpdateProjectInformationRequest(
+                    snapshot.DocumentRuntimeSerialNumber,
+                    snapshot.Revision,
+                    information),
+                snapshot);
+            var result = plan.CanApply
+                ? await _mutationService.ApplyAsync(plan, cancellationToken)
+                : new OperationResult(false, plan.Diagnostics);
+            if (result.Succeeded)
+                NotifyOverviewChanged(new OverviewInvalidation(
+                    snapshot.DocumentRuntimeSerialNumber,
+                    OverviewInvalidationKind.Metadata |
+                    OverviewInvalidationKind.Thumbnails |
+                    OverviewInvalidationKind.Diagnostics));
+            return result;
+        }
+        catch (Exception exception)
+        {
+            return UnavailableResult(exception.Message);
+        }
+    }
+
     public static async Task<OperationResult> BatchUpdateSheetsAsync(
         BatchUpdateSheetsRequest request,
         CancellationToken cancellationToken = default)

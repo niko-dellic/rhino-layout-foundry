@@ -53,6 +53,14 @@ internal static class FoundryViewIcons
         graphics.DrawLine(pen, 4, 12, 14, 12);
     });
 
+    internal static Icon Search() => NewIcon(graphics =>
+    {
+        var color = FoundryTheme.PrimaryText;
+        var pen = new Pen(color, Emphasis);
+        graphics.DrawEllipse(pen, 2, 2, 8.5f, 8.5f);
+        graphics.DrawLine(pen, 9.25f, 9.25f, 14, 14);
+    });
+
     internal static Icon ThumbnailStack() => NewIcon(graphics =>
     {
         var color = FoundryTheme.PrimaryText;
@@ -111,6 +119,20 @@ internal static class FoundryViewIcons
         graphics.DrawEllipse(pen, 4.5f, 2, 4, 4);
         graphics.DrawEllipse(pen, 9.5f, 6, 4, 4);
         graphics.DrawEllipse(pen, 6.5f, 10, 4, 4);
+    });
+
+    internal static Icon ProjectInformation() => NewIcon(graphics =>
+    {
+        var color = FoundryTheme.PrimaryText;
+        var muted = FoundryTheme.WithAlpha(color, 155);
+        var pen = new Pen(color, Emphasis);
+        graphics.DrawRectangle(pen, 2, 1.5f, 12, 13);
+        graphics.DrawEllipse(new Pen(muted, Hairline), 4, 4, 3, 3);
+        graphics.DrawLine(new Pen(muted, Hairline), 3.75f, 9, 8, 9);
+        graphics.DrawLine(new Pen(muted, Hairline), 3.75f, 11.5f, 8, 11.5f);
+        graphics.DrawLine(pen, 9.5f, 5, 12.25f, 5);
+        graphics.DrawLine(pen, 9.5f, 7.5f, 12.25f, 7.5f);
+        graphics.DrawLine(pen, 9.5f, 10, 12.25f, 10);
     });
 
     internal static Icon Delete() => NewIcon(graphics =>

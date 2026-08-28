@@ -81,6 +81,29 @@ public sealed class BatchUpdateSheetsPlannerTests
         Assert.Contains(plan.Diagnostics, item => item.Code == "batch.title_block_missing");
     }
 
+    [Fact]
+    public void RevisionCanBeAppendedAcrossIncludedSheets()
+    {
+        var snapshot = EnrichedSnapshot();
+        var revision = new SheetRevisionRecord("P02", "2026-08-28", "Planning issue", "ND", "QA");
+        var plan = new BatchUpdateSheetsPlanner().Plan(new BatchUpdateSheetsRequest(
+            42,
+            1,
+            [TestSnapshots.SheetOneId, TestSnapshots.SheetTwoId],
+            null,
+            1,
+            1,
+            null,
+            null,
+            null,
+            null,
+            AppendRevision: revision), snapshot);
+
+        Assert.True(plan.CanApply);
+        var change = Assert.IsType<BatchUpdateSheetsChange>(Assert.Single(plan.Changes));
+        Assert.Equal("P02", change.AppendRevision!.Code);
+    }
+
     private static DocumentSnapshot EnrichedSnapshot()
     {
         var source = TestSnapshots.Create();

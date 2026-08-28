@@ -25,6 +25,8 @@ internal sealed class BatchPropertiesDialog : Dialog
     private readonly FilteredPicker _displayModePicker;
     private readonly CheckBox _titleBlockCheck;
     private readonly FilteredPicker _titleBlockPicker;
+    private readonly CheckBox _revisionCheck;
+    private readonly TextArea _revisionEditor;
     private readonly TextArea _review;
     private readonly Label _status;
     private readonly Button _applyButton;
@@ -74,6 +76,18 @@ internal sealed class BatchPropertiesDialog : Dialog
         _titleBlockPicker = new FilteredPicker(
             _titleBlocks.Select(choice => choice.Label),
             "Search title-block instances");
+        _revisionCheck = new CheckBox
+        {
+            Text = targets.Count == 1 ? "Replace revision schedule" : "Append revision to included layouts",
+        };
+        _revisionEditor = new TextArea
+        {
+            Height = 76,
+            Wrap = false,
+            ToolTip = "One row per line: Code | Date | Description | Issued by | Checked by",
+        };
+        if (targets.Count == 1 && snapshot.Sheets.GetValueOrDefault(targets[0].Key.Id)?.TitleBlockData is { } data)
+            _revisionEditor.Text = FormatRevisions(data.Revisions);
         _displayModePicker.Opened += (_, _) => _titleBlockPicker.CloseResults();
         _titleBlockPicker.Opened += (_, _) => _displayModePicker.CloseResults();
         var firstTitleBlock = targets.Count == 1
@@ -91,7 +105,7 @@ internal sealed class BatchPropertiesDialog : Dialog
         AbortButton = cancel;
 
         var targetGrid = CreateTargetGrid();
-        foreach (var check in new[] { _renameCheck, _paperCheck, _displayModeCheck, _titleBlockCheck })
+        foreach (var check in new[] { _renameCheck, _paperCheck, _displayModeCheck, _titleBlockCheck, _revisionCheck })
             check.CheckedChanged += (_, _) => RefreshEditor();
         _patternBox.TextChanged += (_, _) => RefreshEditor();
         _startStepper.ValueChanged += (_, _) => RefreshEditor();
@@ -101,6 +115,7 @@ internal sealed class BatchPropertiesDialog : Dialog
         _unitDropDown.SelectedIndexChanged += (_, _) => RefreshEditor();
         _displayModePicker.ValueChanged += (_, _) => RefreshEditor();
         _titleBlockPicker.ValueChanged += (_, _) => RefreshEditor();
+        _revisionEditor.TextChanged += (_, _) => RefreshEditor();
         _paperPreset.SelectedIndexChanged += (_, _) => ApplyPreset();
 
         Content = new StackLayout
@@ -127,6 +142,7 @@ internal sealed class BatchPropertiesDialog : Dialog
                                 {
                                     PropertyCard("Details", _displayModeCheck, CreateDisplayEditor()),
                                     PropertyCard("Title block", _titleBlockCheck, CreateTitleBlockEditor()),
+                                    PropertyCard("Revisions", _revisionCheck, CreateRevisionEditor()),
                                 },
                             }, true)),
                     },
@@ -227,6 +243,18 @@ internal sealed class BatchPropertiesDialog : Dialog
         },
     };
 
+    private Control CreateRevisionEditor() => new StackLayout
+    {
+        Spacing = FoundryTheme.Space2,
+        Items =
+        {
+            FoundryTheme.MutedLabel(_targets.Length == 1
+                ? "Edit, remove, or reorder rows. Use: Code | Date | Description | Issued by | Checked by"
+                : "Enter one row to append: Code | Date | Description | Issued by | Checked by"),
+            _revisionEditor,
+        },
+    };
+
     private static Control PropertyCard(string title, CheckBox toggle, Control editor) =>
         FoundryTheme.Surface(new StackLayout
         {
@@ -254,6 +282,7 @@ internal sealed class BatchPropertiesDialog : Dialog
                 _titleBlockPicker.Text.Trim(),
                 StringComparison.OrdinalIgnoreCase))
             : null;
+        var revisions = ParseRevisions(out _);
         return new BatchUpdateSheetsRequest(
             _snapshot.DocumentRuntimeSerialNumber,
             _snapshot.Revision,
@@ -266,7 +295,9 @@ internal sealed class BatchPropertiesDialog : Dialog
             _paperCheck.Checked == true ? _unitDropDown.SelectedValue?.ToString() : null,
             modeId,
             changesTitleBlock,
-            titleBlockChoice?.InstanceObjectId);
+            titleBlockChoice?.InstanceObjectId,
+            ReplaceRevisionSchedule: _revisionCheck.Checked == true && _targets.Length == 1 ? revisions : null,
+            AppendRevision: _revisionCheck.Checked == true && _targets.Length > 1 ? revisions.FirstOrDefault() : null);
     }
 
     private void RefreshEditor()
@@ -284,6 +315,8 @@ internal sealed class BatchPropertiesDialog : Dialog
         _displayModePicker.Enabled = display;
         var titleBlock = _titleBlockCheck.Checked == true;
         _titleBlockPicker.Enabled = titleBlock;
+        var revisionsEnabled = _revisionCheck.Checked == true;
+        _revisionEditor.Enabled = revisionsEnabled;
 
         var plan = new BatchUpdateSheetsPlanner().Plan(Request(), _snapshot);
         var change = plan.Changes.OfType<BatchUpdateSheetsChange>().SingleOrDefault();
@@ -306,6 +339,10 @@ internal sealed class BatchPropertiesDialog : Dialog
                     ? "Title block  →  Remove assigned title block"
                     : $"Title block  →  {choice?.Label ?? "Unavailable instance"}");
             }
+            if (change.ReplaceRevisionSchedule is { } replacements)
+                review.Add($"Revision schedule  →  {replacements.Count} row{(replacements.Count == 1 ? string.Empty : "s")}");
+            if (change.AppendRevision is { } appended)
+                review.Add($"Append revision  →  {FormatRevision(appended)}");
         }
         _review.Text = review.Count == 0 ? "Choose a property to change." : string.Join(Environment.NewLine, review);
         var localError = display && !_displayModes.Values.Any(name =>
@@ -316,9 +353,39 @@ internal sealed class BatchPropertiesDialog : Dialog
             string.Equals(choice.Label, _titleBlockPicker.Text.Trim(), StringComparison.OrdinalIgnoreCase))
             ? "Choose an available title-block instance or Remove title block."
             : null;
+        ParseRevisions(out var revisionError);
+        localError ??= revisionsEnabled ? revisionError : null;
         _status.Text = localError ?? string.Join(" ", plan.Diagnostics.Select(item => item.Message));
         _applyButton.Enabled = plan.CanApply && localError is null;
     }
+
+    private IReadOnlyList<SheetRevisionRecord> ParseRevisions(out string? error)
+    {
+        error = null;
+        var result = new List<SheetRevisionRecord>();
+        var lines = _revisionEditor.Text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
+        foreach (var raw in lines)
+        {
+            var parts = raw.Split('|').Select(part => part.Trim()).ToArray();
+            if (parts.Length is < 1 or > 5)
+            {
+                error = "Revision rows must contain at most five pipe-separated values.";
+                return result;
+            }
+            Array.Resize(ref parts, 5);
+            for (var index = 0; index < parts.Length; index++) parts[index] ??= string.Empty;
+            result.Add(new SheetRevisionRecord(parts[0], parts[1], parts[2], parts[3], parts[4]));
+        }
+        if (_targets.Length > 1 && result.Count != 1)
+            error = "Enter exactly one revision row when editing multiple layouts.";
+        return result;
+    }
+
+    private static string FormatRevisions(IEnumerable<SheetRevisionRecord> revisions) =>
+        string.Join(Environment.NewLine, revisions.Select(FormatRevision));
+
+    private static string FormatRevision(SheetRevisionRecord revision) => string.Join(" | ",
+        revision.Code, revision.Date, revision.Description, revision.IssuedBy, revision.CheckedBy);
 
     private async Task ApplyAsync()
     {

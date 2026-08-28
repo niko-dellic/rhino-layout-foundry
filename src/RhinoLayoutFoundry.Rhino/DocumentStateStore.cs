@@ -63,6 +63,8 @@ internal sealed class DocumentStateStore
             SchemaVersion = writeVersion,
             ObserverCanvas = writeVersion >= 4 ? state.Canvas : null,
             ImportRecovery = writeVersion >= 5 ? state.Recovery : null,
+            DedicatedDetailLayerId = writeVersion >= 6 ? state.DedicatedDetailLayerId : null,
+            ProjectData = writeVersion >= 7 ? state.ProjectInfo : null,
         };
         var envelope = new ArchivableDictionary(1, "RhinoLayoutFoundry.DocumentState");
         envelope.Set(SchemaVersionKey, writeVersion);

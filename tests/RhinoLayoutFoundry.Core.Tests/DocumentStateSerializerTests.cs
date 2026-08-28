@@ -63,7 +63,13 @@ public sealed class DocumentStateSerializerTests
                 {
                     [sheetId] = new(240, 80),
                 }),
-            DedicatedDetailLayerId: detailLayerId);
+            DedicatedDetailLayerId: detailLayerId,
+            ProjectData: ProjectInformation.Empty with
+            {
+                ProjectName = "Civic Library",
+                FirmName = "Foundry Architects",
+                DefaultRevision = new SheetRevisionRecord("P01", "2026-08-28", "Permit", "ND", "QA"),
+            });
 
         var restored = DocumentStateSerializer.Deserialize(DocumentStateSerializer.Serialize(state));
 
@@ -82,6 +88,8 @@ public sealed class DocumentStateSerializerTests
         Assert.Equal(new ObserverPointRecord(12.5, -4), restored.Canvas.FolderOrigins[folder.Id]);
         Assert.Equal(new ObserverPointRecord(240, 80), restored.Canvas.SheetPlacements[sheetId]);
         Assert.Equal(detailLayerId, restored.DedicatedDetailLayerId);
+        Assert.Equal("Civic Library", restored.ProjectInfo.ProjectName);
+        Assert.Equal("P01", restored.ProjectInfo.DefaultRevision!.Code);
     }
 
     [Fact]
@@ -176,6 +184,24 @@ public sealed class DocumentStateSerializerTests
         Assert.Equal(DocumentState.CurrentSchemaVersion, restored.SchemaVersion);
         Assert.Null(restored.DedicatedDetailLayerId);
         Assert.Single(restored.Recovery);
+    }
+
+    [Fact]
+    public void VersionSixStateMigratesWithEmptyProjectInformation()
+    {
+        var detailLayerId = Guid.NewGuid();
+        var payload = DocumentStateSerializer.Serialize(DocumentState.Empty() with
+            {
+                DedicatedDetailLayerId = detailLayerId,
+                ProjectData = ProjectInformation.Empty with { ProjectName = "Not in schema six" },
+            })
+            .Replace($"\"SchemaVersion\":{DocumentState.CurrentSchemaVersion}", "\"SchemaVersion\":6", StringComparison.Ordinal)
+            .Replace(",\"ProjectData\":{\"ProjectName\":\"Not in schema six\",\"ProjectNumber\":\"\",\"ClientName\":\"\",\"SiteAddress\":\"\",\"ProjectPhase\":\"\",\"ProjectStatus\":\"\",\"FirmName\":\"\",\"FirmAddress\":\"\",\"FirmPhone\":\"\",\"FirmEmail\":\"\",\"FirmWebsite\":\"\",\"FirmRegistration\":\"\",\"IssueDate\":\"\",\"IssuePurpose\":\"\",\"DrawnBy\":\"\",\"CheckedBy\":\"\",\"ApprovedBy\":\"\",\"CustomFields\":{},\"Logo\":null,\"DefaultRevision\":null}", string.Empty, StringComparison.Ordinal);
+
+        var restored = DocumentStateSerializer.Deserialize(payload);
+
+        Assert.Equal(detailLayerId, restored.DedicatedDetailLayerId);
+        Assert.Equal(string.Empty, restored.ProjectInfo.ProjectName);
     }
 
     [Fact]

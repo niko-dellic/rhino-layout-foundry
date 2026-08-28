@@ -60,7 +60,8 @@ public sealed record LayoutPackageSheet(
     IReadOnlyList<string> Tags,
     IReadOnlyDictionary<string, string> Metadata,
     TitleBlockRole? TitleBlock,
-    bool IncludeInPrintAll);
+    bool IncludeInPrintAll,
+    SheetTitleBlockData? TitleBlockData = null);
 
 public sealed record LayoutPackageDetail(
     Guid SourceDetailViewportId,

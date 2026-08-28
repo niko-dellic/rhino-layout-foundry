@@ -47,6 +47,8 @@ public sealed class ObserverFoundryPanel : Panel
 
     internal event EventHandler<DeleteSelectionRequestedEventArgs>? DeleteSelectionRequested;
 
+    internal void FocusContent() => _canvas.Focus();
+
     public ObserverFoundryPanel()
     {
         BackgroundColor = FoundryTheme.PanelBackground;

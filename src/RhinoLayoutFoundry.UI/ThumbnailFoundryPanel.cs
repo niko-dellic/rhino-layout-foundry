@@ -128,6 +128,8 @@ internal sealed class ThumbnailFoundryPanel : Panel
     private static FoundryToolbarIconButton ToolbarButton(Image image, string toolTip) =>
         new(image, toolTip);
 
+    internal void FocusContent() => _grid.Focus();
+
     internal void SetFilter(OverviewFilterProjection projection)
     {
         _filter = projection ?? throw new ArgumentNullException(nameof(projection));

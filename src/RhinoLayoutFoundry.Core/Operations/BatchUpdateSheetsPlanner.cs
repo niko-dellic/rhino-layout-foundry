@@ -16,7 +16,9 @@ public sealed record BatchUpdateSheetsRequest(
     string? PaperUnitSystem,
     Guid? DetailDisplayModeId,
     bool ChangeTitleBlock = false,
-    Guid? TitleBlockSourceInstanceObjectId = null);
+    Guid? TitleBlockSourceInstanceObjectId = null,
+    IReadOnlyList<SheetRevisionRecord>? ReplaceRevisionSchedule = null,
+    SheetRevisionRecord? AppendRevision = null);
 
 public sealed class BatchUpdateSheetsPlanner : IOperationPlanner<BatchUpdateSheetsRequest>
 {
@@ -57,6 +59,10 @@ public sealed class BatchUpdateSheetsPlanner : IOperationPlanner<BatchUpdateShee
         if (request.ChangeTitleBlock && request.TitleBlockSourceInstanceObjectId is { } sourceId &&
             !snapshot.TitleBlockInstances.ContainsKey(sourceId))
             diagnostics.Add(Error("batch.title_block_missing", "The selected title-block instance is no longer available."));
+        if (request.ReplaceRevisionSchedule is not null && request.AppendRevision is not null)
+            diagnostics.Add(Error("batch.revision_mode", "Choose either replacement or append revision editing."));
+        if (request.AppendRevision is { } revision && RevisionIsEmpty(revision))
+            diagnostics.Add(Error("batch.revision_empty", "Enter at least one revision value."));
 
         var pattern = request.NamingPattern?.Trim();
         var newNames = new Dictionary<Guid, string>();
@@ -89,7 +95,7 @@ public sealed class BatchUpdateSheetsPlanner : IOperationPlanner<BatchUpdateShee
         }
 
         if (string.IsNullOrWhiteSpace(pattern) && !changesPaper && request.DetailDisplayModeId is null &&
-            !request.ChangeTitleBlock)
+            !request.ChangeTitleBlock && request.ReplaceRevisionSchedule is null && request.AppendRevision is null)
             diagnostics.Add(Error("batch.no_changes", "Choose at least one property to change."));
 
         IReadOnlyList<OperationChange> changes = diagnostics.Any(item => item.Severity == DiagnosticSeverity.Error)
@@ -102,7 +108,9 @@ public sealed class BatchUpdateSheetsPlanner : IOperationPlanner<BatchUpdateShee
                 changesPaper ? request.PaperUnitSystem : null,
                 request.DetailDisplayModeId,
                 request.ChangeTitleBlock,
-                request.TitleBlockSourceInstanceObjectId)];
+                request.TitleBlockSourceInstanceObjectId,
+                request.ReplaceRevisionSchedule,
+                request.AppendRevision)];
         if (changes.Count > 0)
             diagnostics.Add(new Diagnostic("batch.undo_unavailable", DiagnosticSeverity.Warning,
                 "Rhino does not expose native Undo for these layout properties. Foundry restores every before-value if Apply fails."));
@@ -112,4 +120,8 @@ public sealed class BatchUpdateSheetsPlanner : IOperationPlanner<BatchUpdateShee
 
     private static Diagnostic Error(string code, string message) =>
         new(code, DiagnosticSeverity.Error, message);
+
+    private static bool RevisionIsEmpty(SheetRevisionRecord revision) =>
+        new[] { revision.Code, revision.Date, revision.Description, revision.IssuedBy, revision.CheckedBy }
+            .All(string.IsNullOrWhiteSpace);
 }

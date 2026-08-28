@@ -61,6 +61,10 @@ internal static class FoundryTheme
         () => AppearanceSettings.SelectedObjectColor,
         Color.FromArgb(59, 130, 246, 255));
 
+    internal static Color DangerAccent => IsDarkMode
+        ? Color.FromArgb(239, 68, 68, 255)
+        : Color.FromArgb(220, 38, 38, 255);
+
     internal static Color SelectionWindowStroke(bool crossing) => RhinoColor(
         () => crossing
             ? AppearanceSettings.SelectionWindowCrossingStrokeColor

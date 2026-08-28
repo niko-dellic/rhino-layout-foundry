@@ -310,7 +310,8 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
                     record.Tags,
                     record.Metadata,
                     record.TitleBlock,
-                    record.IncludeInPrintAll));
+                    record.IncludeInPrintAll,
+                    record.TitleBlockData));
             }
 
             foreach (var rule in state.DisplayRules) referencedDisplayModes.Add(rule.DisplayModeId);
@@ -1024,7 +1025,8 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
                 source.Tags,
                 source.Metadata,
                 titleBlock,
-                source.IncludeInPrintAll);
+                source.IncludeInPrintAll,
+                source.TitleBlockData);
         }
 
         var recovery = (mode == LayoutPackageImportMode.Merge ? before.Recovery : [])
@@ -1119,7 +1121,44 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
             templates,
             canvas,
             recovery,
-            before.DedicatedDetailLayerId);
+            before.DedicatedDetailLayerId,
+            mode == LayoutPackageImportMode.Replace
+                ? manifest.FoundryState.ProjectInfo
+                : MergeProjectInformation(before.ProjectInfo, manifest.FoundryState.ProjectInfo));
+    }
+
+    private static ProjectInformation MergeProjectInformation(
+        ProjectInformation destination,
+        ProjectInformation source)
+    {
+        static string Prefer(string destinationValue, string sourceValue) =>
+            string.IsNullOrWhiteSpace(destinationValue) ? sourceValue : destinationValue;
+        var custom = destination.CustomFields
+            .Concat(source.CustomFields.Where(pair => !destination.CustomFields.ContainsKey(pair.Key)))
+            .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
+        return destination with
+        {
+            ProjectName = Prefer(destination.ProjectName, source.ProjectName),
+            ProjectNumber = Prefer(destination.ProjectNumber, source.ProjectNumber),
+            ClientName = Prefer(destination.ClientName, source.ClientName),
+            SiteAddress = Prefer(destination.SiteAddress, source.SiteAddress),
+            ProjectPhase = Prefer(destination.ProjectPhase, source.ProjectPhase),
+            ProjectStatus = Prefer(destination.ProjectStatus, source.ProjectStatus),
+            FirmName = Prefer(destination.FirmName, source.FirmName),
+            FirmAddress = Prefer(destination.FirmAddress, source.FirmAddress),
+            FirmPhone = Prefer(destination.FirmPhone, source.FirmPhone),
+            FirmEmail = Prefer(destination.FirmEmail, source.FirmEmail),
+            FirmWebsite = Prefer(destination.FirmWebsite, source.FirmWebsite),
+            FirmRegistration = Prefer(destination.FirmRegistration, source.FirmRegistration),
+            IssueDate = Prefer(destination.IssueDate, source.IssueDate),
+            IssuePurpose = Prefer(destination.IssuePurpose, source.IssuePurpose),
+            DrawnBy = Prefer(destination.DrawnBy, source.DrawnBy),
+            CheckedBy = Prefer(destination.CheckedBy, source.CheckedBy),
+            ApprovedBy = Prefer(destination.ApprovedBy, source.ApprovedBy),
+            CustomFields = custom,
+            Logo = destination.Logo ?? source.Logo,
+            DefaultRevision = destination.DefaultRevision ?? source.DefaultRevision,
+        };
     }
 
     private static ObserverCanvasState RemapCanvas(

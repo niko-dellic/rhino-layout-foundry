@@ -24,7 +24,7 @@ public static class DocumentStateSerializer
         var state = JsonSerializer.Deserialize<DocumentState>(payload, Options)
             ?? throw new JsonException("The document state payload was empty.");
 
-        if (state.SchemaVersion is 1 or 2 or 3 or 4 or 5)
+        if (state.SchemaVersion is 1 or 2 or 3 or 4 or 5 or 6)
         {
             return state with
             {
@@ -37,7 +37,8 @@ public static class DocumentStateSerializer
                     : state.Sheets,
                 ObserverCanvas = state.SchemaVersion < 4 ? ObserverCanvasState.Empty : state.Canvas,
                 ImportRecovery = state.SchemaVersion < 5 ? [] : state.Recovery,
-                DedicatedDetailLayerId = null,
+                DedicatedDetailLayerId = state.SchemaVersion < 6 ? null : state.DedicatedDetailLayerId,
+                ProjectData = ProjectInformation.Empty,
             };
         }
 
@@ -47,6 +48,11 @@ public static class DocumentStateSerializer
                 $"Document state schema {state.SchemaVersion} is not supported; expected {DocumentState.CurrentSchemaVersion}.");
         }
 
-        return state with { ObserverCanvas = state.Canvas, ImportRecovery = state.Recovery };
+        return state with
+        {
+            ObserverCanvas = state.Canvas,
+            ImportRecovery = state.Recovery,
+            ProjectData = state.ProjectInfo,
+        };
     }
 }

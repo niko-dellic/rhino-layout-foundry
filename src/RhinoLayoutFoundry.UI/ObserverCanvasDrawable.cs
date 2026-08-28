@@ -397,12 +397,19 @@ internal sealed class ObserverCanvasDrawable : Drawable
                 FoundryTheme.CanvasSubtleSurface,
                 emphasized ? 220 : 55),
             bounds.X, bounds.Y, bounds.Width, (float)Math.Min(bounds.Height, headerHeight));
+        var headerColor = emphasized
+            ? FoundryTheme.PrimaryText
+            : FoundryTheme.WithAlpha(FoundryTheme.PrimaryText, 64);
+        FoundryHierarchyIcons.DrawFolder(
+            graphics,
+            headerColor,
+            new RectangleF(bounds.X + 10, bounds.Y + 5, 14, 14));
         graphics.DrawText(
             _folderFont,
-            emphasized ? FoundryTheme.PrimaryText : FoundryTheme.WithAlpha(FoundryTheme.PrimaryText, 64),
-            bounds.X + 10,
+            headerColor,
+            bounds.X + 30,
             bounds.Y + 6,
-            $"▾  {frame.Folder.Name}   ·   {frame.DirectSheetCount} layout{(frame.DirectSheetCount == 1 ? string.Empty : "s")}");
+            $"{frame.Folder.Name}   ·   {frame.DirectSheetCount} layout{(frame.DirectSheetCount == 1 ? string.Empty : "s")}");
     }
 
     private void DrawSheet(Graphics graphics, ObserverSheetCard card, ObserverSize viewport)
@@ -468,10 +475,17 @@ internal sealed class ObserverCanvasDrawable : Drawable
                 "↕");
         }
 
+        var labelColor = emphasized
+            ? FoundryTheme.PrimaryText
+            : FoundryTheme.WithAlpha(FoundryTheme.PrimaryText, 64);
+        FoundryHierarchyIcons.DrawLayout(
+            graphics,
+            labelColor,
+            new RectangleF(bounds.Left, bounds.Bottom + 4, 14, 14));
         graphics.DrawText(
             _sheetFont,
-            emphasized ? FoundryTheme.PrimaryText : FoundryTheme.WithAlpha(FoundryTheme.PrimaryText, 64),
-            bounds.Left,
+            labelColor,
+            bounds.Left + 20,
             bounds.Bottom + 5,
             card.Sheet.Name);
         if (selected && _dragMode == DragMode.Sheets && _dragWorldDelta != new ObserverPoint())
@@ -609,11 +623,27 @@ internal sealed class ObserverCanvasDrawable : Drawable
                     y + 5,
                     row.IsExpanded ? "▾" : "▸");
             }
+            var rowColor = emphasized
+                ? FoundryTheme.PrimaryText
+                : FoundryTheme.WithAlpha(FoundryTheme.MutedText, 80);
+            var iconBounds = new RectangleF(disclosureX + 16, y + 5, 14, 14);
+            switch (row.Key.Kind)
+            {
+                case OverviewNodeKind.Folder:
+                    FoundryHierarchyIcons.DrawFolder(graphics, rowColor, iconBounds);
+                    break;
+                case OverviewNodeKind.Sheet:
+                    FoundryHierarchyIcons.DrawLayout(graphics, rowColor, iconBounds);
+                    break;
+                case OverviewNodeKind.Detail:
+                    FoundryHierarchyIcons.DrawDetail(graphics, rowColor, iconBounds);
+                    break;
+            }
             DrawOverlayText(
                 graphics,
                 _sheetFont,
-                emphasized ? FoundryTheme.PrimaryText : FoundryTheme.WithAlpha(FoundryTheme.MutedText, 80),
-                disclosureX + 16,
+                rowColor,
+                disclosureX + 36,
                 y + 5,
                 row.Label);
             if (row.IsDraft)
@@ -913,7 +943,7 @@ internal sealed class ObserverCanvasDrawable : Drawable
         var result = _navigatorRows.ToList();
         result.Insert(insertionIndex, new CanvasNavigatorRow(
             new OverviewNodeKey(OverviewNodeKind.Folder, draft.Id),
-            $"📁  {draft.Name}",
+            draft.Name,
             parentDepth + 1,
             IsDraft: true));
         return result.ToArray();
@@ -1021,7 +1051,7 @@ internal sealed class ObserverCanvasDrawable : Drawable
             var expanded = !_collapsedNavigatorFolders.Contains(folder.Id);
             rows.Add(new CanvasNavigatorRow(
                 new OverviewNodeKey(OverviewNodeKind.Folder, folder.Id),
-                $"📁  {folder.Name}",
+                folder.Name,
                 depth,
                 CanExpand: canExpand,
                 IsExpanded: expanded));
@@ -1033,7 +1063,7 @@ internal sealed class ObserverCanvasDrawable : Drawable
                 var sheetExpanded = _expandedNavigatorSheets.Contains(sheet.PageViewId);
                 rows.Add(new CanvasNavigatorRow(
                     new OverviewNodeKey(OverviewNodeKind.Sheet, sheet.PageViewId),
-                    $"▣  {sheet.Name}",
+                    sheet.Name,
                     depth + 1,
                     CanExpand: sheet.Details.Count > 0,
                     IsExpanded: sheetExpanded));
@@ -1041,7 +1071,7 @@ internal sealed class ObserverCanvasDrawable : Drawable
                 foreach (var detail in sheet.Details)
                     rows.Add(new CanvasNavigatorRow(
                         new OverviewNodeKey(OverviewNodeKind.Detail, detail.DetailViewportId),
-                        $"⌗  {detail.Name}",
+                        detail.Name,
                         depth + 2));
             }
         }

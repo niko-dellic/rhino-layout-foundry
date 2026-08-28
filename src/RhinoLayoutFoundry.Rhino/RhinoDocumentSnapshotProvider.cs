@@ -91,7 +91,8 @@ internal sealed class RhinoDocumentSnapshotProvider : IDocumentSnapshotProvider
                     detailSettings,
                     titleBlock?.InstanceObjectId,
                     titleBlockName,
-                    record?.IncludeInPrintAll ?? true);
+                    record?.IncludeInPrintAll ?? true,
+                    record?.TitleBlockData);
             })
             .ToDictionary(sheet => sheet.PageViewId);
 
@@ -120,7 +121,8 @@ internal sealed class RhinoDocumentSnapshotProvider : IDocumentSnapshotProvider
             document.InstanceDefinitions.Select(definition => definition.Id).ToHashSet(),
             displayModeNames,
             titleBlockInstances,
-            state.Canvas);
+            state.Canvas,
+            state.ProjectInfo);
     }
 
     private static IReadOnlyList<double> TransformValues(global::Rhino.Geometry.Transform transform) =>

@@ -11,13 +11,18 @@ namespace RhinoLayoutFoundry.UI;
 internal sealed class FoundryToolbarField : Panel
 {
     private readonly Control _input;
+    private readonly Control _interactionControl;
     private readonly Panel _underline;
     private bool _hovered;
     private bool _focused;
 
-    internal FoundryToolbarField(Control input, int width)
+    internal FoundryToolbarField(
+        Control input,
+        int width,
+        Control? interactionControl = null)
     {
         _input = input ?? throw new ArgumentNullException(nameof(input));
+        _interactionControl = interactionControl ?? input;
         Width = width;
         Height = 28;
         BackgroundColor = Colors.Transparent;
@@ -48,22 +53,22 @@ internal sealed class FoundryToolbarField : Panel
             _hovered = false;
             UpdateUnderline();
         };
-        _input.GotFocus += (_, _) =>
+        _interactionControl.GotFocus += (_, _) =>
         {
             _focused = true;
             UpdateUnderline();
         };
-        _input.LostFocus += (_, _) =>
+        _interactionControl.LostFocus += (_, _) =>
         {
             _focused = false;
             UpdateUnderline();
         };
-        _input.EnabledChanged += (_, _) => UpdateUnderline();
+        _interactionControl.EnabledChanged += (_, _) => UpdateUnderline();
     }
 
     private void UpdateUnderline()
     {
-        _underline.BackgroundColor = !_input.Enabled
+        _underline.BackgroundColor = !_interactionControl.Enabled
             ? Colors.Transparent
             : _focused
                 ? FoundryTheme.SelectionAccent

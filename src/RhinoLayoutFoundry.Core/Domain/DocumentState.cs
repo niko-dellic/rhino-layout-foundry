@@ -17,9 +17,10 @@ public sealed record DocumentState(
     IReadOnlyList<SheetTemplateRecipe>? SheetTemplates = null,
     ObserverCanvasState? ObserverCanvas = null,
     IReadOnlyList<ImportRecoveryRecord>? ImportRecovery = null,
-    Guid? DedicatedDetailLayerId = null)
+    Guid? DedicatedDetailLayerId = null,
+    ProjectInformation? ProjectData = null)
 {
-    public const int CurrentSchemaVersion = 6;
+    public const int CurrentSchemaVersion = 7;
 
     [JsonIgnore]
     public IReadOnlyList<SheetTemplateRecipe> Templates => SheetTemplates ?? [];
@@ -29,6 +30,9 @@ public sealed record DocumentState(
 
     [JsonIgnore]
     public IReadOnlyList<ImportRecoveryRecord> Recovery => ImportRecovery ?? [];
+
+    [JsonIgnore]
+    public ProjectInformation ProjectInfo => ProjectData ?? ProjectInformation.Empty;
 
     public static DocumentState Empty()
     {
@@ -104,9 +108,11 @@ public sealed record SheetRecord(
     IReadOnlyList<string> Tags,
     IReadOnlyDictionary<string, string> Metadata,
     TitleBlockRole? TitleBlock,
-    bool IncludeInPrintAll = true);
+    bool IncludeInPrintAll = true,
+    SheetTitleBlockData? TitleBlockData = null);
 
 public sealed record TitleBlockRole(
     Guid InstanceObjectId,
     Guid InstanceDefinitionId,
-    string AnchorName);
+    string AnchorName,
+    BuiltInTitleBlockKind? BuiltInKind = null);

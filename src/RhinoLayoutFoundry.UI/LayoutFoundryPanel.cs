@@ -16,7 +16,7 @@ public sealed class LayoutFoundryPanel : Panel
     private readonly Label _emptyDescriptionLabel;
     private readonly Label _summaryLabel;
     private readonly Label _statusLabel;
-    private readonly SearchBox _filterTextBox;
+    private readonly TextBox _filterTextBox;
     private readonly DropDown _filterKindDropDown;
     private readonly FoundryToolbarIconButton _clearFilterButton;
     private readonly FoundryToolbarField _searchField;
@@ -32,6 +32,7 @@ public sealed class LayoutFoundryPanel : Panel
     private readonly FoundryToolbarIconButton _addFolderButton;
     private readonly FoundryToolbarIconButton _batchCreateButton;
     private readonly FoundryToolbarIconButton _deleteButton;
+    private readonly FoundryToolbarIconButton _projectInfoButton;
     private readonly FoundryToolbarIconButton _importButton;
     private readonly FoundryToolbarIconButton _exportButton;
     private readonly FoundryToolbarIconButton _listViewButton;
@@ -128,7 +129,7 @@ public sealed class LayoutFoundryPanel : Panel
         _statusLabel = FoundryTheme.MutedLabel();
         _statusLabel.TextAlignment = TextAlignment.Right;
 
-        _filterTextBox = new SearchBox
+        _filterTextBox = new TextBox
         {
             PlaceholderText = "Search",
             ToolTip = "Search layouts, folders, and details",
@@ -143,7 +144,22 @@ public sealed class LayoutFoundryPanel : Panel
             DataStore = new[] { "All rows", "Sheets", "Details" },
             SelectedIndex = 0,
         };
-        _searchField = new FoundryToolbarField(_filterTextBox, 240);
+        var searchInput = new StackLayout
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = FoundryTheme.Space1,
+            VerticalContentAlignment = VerticalAlignment.Center,
+            Items =
+            {
+                new ImageView
+                {
+                    Image = FoundryViewIcons.Search(),
+                    Size = new Size(16, 16),
+                },
+                new StackLayoutItem(_filterTextBox, expand: true),
+            },
+        };
+        _searchField = new FoundryToolbarField(searchInput, 240, _filterTextBox);
         _filterKindField = new FoundryToolbarField(_filterKindDropDown, 96);
         _clearFilterButton = new FoundryToolbarIconButton(
             FoundryViewIcons.Close(),
@@ -188,6 +204,12 @@ public sealed class LayoutFoundryPanel : Panel
         _deleteButton = new FoundryToolbarIconButton(
             FoundryViewIcons.Delete(),
             "Delete selected items")
+        {
+            Enabled = false,
+        };
+        _projectInfoButton = new FoundryToolbarIconButton(
+            FoundryViewIcons.ProjectInformation(),
+            "Edit project information")
         {
             Enabled = false,
         };
@@ -309,12 +331,14 @@ public sealed class LayoutFoundryPanel : Panel
             if (eventArgs.Item is HierarchyTreeItem item) _collapsedNodeKeys.Remove(item.Node.Key);
         };
         _filterTextBox.TextChanged += (_, _) => OnFilterChanged();
+        _filterTextBox.KeyDown += OnSearchKeyDown;
         _filterKindDropDown.SelectedIndexChanged += (_, _) => OnFilterChanged();
         _clearFilterButton.Click += (_, _) => ClearFilter();
         _addFolderButton.Click += (_, _) => BeginFolderCreationForCurrentView();
         _batchCreateButton.Click += (_, _) => OpenCreateLayouts(ResolveCreationDestinationFolderId());
         _manageButton.Click += (_, _) => OpenBatchProperties();
         _deleteButton.Click += (_, _) => RequestDeleteSelection(SelectedKeys());
+        _projectInfoButton.Click += (_, _) => OpenProjectInformation();
         _importButton.Click += async (_, _) => await ImportLayoutPackageAsync();
         _exportButton.Click += async (_, _) => await ExportLayoutPackageAsync();
         _listViewButton.Click += (_, _) => ShowListView();
@@ -513,8 +537,21 @@ public sealed class LayoutFoundryPanel : Panel
             {
                 new ImageView { Image = FoundryViewIcons.BrandMark() },
                 title,
+                new StackLayoutItem(null, true),
             },
         };
+    }
+
+    private void OpenProjectInformation()
+    {
+        var snapshot = LayoutFoundryUiHost.CaptureSnapshot();
+        if (snapshot is null)
+        {
+            _statusLabel.Text = "Open a Rhino document before editing project information.";
+            return;
+        }
+        new ProjectInformationDialog(snapshot.ProjectInfo).ShowModal(this);
+        RefreshOverview();
     }
 
     public void ShowListView() => SetViewMode(FoundryPanelViewMode.List);
@@ -755,6 +792,13 @@ public sealed class LayoutFoundryPanel : Panel
                     Height = 20,
                     BackgroundColor = FoundryTheme.CanvasBorder,
                 },
+                _projectInfoButton,
+                new Panel
+                {
+                    Width = 1,
+                    Height = 20,
+                    BackgroundColor = FoundryTheme.CanvasBorder,
+                },
                 _importButton,
                 _exportButton,
                 new StackLayoutItem(null, expand: true),
@@ -929,10 +973,35 @@ public sealed class LayoutFoundryPanel : Panel
 
     private void OnFilterChanged()
     {
-        // SearchBox already supplies its platform-native cancel affordance.
-        // Keep the explicit reset action only when a row-kind filter is active.
-        _clearFilterButton.Visible = _filterKindDropDown.SelectedIndex != 0;
+        _clearFilterButton.Visible =
+            !string.IsNullOrWhiteSpace(_filterTextBox.Text) ||
+            _filterKindDropDown.SelectedIndex != 0;
         PopulateTree();
+    }
+
+    private void OnSearchKeyDown(object? sender, KeyEventArgs eventArgs)
+    {
+        if (eventArgs.Key != Keys.Escape)
+            return;
+
+        eventArgs.Handled = true;
+        Application.Instance.AsyncInvoke(FocusActiveView);
+    }
+
+    private void FocusActiveView()
+    {
+        switch (_viewMode)
+        {
+            case FoundryPanelViewMode.Thumbnail:
+                _thumbnailView.FocusContent();
+                break;
+            case FoundryPanelViewMode.Canvas:
+                _observerView.FocusContent();
+                break;
+            default:
+                _treeGrid.Focus();
+                break;
+        }
     }
 
     private void ClearFilter()
@@ -1671,6 +1740,7 @@ public sealed class LayoutFoundryPanel : Panel
 
         _importButton.Enabled = _overview.DocumentRuntimeSerialNumber is not null;
         _exportButton.Enabled = _overview.DocumentRuntimeSerialNumber is not null;
+        _projectInfoButton.Enabled = _overview.DocumentRuntimeSerialNumber is not null;
         _batchCreateButton.Enabled = _overview.DocumentRuntimeSerialNumber is not null;
         var destinationId = ResolveCreationDestinationFolderId();
         var destinationName = destinationId is { } id ? FolderDestinationName(id) : "Layouts";
@@ -2295,19 +2365,19 @@ public sealed class LayoutFoundryPanel : Panel
             column is not null &&
             IsInteractivePropertyColumn(column))
         {
-            var selected = SelectedKeys();
+            var selected = _selection.Selected.ToArray();
             _propertyInteractionTargets = selected.Contains(item.Node.Key)
                 ? selected
                 : [item.Node.Key];
         }
 
         if ((eventArgs.Buttons & MouseButtons.Primary) != 0 &&
-            eventArgs.Modifiers == Keys.None &&
             item is not null &&
             !item.IsInlineDraft &&
-            !SelectedItems().Contains(item) &&
             column is not null &&
-            IsInteractivePropertyColumn(column))
+            IsInteractivePropertyColumn(column) &&
+            (eventArgs.Modifiers != Keys.None ||
+             !_selection.Selected.Contains(item.Node.Key)))
         {
             var guard = new CellInteractionGuard(item.Node.Key, column);
             _cellInteractionGuard = guard;
@@ -2925,7 +2995,15 @@ public sealed class LayoutFoundryPanel : Panel
             Node = node;
             Presentation = OverviewRowPresentation.Create(node, useMacSafeSingleColumn: false);
             IsInlineDraft = inlineDraftId == node.Key.Id;
-            RowIcon = node.IsDocumentRoot ? LayoutFoundryUiHost.ProjectIcon : null;
+            RowIcon = node.IsDocumentRoot
+                ? FoundryHierarchyIcons.Rhino
+                : node.Key.Kind switch
+                {
+                    OverviewNodeKind.Folder => FoundryHierarchyIcons.Folder,
+                    OverviewNodeKind.Sheet => FoundryHierarchyIcons.Layout,
+                    OverviewNodeKind.Detail => FoundryHierarchyIcons.Detail,
+                    _ => null,
+                };
             _displayText = IsInlineDraft
                 ? node.Label
                 : RowIcon is not null

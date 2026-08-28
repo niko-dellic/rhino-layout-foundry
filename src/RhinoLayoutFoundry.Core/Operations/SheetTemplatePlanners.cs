@@ -1,6 +1,7 @@
 using RhinoLayoutFoundry.Core.Diagnostics;
 using RhinoLayoutFoundry.Core.Domain;
 using RhinoLayoutFoundry.Core.Naming;
+using System.Globalization;
 
 namespace RhinoLayoutFoundry.Core.Operations;
 
@@ -81,6 +82,7 @@ public sealed record LayoutCreationSpec(
     Guid? DetailDisplayModeId = null,
     bool UseTemplateTitleBlock = true,
     Guid? TitleBlockSourceInstanceObjectId = null,
+    BuiltInTitleBlockKind? BuiltInTitleBlock = null,
     string? NamedView = null,
     bool UseDedicatedDetailLayer = true);
 
@@ -93,7 +95,8 @@ public sealed record BatchCreateSheetsRequest(
     int Start,
     int Step,
     IReadOnlyDictionary<Guid, string>? NamedViewAssignments = null,
-    IReadOnlyList<LayoutCreationSpec>? CreationSpecs = null);
+    IReadOnlyList<LayoutCreationSpec>? CreationSpecs = null,
+    ProjectInformation? ProjectData = null);
 
 public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateSheetsRequest>
 {
@@ -111,6 +114,7 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
             diagnostics.Add(CaptureSheetTemplatePlanner.Error("batch.empty", "Choose at least one template and quantity."));
         if (request.Step == 0)
             diagnostics.Add(CaptureSheetTemplatePlanner.Error("batch.step_zero", "The naming step cannot be zero."));
+        UpdateProjectInformationPlanner.Validate(request.ProjectData ?? snapshot.ProjectInfo, diagnostics);
 
         var templates = snapshot.Templates.ToDictionary(item => item.Id);
         var expanded = new List<(Guid DraftId, SheetTemplateRecipe Template, bool UseDedicatedDetailLayer)>();
@@ -189,7 +193,9 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
                     nextOrder + index,
                     expanded[index].Template,
                     request.NamedViewAssignments ?? new Dictionary<Guid, string>(),
-                    expanded[index].UseDedicatedDetailLayer));
+                    expanded[index].UseDedicatedDetailLayer,
+                    (request.Start + index * request.Step).ToString(CultureInfo.InvariantCulture),
+                    request.ProjectData ?? snapshot.ProjectInfo));
             }
             diagnostics.Add(new Diagnostic("batch.undo_unavailable", DiagnosticSeverity.Warning,
                 "Rhino does not expose native Undo for layout creation. Foundry will roll back the entire batch if any sheet fails."));
@@ -256,6 +262,27 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
             }
         }
 
+        AdaptiveTitleBlockLayout? adaptiveTitleBlock = null;
+        if (spec.BuiltInTitleBlock is { } builtInKind)
+        {
+            try
+            {
+                adaptiveTitleBlock = AdaptiveTitleBlockLayoutSolver.Solve(builtInKind, spec.Paper);
+                titleBlock = new TitleBlockTemplateRecipe(
+                    Guid.Empty,
+                    $"Foundry — {AdaptiveTitleBlockLayoutSolver.Label(builtInKind)}",
+                    IdentityTransform,
+                    AdaptiveTitleBlockLayoutSolver.Label(builtInKind),
+                    StandardTitleBlockMappings,
+                    builtInKind);
+            }
+            catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
+            {
+                diagnostics.Add(CaptureSheetTemplatePlanner.Error(
+                    "title_block.paper_too_small", exception.Message));
+            }
+        }
+
         var horizontalScale = spec.Paper.Width / source.Paper.Width;
         var verticalScale = spec.Paper.Height / source.Paper.Height;
         var details = source.DetailSlots.Select(slot => slot with
@@ -267,6 +294,18 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
             DisplayModeId = spec.DetailDisplayModeId ?? slot.DisplayModeId,
             DefaultNamedView = string.IsNullOrWhiteSpace(spec.NamedView) ? slot.DefaultNamedView : spec.NamedView,
         }).ToArray();
+
+        if (adaptiveTitleBlock is not null)
+        {
+            var content = adaptiveTitleBlock.Content;
+            details = details.Select(slot => slot with
+            {
+                Left = content.Left + slot.Left / spec.Paper.Width * content.Width,
+                Right = content.Left + slot.Right / spec.Paper.Width * content.Width,
+                Bottom = content.Bottom + slot.Bottom / spec.Paper.Height * content.Height,
+                Top = content.Bottom + slot.Top / spec.Paper.Height * content.Height,
+            }).ToArray();
+        }
 
         return source with
         {
@@ -350,7 +389,8 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
             diagnostics.Add(CaptureSheetTemplatePlanner.Error("template.detail_bounds_invalid", $"Template '{template.Name}' contains an invalid detail rectangle."));
         if (template.DetailSlots.Any(slot => slot.PageToModelRatio is <= 0))
             diagnostics.Add(CaptureSheetTemplatePlanner.Error("template.detail_scale_invalid", $"Template '{template.Name}' contains an invalid detail scale."));
-        if (template.TitleBlock is { } block && !snapshot.InstanceDefinitions.Contains(block.InstanceDefinitionId))
+        if (template.TitleBlock is { BuiltInKind: null } block &&
+            !snapshot.InstanceDefinitions.Contains(block.InstanceDefinitionId))
             diagnostics.Add(new Diagnostic("template.block_unresolved", DiagnosticSeverity.Warning,
                 $"Title block '{block.InstanceDefinitionName}' is not in this document and will be skipped."));
         if (template.TitleBlock is { Transform.Count: not 16 })
@@ -366,6 +406,31 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
                     $"The display mode for detail '{slot.Name}' is unavailable; Rhino's default will be used."));
         }
     }
+
+    private static readonly IReadOnlyList<double> IdentityTransform =
+    [
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 0, 1,
+    ];
+
+    private static readonly IReadOnlyDictionary<string, string> StandardTitleBlockMappings =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["project.name"] = "document.project_name",
+            ["project.number"] = "document.project_number",
+            ["project.client"] = "document.client_name",
+            ["project.site"] = "document.site_address",
+            ["project.phase"] = "document.project_phase",
+            ["project.status"] = "document.project_status",
+            ["firm.name"] = "document.firm_name",
+            ["issue.date"] = "document.issue_date",
+            ["issue.purpose"] = "document.issue_purpose",
+            ["sheet.number"] = "sheet.number",
+            ["sheet.title"] = "sheet.title",
+            ["sheet.scale"] = "sheet.scale",
+        };
 
     private static IReadOnlyDictionary<string, string> Tokens(
         DocumentSnapshot snapshot,

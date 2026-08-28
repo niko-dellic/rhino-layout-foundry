@@ -42,4 +42,5 @@ public sealed record TitleBlockTemplateRecipe(
     string InstanceDefinitionName,
     IReadOnlyList<double> Transform,
     string AnchorName,
-    IReadOnlyDictionary<string, string> FieldMappings);
+    IReadOnlyDictionary<string, string> FieldMappings,
+    BuiltInTitleBlockKind? BuiltInKind = null);

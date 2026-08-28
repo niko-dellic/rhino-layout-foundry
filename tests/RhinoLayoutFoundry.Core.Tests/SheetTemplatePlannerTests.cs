@@ -245,6 +245,48 @@ public sealed class SheetTemplatePlannerTests
         Assert.Equal(transform, created.Template.TitleBlock.Transform);
     }
 
+    [Fact]
+    public void AdaptiveTitleBlockReservesSpaceAndCarriesSheetNumber()
+    {
+        var snapshot = WithTemplates(TestSnapshots.Create(), []);
+        var project = ProjectInformation.Empty with
+        {
+            ProjectName = "Civic Library",
+            FirmName = "Foundry Architects",
+        };
+        var plan = new BatchCreateSheetsPlanner().Plan(new BatchCreateSheetsRequest(
+            42,
+            1,
+            TestSnapshots.RootFolderId,
+            [],
+            "A-{index:000}",
+            101,
+            1,
+            CreationSpecs:
+            [
+                new LayoutCreationSpec(
+                    1,
+                    new PaperRecipe(594, 420, "Millimeters"),
+                    BuiltInLayoutKind.SingleDetail,
+                    UseTemplateTitleBlock: false,
+                    BuiltInTitleBlock: BuiltInTitleBlockKind.CompactLowerRight),
+            ],
+            ProjectData: project), snapshot);
+
+        Assert.True(plan.CanApply);
+        var change = Assert.IsType<CreateSheetFromTemplateChange>(Assert.Single(plan.Changes));
+        Assert.Equal("101", change.SheetNumber);
+        Assert.Equal("Civic Library", change.ProjectData!.ProjectName);
+        Assert.Equal(BuiltInTitleBlockKind.CompactLowerRight, change.Template.TitleBlock!.BuiltInKind);
+        var geometry = AdaptiveTitleBlockLayoutSolver.Solve(
+            BuiltInTitleBlockKind.CompactLowerRight,
+            change.Template.Paper);
+        var detail = Assert.Single(change.Template.DetailSlots);
+        Assert.True(detail.Bottom >= geometry.Content.Bottom);
+        Assert.True(detail.Top <= geometry.Content.Top);
+        Assert.True(detail.Right <= geometry.Content.Right);
+    }
+
     private static SheetTemplateRecipe Template(string name, double width, double height) => new(
         Guid.NewGuid(), SheetTemplateRecipe.CurrentRecipeVersion, name,
         new PaperRecipe(width, height, "Millimeters"),

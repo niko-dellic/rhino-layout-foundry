@@ -14,7 +14,8 @@ public sealed record DocumentSnapshot(
     IReadOnlySet<Guid>? InstanceDefinitionIds = null,
     IReadOnlyDictionary<Guid, string>? DisplayModeNames = null,
     IReadOnlyDictionary<Guid, TitleBlockInstanceSnapshot>? TitleBlockInstanceChoices = null,
-    ObserverCanvasState? ObserverCanvas = null)
+    ObserverCanvasState? ObserverCanvas = null,
+    ProjectInformation? ProjectData = null)
 {
     public IReadOnlyList<SheetTemplateRecipe> Templates => SheetTemplates ?? [];
     public IReadOnlyDictionary<string, string> Metadata =>
@@ -27,6 +28,7 @@ public sealed record DocumentSnapshot(
     public IReadOnlyDictionary<Guid, TitleBlockInstanceSnapshot> TitleBlockInstances =>
         TitleBlockInstanceChoices ?? new Dictionary<Guid, TitleBlockInstanceSnapshot>();
     public ObserverCanvasState Canvas => ObserverCanvas ?? ObserverCanvasState.Empty;
+    public ProjectInformation ProjectInfo => ProjectData ?? ProjectInformation.Empty;
 }
 
 public sealed record SheetSnapshot(
@@ -42,7 +44,8 @@ public sealed record SheetSnapshot(
     IReadOnlyList<DetailSnapshot>? DetailSettings = null,
     Guid? TitleBlockInstanceObjectId = null,
     string? TitleBlockDefinitionName = null,
-    bool IncludeInPrintAll = true)
+    bool IncludeInPrintAll = true,
+    SheetTitleBlockData? TitleBlockData = null)
 {
     public IReadOnlyList<DetailSnapshot> Details => DetailSettings ?? [];
 }

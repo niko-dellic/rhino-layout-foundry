@@ -107,7 +107,13 @@ public sealed record CreateSheetFromTemplateChange(
     int Order,
     SheetTemplateRecipe Template,
     IReadOnlyDictionary<Guid, string> NamedViewAssignments,
-    bool UseDedicatedDetailLayer = true) : OperationChange;
+    bool UseDedicatedDetailLayer = true,
+    string SheetNumber = "",
+    ProjectInformation? ProjectData = null) : OperationChange;
+
+public sealed record UpdateProjectInformationChange(
+    ProjectInformation ExpectedInformation,
+    ProjectInformation NewInformation) : OperationChange;
 
 public sealed record BatchUpdateSheetsChange(
     IReadOnlyList<Guid> SheetPageViewIds,
@@ -117,7 +123,9 @@ public sealed record BatchUpdateSheetsChange(
     string? PaperUnitSystem,
     Guid? DetailDisplayModeId,
     bool ChangeTitleBlock = false,
-    Guid? TitleBlockSourceInstanceObjectId = null) : OperationChange;
+    Guid? TitleBlockSourceInstanceObjectId = null,
+    IReadOnlyList<SheetRevisionRecord>? ReplaceRevisionSchedule = null,
+    SheetRevisionRecord? AppendRevision = null) : OperationChange;
 
 public sealed record UpdateDetailDisplayModesChange(
     IReadOnlyList<Guid> DetailViewportIds,
