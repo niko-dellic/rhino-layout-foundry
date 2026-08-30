@@ -2692,7 +2692,7 @@ public sealed class LayoutFoundryPanel : Panel
             _statusLabel.Text = "The selection does not contain any layouts.";
             return;
         }
-        var dialog = new BatchPropertiesDialog(snapshot, targets);
+        var dialog = new BatchCreateLayoutsDialog(snapshot, targets);
         dialog.ShowModal(this);
         if (dialog.Succeeded)
         {

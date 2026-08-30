@@ -196,6 +196,8 @@ The observer canvas is a view mode inside the main per-document Layout Foundry p
 
 - a single custom-drawn, viewport-virtualized workspace that issues no draw or bitmap-decode work for offscreen sheets;
 - cached sheet cards with 256/512/1024/2048 progressive thumbnail loading;
+- automatic semantic zoom driven by each sheet's projected shorter edge: full raster/detail interaction at Detail LOD, clipped in-paper sheet summaries at Sheet LOD, and adaptive collision-free hierarchy summaries at Folder LOD;
+- preview scheduling limited to visible and overscan sheets currently in Detail LOD, with pending work reconciled as zoom changes and encoded captures retained for fast zoom-in reuse;
 - zoom, pan, fit-all, and focus-selection;
 - an expand control that moves the live canvas into a maximized workspace, hides the auxiliary sidebars, and restores it to the main panel without resetting the camera or selection;
 - neutral zinc/gray canvas surfaces in light and dark Rhino themes, with selection borders and directional selection windows sourced from the user's Rhino appearance settings;

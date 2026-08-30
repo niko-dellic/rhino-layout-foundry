@@ -124,6 +124,13 @@ public sealed class OverviewThumbnailRequestQueue
         _inFlight.Remove(key);
     }
 
+    public void RetainPending(Func<OverviewThumbnailKey, bool> retain)
+    {
+        ArgumentNullException.ThrowIfNull(retain);
+        foreach (var key in _pending.Keys.Where(key => !retain(key)).ToArray())
+            _pending.Remove(key);
+    }
+
     public void RemoveDocument(uint documentRuntimeSerialNumber)
     {
         foreach (var key in _pending.Keys

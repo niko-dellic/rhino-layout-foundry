@@ -85,7 +85,8 @@ public sealed record LayoutCreationSpec(
     BuiltInTitleBlockKind? BuiltInTitleBlock = null,
     string? NamedView = null,
     bool UseDedicatedDetailLayer = true,
-    IReadOnlyList<string?>? NamedViewsByDetail = null);
+    IReadOnlyList<string?>? NamedViewsByDetail = null,
+    IReadOnlyList<Guid?>? DetailDisplayModesByDetail = null);
 
 public sealed record BatchCreateSheetsRequest(
     uint DocumentRuntimeSerialNumber,
@@ -97,7 +98,8 @@ public sealed record BatchCreateSheetsRequest(
     int Step,
     IReadOnlyDictionary<Guid, string>? NamedViewAssignments = null,
     IReadOnlyList<LayoutCreationSpec>? CreationSpecs = null,
-    ProjectInformation? ProjectData = null);
+    ProjectInformation? ProjectData = null,
+    IReadOnlyList<SheetRevisionRecord>? InitialRevisions = null);
 
 public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateSheetsRequest>
 {
@@ -200,7 +202,8 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
                     expanded[index].NamedViewAssignments,
                     expanded[index].UseDedicatedDetailLayer,
                     (request.Start + index * request.Step).ToString(CultureInfo.InvariantCulture),
-                    request.ProjectData ?? snapshot.ProjectInfo));
+                    request.ProjectData ?? snapshot.ProjectInfo,
+                    request.InitialRevisions));
             }
             diagnostics.Add(new Diagnostic("batch.undo_unavailable", DiagnosticSeverity.Warning,
                 "Rhino does not expose native Undo for layout creation. Foundry will roll back the entire batch if any sheet fails."));
@@ -242,6 +245,26 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
         {
             diagnostics.Add(CaptureSheetTemplatePlanner.Error(
                 "template.display_mode_unresolved", "The selected detail display mode is unavailable."));
+        }
+
+        var hasDisplayModeOverrides = spec.DetailDisplayModesByDetail is not null &&
+                                      spec.DetailDisplayModesByDetail.Count == source.DetailSlots.Count;
+        if (spec.DetailDisplayModesByDetail is not null && !hasDisplayModeOverrides)
+        {
+            diagnostics.Add(CaptureSheetTemplatePlanner.Error(
+                "template.display_mode_assignment_count",
+                $"Layout '{source.Name}' has {source.DetailSlots.Count} details but received " +
+                $"{spec.DetailDisplayModesByDetail.Count} detail display-mode assignments."));
+        }
+        else if (spec.DetailDisplayModesByDetail is not null)
+        {
+            foreach (var overrideId in spec.DetailDisplayModesByDetail.OfType<Guid>())
+            {
+                if (snapshot.DisplayModeIds.Contains(overrideId)) continue;
+                diagnostics.Add(CaptureSheetTemplatePlanner.Error(
+                    "template.display_mode_unresolved",
+                    "A selected detail display-mode override is unavailable."));
+            }
         }
 
         TitleBlockTemplateRecipe? titleBlock = source.TitleBlock;
@@ -291,13 +314,15 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
 
         var horizontalScale = spec.Paper.Width / source.Paper.Width;
         var verticalScale = spec.Paper.Height / source.Paper.Height;
-        var details = source.DetailSlots.Select(slot => slot with
+        var details = source.DetailSlots.Select((slot, index) => slot with
         {
             Left = slot.Left * horizontalScale,
             Right = slot.Right * horizontalScale,
             Bottom = slot.Bottom * verticalScale,
             Top = slot.Top * verticalScale,
-            DisplayModeId = spec.DetailDisplayModeId ?? slot.DisplayModeId,
+            DisplayModeId = hasDisplayModeOverrides && spec.DetailDisplayModesByDetail![index] is { } overrideId
+                ? overrideId
+                : spec.DetailDisplayModeId ?? slot.DisplayModeId,
         }).ToArray();
 
         var namedViewAssignments = new Dictionary<Guid, string>();

@@ -95,6 +95,15 @@ internal sealed class FoundryCheckBox : Drawable
             eventArgs.Graphics.DrawLine(pen, 5, 12, 8, 15);
             eventArgs.Graphics.DrawLine(pen, 8, 15, 13, 9);
         }
+        else if (Checked is null)
+        {
+            eventArgs.Graphics.DrawLine(
+                new Pen(FoundryTheme.WithAlpha(FoundryTheme.PrimaryText, Enabled ? 210 : 85), 1.5f),
+                5,
+                12,
+                13,
+                12);
+        }
 
         if (_showFocusRing && Enabled)
         {

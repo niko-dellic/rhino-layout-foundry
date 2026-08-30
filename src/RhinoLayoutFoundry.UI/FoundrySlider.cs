@@ -12,12 +12,18 @@ internal sealed class FoundrySlider : Drawable
     private const float TrackInset = 8;
     private readonly int _minimum;
     private readonly int _maximum;
+    private readonly Func<int, string> _toolTipFormatter;
     private int _value;
     private bool _dragging;
     private bool _hovered;
     private bool _showFocusRing;
 
-    internal FoundrySlider(int minimum, int maximum, int value, int width = 170)
+    internal FoundrySlider(
+        int minimum,
+        int maximum,
+        int value,
+        int width = 170,
+        Func<int, string>? toolTipFormatter = null)
         : base(true)
     {
         if (maximum <= minimum)
@@ -25,6 +31,7 @@ internal sealed class FoundrySlider : Drawable
 
         _minimum = minimum;
         _maximum = maximum;
+        _toolTipFormatter = toolTipFormatter ?? (current => $"{current}% opacity");
         _value = Math.Clamp(value, minimum, maximum);
         Size = new Size(width, 32);
         BackgroundColor = Colors.Transparent;
@@ -133,7 +140,7 @@ internal sealed class FoundrySlider : Drawable
         Invalidate();
     }
 
-    private void UpdateToolTip() => ToolTip = $"{_value}% opacity";
+    private void UpdateToolTip() => ToolTip = _toolTipFormatter(_value);
 
     private void OnPaint(object? sender, PaintEventArgs eventArgs)
     {

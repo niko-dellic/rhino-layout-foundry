@@ -141,6 +141,86 @@ public sealed class SheetTemplatePlannerTests
     }
 
     [Fact]
+    public void PerDetailDisplayModeOverridesTakePrecedenceOverPageDefault()
+    {
+        var snapshot = WithTemplates(TestSnapshots.Create(), []);
+        var plan = new BatchCreateSheetsPlanner().Plan(new BatchCreateSheetsRequest(
+            42,
+            1,
+            TestSnapshots.RootFolderId,
+            [],
+            "Page {index}",
+            1,
+            1,
+            CreationSpecs:
+            [
+                new LayoutCreationSpec(
+                    1,
+                    new PaperRecipe(594, 420, "Millimeters"),
+                    BuiltInLayoutKind.TwoDetailsVertical,
+                    DetailDisplayModeId: TestSnapshots.DisplayModeOneId,
+                    DetailDisplayModesByDetail: [null, TestSnapshots.DisplayModeTwoId]),
+            ]), snapshot);
+
+        Assert.True(plan.CanApply);
+        var details = Assert.Single(plan.Changes.Cast<CreateSheetFromTemplateChange>()).Template.DetailSlots;
+        Assert.Equal(TestSnapshots.DisplayModeOneId, details[0].DisplayModeId);
+        Assert.Equal(TestSnapshots.DisplayModeTwoId, details[1].DisplayModeId);
+    }
+
+    [Fact]
+    public void WrongPerDetailDisplayModeCountBlocksBatch()
+    {
+        var snapshot = WithTemplates(TestSnapshots.Create(), []);
+        var plan = new BatchCreateSheetsPlanner().Plan(new BatchCreateSheetsRequest(
+            42,
+            1,
+            TestSnapshots.RootFolderId,
+            [],
+            "Page {index}",
+            1,
+            1,
+            CreationSpecs:
+            [
+                new LayoutCreationSpec(
+                    1,
+                    new PaperRecipe(594, 420, "Millimeters"),
+                    BuiltInLayoutKind.TwoDetailsHorizontal,
+                    DetailDisplayModesByDetail: [TestSnapshots.DisplayModeOneId]),
+            ]), snapshot);
+
+        Assert.False(plan.CanApply);
+        Assert.Contains(plan.Diagnostics, diagnostic =>
+            diagnostic.Code == "template.display_mode_assignment_count");
+    }
+
+    [Fact]
+    public void MissingPerDetailDisplayModeBlocksBatch()
+    {
+        var snapshot = WithTemplates(TestSnapshots.Create(), []);
+        var missingId = Guid.Parse("50000000-0000-0000-0000-000000000099");
+        var plan = new BatchCreateSheetsPlanner().Plan(new BatchCreateSheetsRequest(
+            42,
+            1,
+            TestSnapshots.RootFolderId,
+            [],
+            "Page {index}",
+            1,
+            1,
+            CreationSpecs:
+            [
+                new LayoutCreationSpec(
+                    1,
+                    new PaperRecipe(594, 420, "Millimeters"),
+                    BuiltInLayoutKind.SingleDetail,
+                    DetailDisplayModesByDetail: [missingId]),
+            ]), snapshot);
+
+        Assert.False(plan.CanApply);
+        Assert.Contains(plan.Diagnostics, diagnostic => diagnostic.Code == "template.display_mode_unresolved");
+    }
+
+    [Fact]
     public void DedicatedDetailLayerChoiceIsPreservedPerCreationSpec()
     {
         var snapshot = WithTemplates(TestSnapshots.Create(), []);
@@ -167,6 +247,35 @@ public sealed class SheetTemplatePlannerTests
         Assert.True(plan.CanApply);
         Assert.Equal([false, true], plan.Changes.Cast<CreateSheetFromTemplateChange>()
             .Select(change => change.UseDedicatedDetailLayer));
+    }
+
+    [Fact]
+    public void InitialRevisionScheduleIsPreservedForEveryCreatedLayout()
+    {
+        var snapshot = WithTemplates(TestSnapshots.Create(), []);
+        var revisions = new[]
+        {
+            new SheetRevisionRecord("P01", "2026-08-28", "Planning issue", "ND", "QA"),
+            new SheetRevisionRecord("P02", "2026-09-02", "Client issue", "ND", "QA"),
+        };
+        var plan = new BatchCreateSheetsPlanner().Plan(new BatchCreateSheetsRequest(
+            42,
+            1,
+            TestSnapshots.RootFolderId,
+            [],
+            "Page {index}",
+            1,
+            1,
+            CreationSpecs:
+            [
+                new LayoutCreationSpec(2, new PaperRecipe(594, 420, "Millimeters")),
+            ],
+            InitialRevisions: revisions), snapshot);
+
+        Assert.True(plan.CanApply);
+        var changes = plan.Changes.Cast<CreateSheetFromTemplateChange>().ToArray();
+        Assert.Equal(2, changes.Length);
+        Assert.All(changes, change => Assert.Equal(revisions, change.InitialRevisions));
     }
 
     [Fact]

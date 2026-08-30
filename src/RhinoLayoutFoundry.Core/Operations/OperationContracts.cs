@@ -90,6 +90,22 @@ public sealed record MoveFolderChange(
     Guid DestinationFolderId,
     int Order) : OperationChange;
 
+public sealed record HierarchyFolderPlacement(
+    Guid FolderId,
+    Guid? ParentFolderId,
+    int Order);
+
+public sealed record HierarchySheetPlacement(
+    Guid PageViewId,
+    Guid FolderId,
+    int Order);
+
+public sealed record ReorganizeHierarchyChange(
+    IReadOnlyList<HierarchyFolderPlacement> ExpectedFolders,
+    IReadOnlyList<HierarchySheetPlacement> ExpectedSheets,
+    IReadOnlyList<HierarchyFolderPlacement> NewFolders,
+    IReadOnlyList<HierarchySheetPlacement> NewSheets) : OperationChange;
+
 public sealed record CreateSheetChange(
     Guid DestinationFolderId,
     string Name,
@@ -114,7 +130,8 @@ public sealed record CreateSheetFromTemplateChange(
     IReadOnlyDictionary<Guid, string> NamedViewAssignments,
     bool UseDedicatedDetailLayer = true,
     string SheetNumber = "",
-    ProjectInformation? ProjectData = null) : OperationChange;
+    ProjectInformation? ProjectData = null,
+    IReadOnlyList<SheetRevisionRecord>? InitialRevisions = null) : OperationChange;
 
 public sealed record UpdateProjectInformationChange(
     ProjectInformation ExpectedInformation,

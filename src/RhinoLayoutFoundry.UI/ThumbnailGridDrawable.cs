@@ -46,11 +46,11 @@ internal sealed class ThumbnailGridDrawable : Drawable
     internal void SetSnapshot(
         ObserverSnapshot snapshot,
         double availableWidth,
-        double requestedCardWidth,
+        double density,
         double minimumHeight = 0)
     {
         _snapshot = snapshot ?? ObserverSnapshot.NoDocument;
-        SetGridSize(availableWidth, requestedCardWidth, minimumHeight);
+        SetGridDensity(availableWidth, density, minimumHeight);
         var currentIds = _snapshot.Sheets.Select(sheet => sheet.PageViewId).ToHashSet();
         foreach (var stale in _previews.Keys.Where(id => !currentIds.Contains(id)).ToArray())
         {
@@ -60,9 +60,9 @@ internal sealed class ThumbnailGridDrawable : Drawable
         Invalidate();
     }
 
-    internal void SetGridSize(double availableWidth, double requestedCardWidth, double minimumHeight = 0)
+    internal void SetGridDensity(double availableWidth, double density, double minimumHeight = 0)
     {
-        _layout = ThumbnailGridLayout.Create(_snapshot.Sheets.Count, availableWidth, requestedCardWidth);
+        _layout = ThumbnailGridLayout.CreateForDensity(_snapshot.Sheets.Count, availableWidth, density);
         Size = new Size(
             Math.Max(1, (int)Math.Ceiling(availableWidth)),
             Math.Max(1, (int)Math.Ceiling(Math.Max(_layout.ContentHeight, minimumHeight))));

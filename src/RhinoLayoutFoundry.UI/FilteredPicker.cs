@@ -5,7 +5,7 @@ namespace RhinoLayoutFoundry.UI;
 
 internal sealed class FilteredPicker : Panel
 {
-    private readonly string[] _allLabels;
+    private string[] _allLabels;
     private readonly TextBox _textBox;
     private readonly FoundryToolbarIconButton _toggleButton;
     private readonly ListBox _results;
@@ -14,6 +14,7 @@ internal sealed class FilteredPicker : Panel
 
     internal FilteredPicker(IEnumerable<string> labels, string placeholder)
     {
+        MinimumSize = new Size(0, 32);
         _allLabels = labels.Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(label => label, StringComparer.OrdinalIgnoreCase)
             .ToArray();
@@ -52,6 +53,11 @@ internal sealed class FilteredPicker : Panel
             ValueChanged?.Invoke(this, EventArgs.Empty);
         };
         UnLoad += (_, _) => ClosePopup();
+        var textField = new Panel
+        {
+            MinimumSize = new Size(0, 32),
+            Content = new FoundryFormField(_textBox),
+        };
         Content = new StackLayout
         {
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
@@ -61,7 +67,7 @@ internal sealed class FilteredPicker : Panel
                 {
                     Orientation = Orientation.Horizontal,
                     Spacing = 0,
-                    Items = { new StackLayoutItem(new FoundryFormField(_textBox), true), _toggleButton },
+                    Items = { new StackLayoutItem(textField, true), _toggleButton },
                 },
             },
         };
@@ -80,6 +86,15 @@ internal sealed class FilteredPicker : Panel
             _settingValue = false;
             Filter(showResults: false);
         }
+    }
+
+    internal void SetChoices(IEnumerable<string> labels)
+    {
+        _allLabels = labels.Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(label => label, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        _results.DataStore = _allLabels;
+        Filter(showResults: false);
     }
 
     public new bool Enabled

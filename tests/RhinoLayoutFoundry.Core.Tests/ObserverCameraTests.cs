@@ -69,4 +69,23 @@ public sealed class ObserverCameraTests
         Assert.True(screen.Right <= 950.1);
         Assert.True(screen.Bottom <= 650.1);
     }
+
+    [Fact]
+    public void MaximumZoomKeepsSheetCenteredAndPreservesItsAspectRatio()
+    {
+        var viewport = new ObserverSize(1600, 1000);
+        var sheet = new ObserverRect(100, 200, 594, 420);
+        var cameraCenter = sheet.Center;
+        var normal = new ObserverCamera(cameraCenter, 1);
+        var maximum = new ObserverCamera(cameraCenter, ObserverCamera.MaximumZoom);
+
+        var normalScreen = normal.WorldToScreen(sheet, viewport);
+        var maximumScreen = maximum.WorldToScreen(sheet, viewport);
+
+        Assert.Equal(viewport.Width / 2, maximumScreen.Center.X, 8);
+        Assert.Equal(viewport.Height / 2, maximumScreen.Center.Y, 8);
+        Assert.Equal(normalScreen.Width * ObserverCamera.MaximumZoom, maximumScreen.Width, 8);
+        Assert.Equal(normalScreen.Height * ObserverCamera.MaximumZoom, maximumScreen.Height, 8);
+        Assert.Equal(sheet.Width / sheet.Height, maximumScreen.Width / maximumScreen.Height, 8);
+    }
 }

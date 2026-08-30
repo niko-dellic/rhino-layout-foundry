@@ -170,7 +170,8 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
     {
         return change is AddFolderChange or RenameFolderChange or
             MoveSheetChange or MoveFolderChange or SetPrintInclusionChange or
-            SetObserverCanvasStateChange or ReorderSheetsChange;
+            SetObserverCanvasStateChange or ReorderSheetsChange or
+            ReorganizeHierarchyChange;
     }
 
     private OperationResult ApplyRename(
@@ -244,7 +245,7 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
         OperationPlan plan)
     {
         var storedBeforeState = _stateStore.Get(document);
-        var beforeState = plan.Changes.Any(change => change is SetPrintInclusionChange or ReorderSheetsChange)
+        var beforeState = plan.Changes.Any(change => change is SetPrintInclusionChange or ReorderSheetsChange or ReorganizeHierarchyChange)
             ? WithCurrentPageRecords(document, storedBeforeState)
             : storedBeforeState;
         var folders = beforeState.Folders.ToList();
@@ -273,6 +274,8 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
                 SetPrintInclusionChange print => ApplyPrintInclusion(sheets, print),
                 SetObserverCanvasStateChange canvas => ApplyObserverCanvasState(beforeState, canvas),
                 ReorderSheetsChange reorder => ApplyReorderSheets(sheets, reorder),
+                ReorganizeHierarchyChange reorganize => ApplyReorganizeHierarchy(
+                    beforeState.RootFolderId, folders, sheets, reorganize),
                 _ => Failure("operation.unsupported_plan", "The hierarchy operation is not supported."),
             };
             if (failure is not null)
@@ -360,6 +363,85 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
             sheets[next.Key] = sheets[next.Key] with { Order = next.Value };
         }
 
+        return null;
+    }
+
+    private static OperationResult? ApplyReorganizeHierarchy(
+        Guid rootFolderId,
+        IList<FolderRecord> folders,
+        IDictionary<Guid, SheetRecord> sheets,
+        ReorganizeHierarchyChange change)
+    {
+        var folderById = folders.ToDictionary(folder => folder.Id);
+        if (change.ExpectedFolders.Select(item => item.FolderId).Distinct().Count() != change.ExpectedFolders.Count ||
+            change.NewFolders.Select(item => item.FolderId).Distinct().Count() != change.NewFolders.Count ||
+            change.ExpectedSheets.Select(item => item.PageViewId).Distinct().Count() != change.ExpectedSheets.Count ||
+            change.NewSheets.Select(item => item.PageViewId).Distinct().Count() != change.NewSheets.Count)
+            return Failure("hierarchy.invalid_change", "The hierarchy change contains duplicate items.");
+
+        if (!change.ExpectedFolders.Select(item => item.FolderId)
+                .ToHashSet().SetEquals(change.NewFolders.Select(item => item.FolderId)) ||
+            !change.ExpectedSheets.Select(item => item.PageViewId)
+                .ToHashSet().SetEquals(change.NewSheets.Select(item => item.PageViewId)))
+            return Failure("hierarchy.invalid_change", "The hierarchy change has mismatched before and after items.");
+
+        foreach (var expected in change.ExpectedFolders)
+        {
+            if (!folderById.TryGetValue(expected.FolderId, out var folder))
+                return Failure("hierarchy.folder_missing", "A reorganized folder no longer exists.");
+            if (folder.ParentId != expected.ParentFolderId || folder.Order != expected.Order)
+                return Failure("hierarchy.before_value_changed",
+                    "Folder placement changed before this edit was applied.");
+        }
+
+        foreach (var expected in change.ExpectedSheets)
+        {
+            if (!sheets.TryGetValue(expected.PageViewId, out var sheet))
+                return Failure("hierarchy.sheet_missing", "A reorganized layout no longer exists.");
+            if (sheet.FolderId != expected.FolderId || sheet.Order != expected.Order)
+                return Failure("hierarchy.before_value_changed",
+                    "Layout placement changed before this edit was applied.");
+        }
+
+        foreach (var next in change.NewFolders)
+        {
+            if (next.FolderId == rootFolderId)
+                return Failure("hierarchy.root_move", "The document root cannot be moved.");
+            if (next.ParentFolderId is not { } parentId || !folderById.ContainsKey(parentId))
+                return Failure("hierarchy.destination_missing", "A destination folder no longer exists.");
+            folderById[next.FolderId] = folderById[next.FolderId] with
+            {
+                ParentId = parentId,
+                Order = next.Order,
+            };
+        }
+
+        foreach (var next in change.NewSheets)
+        {
+            if (!folderById.ContainsKey(next.FolderId))
+                return Failure("hierarchy.destination_missing", "A destination folder no longer exists.");
+            sheets[next.PageViewId] = sheets[next.PageViewId] with
+            {
+                FolderId = next.FolderId,
+                Order = next.Order,
+            };
+        }
+
+        foreach (var folder in folderById.Values.Where(folder => folder.Id != rootFolderId))
+        {
+            var visited = new HashSet<Guid>();
+            var current = folder.Id;
+            while (current != rootFolderId)
+            {
+                if (!visited.Add(current) || !folderById.TryGetValue(current, out var ancestor) ||
+                    ancestor.ParentId is not { } parentId)
+                    return Failure("hierarchy.folder_cycle", "The hierarchy change would create a folder cycle.");
+                current = parentId;
+            }
+        }
+
+        folders.Clear();
+        foreach (var folder in folderById.Values) folders.Add(folder);
         return null;
     }
 
@@ -1452,9 +1534,10 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
                         create.NamedViewAssignments.GetValueOrDefault(slot.Id),
                         create.UseDedicatedDetailLayer ? detailLayer?.LayerIndex : null);
 
-                var revisions = projectInfo.DefaultRevision is { } defaultRevision
-                    ? new[] { defaultRevision }
-                    : [];
+                var revisions = create.InitialRevisions?.ToArray() ??
+                    (projectInfo.DefaultRevision is { } defaultRevision
+                        ? new[] { defaultRevision }
+                        : []);
                 var titleBlockData = new SheetTitleBlockData(create.SheetNumber, revisions);
                 Guid? titleBlockId = null;
                 if (create.Template.TitleBlock is { } titleBlock)

@@ -16,6 +16,29 @@ public sealed class ThumbnailGridLayoutTests
     }
 
     [Fact]
+    public void FullWidthRequestAlwaysProducesOneItemPerRow()
+    {
+        var layout = ThumbnailGridLayout.Create(40, 3840, 3840);
+
+        Assert.Equal(1, layout.Columns);
+        Assert.Equal(40, layout.Rows);
+    }
+
+    [Fact]
+    public void DensityDistributesColumnCountsAcrossTheEntireControlRange()
+    {
+        var compact = ThumbnailGridLayout.CreateForDensity(40, 3840, 0);
+        var midpoint = ThumbnailGridLayout.CreateForDensity(40, 3840, 0.5);
+        var nearLargest = ThumbnailGridLayout.CreateForDensity(40, 3840, 0.75);
+        var largest = ThumbnailGridLayout.CreateForDensity(40, 3840, 1);
+
+        Assert.True(compact.Columns > midpoint.Columns);
+        Assert.InRange(midpoint.Columns, compact.Columns / 2, compact.Columns / 2 + 1);
+        Assert.True(nearLargest.Columns > 1);
+        Assert.Equal(1, largest.Columns);
+    }
+
+    [Fact]
     public void GridFillsAvailableWidthWithoutOverlappingCells()
     {
         var layout = ThumbnailGridLayout.Create(12, 1000, 210);

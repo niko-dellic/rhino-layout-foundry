@@ -10,11 +10,13 @@ namespace RhinoLayoutFoundry.UI;
 internal sealed class FoundryFormField : PixelLayout
 {
     private const int SingleLineHeight = 32;
+    private const int SingleLineEditorHeight = 24;
     private readonly Control _input;
     private readonly Control _interactionControl;
     private readonly FieldChrome _chrome;
     private readonly int _horizontalInset;
     private readonly int _verticalInset;
+    private readonly bool _centerSingleLineEditor;
 
     internal FoundryFormField(
         Control input,
@@ -27,10 +29,12 @@ internal sealed class FoundryFormField : PixelLayout
         _interactionControl = interactionControl ?? input;
         _horizontalInset = horizontalInset ?? (input is TextBox or TextArea ? 7 : 3);
         _verticalInset = input is TextArea ? 4 : 1;
+        _centerSingleLineEditor = input is TextBox or DropDown or NumericStepper;
         _chrome = new FieldChrome(cornerRadius);
         BackgroundColor = Colors.Transparent;
 
         PrepareNativeInput(input);
+        input.Load += (_, _) => SuppressNativeFocusRing(input);
         var requestedHeight = input.Height > 0 ? input.Height + (_verticalInset * 2) : SingleLineHeight;
         Height = Math.Max(minimumHeight, requestedHeight);
         if (input.Width > 0) Width = input.Width;
@@ -72,10 +76,17 @@ internal sealed class FoundryFormField : PixelLayout
         if (size.Width <= 0 || size.Height <= 0) return;
         _chrome.Size = size;
         Move(_chrome, 0, 0);
+        var availableHeight = Math.Max(0, size.Height - (_verticalInset * 2));
+        var inputHeight = _centerSingleLineEditor
+            ? Math.Min(SingleLineEditorHeight, availableHeight)
+            : availableHeight;
+        var inputY = _centerSingleLineEditor
+            ? Math.Max(0, (size.Height - inputHeight) / 2)
+            : _verticalInset;
         _input.Size = new Size(
             Math.Max(0, size.Width - (_horizontalInset * 2)),
-            Math.Max(0, size.Height - (_verticalInset * 2)));
-        Move(_input, _horizontalInset, _verticalInset);
+            inputHeight);
+        Move(_input, _horizontalInset, inputY);
     }
 
     private static void PrepareNativeInput(Control input)
@@ -97,6 +108,30 @@ internal sealed class FoundryFormField : PixelLayout
             case NumericStepper numericStepper:
                 numericStepper.TextColor = FoundryTheme.PrimaryText;
                 break;
+        }
+    }
+
+    private static void SuppressNativeFocusRing(Control input)
+    {
+        if (!OperatingSystem.IsMacOS()) return;
+        try
+        {
+            // AppKit can still draw an NSTextField first-responder ring when
+            // Eto's ShowBorder is false. The Foundry shell owns focus chrome,
+            // so disable the native ring without taking an AppKit dependency.
+            var nativeControl = input.ControlObject;
+            var focusRingProperty = nativeControl?.GetType().GetProperty("FocusRingType");
+            if (focusRingProperty is not { CanWrite: true } ||
+                !focusRingProperty.PropertyType.IsEnum)
+                return;
+
+            var none = Enum.Parse(focusRingProperty.PropertyType, "None");
+            focusRingProperty.SetValue(nativeControl, none);
+        }
+        catch
+        {
+            // Keep the standard Eto behavior if a future platform handler no
+            // longer exposes AppKit's focus-ring property.
         }
     }
 
@@ -132,14 +167,6 @@ internal sealed class FoundryFormField : PixelLayout
                         ? FoundryTheme.WithAlpha(FoundryTheme.SecondaryText, 190)
                         : FoundryTheme.WithAlpha(FoundryTheme.CanvasBorder, 190);
             eventArgs.Graphics.DrawPath(new Pen(border, Focused ? 1.5f : 1), outline);
-
-            if (!Focused || !InputEnabled) return;
-            using var focus = GraphicsPath.GetRoundRect(
-                new RectangleF(2.5f, 2.5f, Math.Max(0, Width - 5), Math.Max(0, Height - 5)),
-                Math.Max(2, _cornerRadius - 2));
-            eventArgs.Graphics.DrawPath(
-                new Pen(FoundryTheme.WithAlpha(FoundryTheme.PrimaryText, 70), 1),
-                focus);
         }
     }
 }

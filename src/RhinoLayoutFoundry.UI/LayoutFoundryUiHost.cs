@@ -615,6 +615,37 @@ public static class LayoutFoundryUiHost
         }
     }
 
+    public static async Task<OperationResult> ReorganizeHierarchyAsync(
+        IReadOnlyList<Guid> folderIds,
+        IReadOnlyList<Guid> sheetIds,
+        HierarchyPlacementTarget target,
+        CancellationToken cancellationToken = default)
+    {
+        if (_snapshotProvider is null || _mutationService is null)
+            return UnavailableResult("Foundry is not connected to an active Rhino plug-in.");
+        try
+        {
+            var snapshot = _snapshotProvider.Capture();
+            var plan = new HierarchyPlacementPlanner().Plan(
+                new HierarchyPlacementRequest(
+                    snapshot.DocumentRuntimeSerialNumber,
+                    snapshot.Revision,
+                    folderIds,
+                    sheetIds,
+                    target),
+                snapshot);
+            return await ApplyHierarchyPlanAsync(
+                plan,
+                snapshot.DocumentRuntimeSerialNumber,
+                folderIds.Concat(sheetIds).Append(target.TargetId).ToHashSet(),
+                cancellationToken);
+        }
+        catch (InvalidOperationException exception)
+        {
+            return UnavailableResult(exception.Message);
+        }
+    }
+
     public static async Task<OperationResult> CreateSheetAsync(
         Guid destinationFolderId,
         string name,

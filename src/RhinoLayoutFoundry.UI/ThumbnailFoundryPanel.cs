@@ -10,7 +10,7 @@ internal sealed class ThumbnailFoundryPanel : Panel
 {
     private readonly ThumbnailGridDrawable _grid;
     private readonly Scrollable _scrollable;
-    private readonly Slider _sizeSlider;
+    private readonly FoundrySlider _sizeSlider;
     private readonly Label _densityLabel;
     private readonly Label _status;
     private readonly UITimer _thumbnailTimer;
@@ -41,15 +41,12 @@ internal sealed class ThumbnailFoundryPanel : Panel
             ExpandContentHeight = true,
             Content = _grid,
         };
-        _sizeSlider = new Slider
-        {
-            MinValue = 120,
-            MaxValue = 360,
-            Value = 210,
-            TickFrequency = 10,
-            Width = 150,
-            ToolTip = "Resize page thumbnails to fit more or fewer layouts per row",
-        };
+        _sizeSlider = new FoundrySlider(
+            0,
+            100,
+            50,
+            150,
+            value => $"Thumbnail size: {value}%");
         _densityLabel = FoundryTheme.MutedLabel();
         _densityLabel.Width = 92;
         _status = FoundryTheme.MutedLabel();
@@ -60,8 +57,8 @@ internal sealed class ThumbnailFoundryPanel : Panel
 
         var smaller = ToolbarButton(FoundryViewIcons.ZoomOut(), "Show more layouts per row");
         var larger = ToolbarButton(FoundryViewIcons.ZoomIn(), "Show fewer, larger layouts per row");
-        smaller.Click += (_, _) => _sizeSlider.Value = Math.Max(_sizeSlider.MinValue, _sizeSlider.Value - 20);
-        larger.Click += (_, _) => _sizeSlider.Value = Math.Min(_sizeSlider.MaxValue, _sizeSlider.Value + 20);
+        smaller.Click += (_, _) => AdjustColumns(1);
+        larger.Click += (_, _) => AdjustColumns(-1);
         _sizeSlider.ValueChanged += (_, _) => ApplyGridSize();
         _scrollable.Scroll += (_, _) => QueueVisiblePreviews();
         _scrollable.SizeChanged += (_, _) =>
@@ -87,7 +84,7 @@ internal sealed class ThumbnailFoundryPanel : Panel
 
         Content = new StackLayout
         {
-            Padding = new Padding(FoundryTheme.Space3),
+            Padding = new Padding(0),
             Spacing = FoundryTheme.Space2,
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Items =
@@ -247,7 +244,8 @@ internal sealed class ThumbnailFoundryPanel : Panel
 
     private void ApplyGridSize()
     {
-        _grid.SetGridSize(GridWidth(), _sizeSlider.Value, GridMinimumHeight());
+        var gridWidth = GridWidth();
+        _grid.SetGridDensity(gridWidth, Density, GridMinimumHeight());
         _scrollable.UpdateScrollSizes();
         UpdateStatus();
         QueueVisiblePreviews();
@@ -256,6 +254,17 @@ internal sealed class ThumbnailFoundryPanel : Panel
     private double GridWidth() => Math.Max(240, _scrollable.Size.Width - 2);
 
     private double GridMinimumHeight() => Math.Max(1, _scrollable.Size.Height - 2);
+
+    private double Density => _sizeSlider.Value / 100d;
+
+    private void AdjustColumns(int delta)
+    {
+        var maximum = ThumbnailGridLayout.MaximumColumns(_grid.Snapshot.Sheets.Count, GridWidth());
+        if (maximum <= 1) return;
+        var desired = Math.Clamp(_grid.GridLayout.Columns + delta, 1, maximum);
+        var density = (maximum - desired) / (double)(maximum - 1);
+        _sizeSlider.Value = (int)Math.Round(density * 100, MidpointRounding.AwayFromZero);
+    }
 
     private void ApplyFilteredSnapshot()
     {
@@ -267,7 +276,7 @@ internal sealed class ThumbnailFoundryPanel : Panel
                     .Where(sheet => _filter.MatchesSheet(sheet.PageViewId))
                     .ToArray(),
             };
-        _grid.SetSnapshot(visible, GridWidth(), _sizeSlider.Value, GridMinimumHeight());
+        _grid.SetSnapshot(visible, GridWidth(), Density, GridMinimumHeight());
         _scrollable.UpdateScrollSizes();
     }
 
@@ -355,7 +364,7 @@ internal sealed class ThumbnailFoundryPanel : Panel
             return;
         }
 
-        var dialog = new BatchPropertiesDialog(snapshot, targets);
+        var dialog = new BatchCreateLayoutsDialog(snapshot, targets);
         dialog.ShowModal(this);
         if (dialog.Succeeded) RefreshSnapshot();
     }

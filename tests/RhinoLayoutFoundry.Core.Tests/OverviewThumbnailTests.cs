@@ -43,6 +43,38 @@ public sealed class OverviewThumbnailTests
     }
 
     [Fact]
+    public void QueueReconciliationRemovesOnlyIneligiblePendingRequests()
+    {
+        var queue = new OverviewThumbnailRequestQueue();
+        var retained = Key(TestSnapshots.SheetOneId);
+        var removed = Key(TestSnapshots.SheetTwoId);
+        queue.Enqueue(new OverviewThumbnailRequest(retained, 10));
+        queue.Enqueue(new OverviewThumbnailRequest(removed, 10));
+
+        queue.RetainPending(key => key.SheetPageViewId == retained.SheetPageViewId);
+
+        Assert.Equal(1, queue.PendingCount);
+        Assert.Equal(retained, queue.TakeNext()!.Key);
+    }
+
+    [Fact]
+    public void QueueReconciliationDoesNotDisturbInFlightRequests()
+    {
+        var queue = new OverviewThumbnailRequestQueue();
+        var key = Key(TestSnapshots.SheetOneId);
+        queue.Enqueue(new OverviewThumbnailRequest(key, 10));
+        Assert.Equal(key, queue.TakeNext()!.Key);
+
+        queue.RetainPending(_ => false);
+        queue.Enqueue(new OverviewThumbnailRequest(key, 1));
+        Assert.Equal(0, queue.PendingCount);
+
+        queue.Complete(key);
+        queue.Enqueue(new OverviewThumbnailRequest(key, 1));
+        Assert.Equal(1, queue.PendingCount);
+    }
+
+    [Fact]
     public void CacheEvictsLeastRecentlyUsedEntryByCount()
     {
         var cache = new OverviewThumbnailCache(maximumEntryCount: 2, maximumByteCount: 100);

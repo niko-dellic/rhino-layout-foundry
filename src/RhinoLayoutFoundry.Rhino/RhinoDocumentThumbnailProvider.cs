@@ -67,10 +67,33 @@ internal sealed class RhinoDocumentThumbnailProvider : IDocumentThumbnailProvide
             return new OverviewThumbnailResult(request.Key, null, "The layout sheet no longer exists.");
         }
 
-        // Capturing the RhinoPageView directly captures its on-screen viewport,
-        // including the gray area surrounding the paper. Build print-preview
-        // settings from the page instead so the bitmap media is the sheet itself.
-        using var pageSettings = new ViewCaptureSettings(page, 72.0)
+        var pageWidthInches = page.PageWidth * RhinoMath.UnitScale(
+            document!.PageUnitSystem,
+            UnitSystem.Inches);
+        var pageHeightInches = page.PageHeight * RhinoMath.UnitScale(
+            document.PageUnitSystem,
+            UnitSystem.Inches);
+        if (!double.IsFinite(pageWidthInches) || pageWidthInches <= 0 ||
+            !double.IsFinite(pageHeightInches) || pageHeightInches <= 0)
+        {
+            return new OverviewThumbnailResult(
+                request.Key,
+                null,
+                "The layout sheet has an invalid paper size.");
+        }
+
+        var requestedSize = new System.Drawing.Size(request.Key.Width, request.Key.Height);
+        var captureDpi = Math.Min(
+            request.Key.Width / pageWidthInches,
+            request.Key.Height / pageHeightInches);
+
+        // CreatePreviewSettings scales an existing print-preview projection.
+        // Rhino 8 on Retina macOS can allocate the requested 2x bitmap while
+        // leaving page/detail drawing at the previous 1x projection, producing
+        // a correct white media rectangle with all content confined to its
+        // upper-left quadrant. Construct the capture at its final media size and
+        // DPI instead so Rhino builds every detail viewport at the same scale.
+        using var captureSettings = new ViewCaptureSettings(page, requestedSize, captureDpi)
         {
             // Preserve Rhino's canonical per-detail display pipeline. The
             // configured gray viewport background is intentionally retained so
@@ -84,29 +107,11 @@ internal sealed class RhinoDocumentThumbnailProvider : IDocumentThumbnailProvide
             OutputColor = ViewCaptureSettings.ColorMode.DisplayColor,
             UsePrintWidths = false,
         };
-        using var previewSettings = pageSettings.CreatePreviewSettings(
-            new System.Drawing.Size(request.Key.Width, request.Key.Height));
-        if (previewSettings is null)
-        {
-            return new OverviewThumbnailResult(
-                request.Key,
-                null,
-                "Rhino could not create page-only preview settings.");
-        }
+        captureSettings.SetLayout(
+            requestedSize,
+            new System.Drawing.Rectangle(System.Drawing.Point.Empty, requestedSize));
 
-        // CreatePreviewSettings scales the page media but Rhino versions have
-        // differed in which output flags they copy. Reassert the fidelity-first
-        // display behavior on the final settings passed to CaptureToBitmap.
-        previewSettings.DrawBackground = true;
-        previewSettings.DrawBackgroundBitmap = false;
-        previewSettings.DrawWallpaper = false;
-        previewSettings.DrawGrid = false;
-        previewSettings.DrawAxis = false;
-        previewSettings.RasterMode = true;
-        previewSettings.OutputColor = ViewCaptureSettings.ColorMode.DisplayColor;
-        previewSettings.UsePrintWidths = false;
-
-        using var bitmap = ViewCapture.CaptureToBitmap(previewSettings);
+        using var bitmap = ViewCapture.CaptureToBitmap(captureSettings);
         if (bitmap is null)
         {
             return new OverviewThumbnailResult(request.Key, null, "Rhino did not return a page preview.");

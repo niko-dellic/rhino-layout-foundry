@@ -16,6 +16,7 @@ public sealed class ObserverFoundryPanel : Panel
     private readonly Label _status;
     private readonly FoundryToolbarIconButton _navigatorButton;
     private readonly FoundryToolbarIconButton _namedViewsButton;
+    private readonly SelectionInspectorPanel _inspector;
     private readonly FoundryToolbarIconButton _nestedPackingButton;
     private readonly FoundryToolbarIconButton _compactPackingButton;
     private readonly FoundryToolbarIconButton _gridAppearanceButton;
@@ -72,7 +73,7 @@ public sealed class ObserverFoundryPanel : Panel
         var zoomInButton = ToolbarButton(FoundryViewIcons.ZoomIn(), "Zoom in");
         _navigatorButton = ToolbarToggleButton(FoundryViewIcons.Navigator(), "Show or hide the Navigator");
         _navigatorButton.Checked = true;
-        _namedViewsButton = ToolbarToggleButton(FoundryViewIcons.NamedViews(), "Show or hide Named views");
+        _namedViewsButton = ToolbarToggleButton(FoundryViewIcons.Properties(), "Show or hide the selection Inspector");
         _nestedPackingButton = ToolbarToggleButton(
             FoundryViewIcons.NestedPacking(),
             "Nest child folder containers inside their parent folders");
@@ -140,6 +141,14 @@ public sealed class ObserverFoundryPanel : Panel
         _canvasOverlay.Add(_canvas, 0, 0);
         _canvasOverlay.Add(_canvasToolbar, 0, 0);
         _canvasOverlay.Add(_gridAppearanceTray, 0, 36);
+        _inspector = new SelectionInspectorPanel { Visible = false };
+        _canvasOverlay.Add(_inspector, 0, 38);
+        _inspector.OperationCompleted += (_, eventArgs) =>
+        {
+            _status.Text = ResultMessage(eventArgs.Result, eventArgs.SuccessMessage);
+            if (eventArgs.Result.Succeeded) RefreshSnapshot(fit: false);
+        };
+        _inspector.NamedViewPreviewsRequested += (_, _) => QueueNamedViewPreviews();
         _canvasOverlay.SizeChanged += (_, _) => QueueCanvasOverlayLayout();
         ApplySidebarVisibility();
         Content = new StackLayout
@@ -170,6 +179,8 @@ public sealed class ObserverFoundryPanel : Panel
             await ApplyBoardStateAsync(eventArgs.State, eventArgs.UndoDescription);
         _canvas.HierarchyMoveRequested += async (_, eventArgs) =>
             await MoveHierarchyAsync(eventArgs);
+        _canvas.HierarchyPlacementRequested += async (_, eventArgs) =>
+            await ReorganizeHierarchyAsync(eventArgs);
         _canvas.ReorderRequested += async (_, eventArgs) =>
             await ReorderAsync(eventArgs);
         _canvas.ReorderStepRequested += async (_, eventArgs) =>
@@ -291,7 +302,8 @@ public sealed class ObserverFoundryPanel : Panel
     private void ApplySidebarVisibility()
     {
         _canvas.SetNavigatorVisible(_navigatorButton.Checked);
-        _canvas.SetNamedViewsVisible(_namedViewsButton.Checked);
+        _canvas.SetNamedViewsVisible(false);
+        _inspector.Visible = _namedViewsButton.Checked;
         UpdateCanvasOverlayLayout();
     }
 
@@ -328,6 +340,13 @@ public sealed class ObserverFoundryPanel : Panel
         _canvas.Size = clientSize;
         _canvasToolbar.Size = new Size(clientSize.Width, 28);
         _canvasOverlay.Move(_canvasToolbar, 0, 0);
+        _inspector.Size = new Size(
+            Math.Min(SelectionInspectorPanel.OverlayWidth, Math.Max(0, clientSize.Width)),
+            Math.Max(0, clientSize.Height - 38));
+        _canvasOverlay.Move(
+            _inspector,
+            Math.Max(0, clientSize.Width - _inspector.Width),
+            38);
         var trayX = Math.Clamp(
             _gridAppearanceButton.Location.X,
             0,
@@ -397,6 +416,7 @@ public sealed class ObserverFoundryPanel : Panel
         _overlayLayoutTimer.Stop();
         _invalidationTimer.Stop();
         ResetThumbnailCapture();
+        _inspector.ClearNamedViewPreviews();
         _canvas.ReleasePreviews();
     }
 
@@ -432,6 +452,7 @@ public sealed class ObserverFoundryPanel : Panel
                 _thumbnailCache.Invalidate(_snapshot.DocumentRuntimeSerialNumber,
                     affectedSheetIds.Count == 0 ? null : affectedSheetIds);
             _namedViewPreviewContentVersion++;
+            _inspector.ClearNamedViewPreviews();
             _canvas.InvalidateNamedViewPreviews();
             ClearNamedViewPreviewRequests();
         }
@@ -449,6 +470,7 @@ public sealed class ObserverFoundryPanel : Panel
         if (documentChanged)
         {
             ResetThumbnailCapture();
+            _inspector.ClearNamedViewPreviews();
             _canvas.ReleasePreviews();
             if (previousSerial != 0) _thumbnailCache.Invalidate(previousSerial);
             _previewContentVersions.Clear();
@@ -476,6 +498,7 @@ public sealed class ObserverFoundryPanel : Panel
         if (!previousNamedViews.SequenceEqual(_snapshot.NamedViews, StringComparer.OrdinalIgnoreCase))
         {
             _namedViewPreviewContentVersion++;
+            _inspector.ClearNamedViewPreviews();
             _canvas.InvalidateNamedViewPreviews();
             ClearNamedViewPreviewRequests();
         }
@@ -506,6 +529,7 @@ public sealed class ObserverFoundryPanel : Panel
             selectionMatchesDocument ? LayoutFoundryUiHost.Selection.Selected : [],
             selectionMatchesDocument ? LayoutFoundryUiHost.Selection.Anchor : null);
         PopulateNavigator();
+        RefreshInspectorContext();
         // The shared Layout Foundry footer owns persistent document totals.
         // This local row is reserved for operation feedback and errors.
         _status.Text = string.Empty;
@@ -592,6 +616,18 @@ public sealed class ObserverFoundryPanel : Panel
             (_snapshot.HasDocument ? _snapshot.DocumentRuntimeSerialNumber : null)) return;
         _canvas.SetSelection(eventArgs.Selection, eventArgs.Anchor);
         if (!ReferenceEquals(eventArgs.Source, this)) PopulateNavigator();
+        RefreshInspectorContext();
+    }
+
+    private void RefreshInspectorContext()
+    {
+        var snapshot = LayoutFoundryUiHost.CaptureSnapshot();
+        IEnumerable<OverviewNodeKey> selection = snapshot is not null &&
+                        LayoutFoundryUiHost.Selection.DocumentRuntimeSerialNumber ==
+                        snapshot.DocumentRuntimeSerialNumber
+            ? LayoutFoundryUiHost.Selection.Selected
+            : [];
+        _inspector.SetContext(snapshot, selection);
     }
 
     private void QueueVisiblePreviews()
@@ -602,6 +638,14 @@ public sealed class ObserverFoundryPanel : Panel
         var cards = _canvas.VisibleSheets(includeOverscan: true);
         _canvas.Invalidate();
         var retained = cards.Select(card => card.Sheet.PageViewId).ToHashSet();
+        var contentVersions = _snapshot.Sheets.ToDictionary(
+            sheet => sheet.PageViewId,
+            sheet => sheet.PreviewContentVersion);
+        _thumbnailQueue.RetainPending(key =>
+            key.DocumentRuntimeSerialNumber == _snapshot.DocumentRuntimeSerialNumber &&
+            retained.Contains(key.SheetPageViewId) &&
+            contentVersions.TryGetValue(key.SheetPageViewId, out var contentVersion) &&
+            contentVersion == key.ContentVersion);
         // Decoded bitmaps are held only for visible/overscan cards. Encoded PNGs
         // remain available in the bounded LRU cache for immediate return visits.
         _canvas.PrunePreviews(retained);
@@ -649,7 +693,8 @@ public sealed class ObserverFoundryPanel : Panel
     private async Task CaptureNextThumbnailAsync()
     {
         if (_thumbnailCaptureInProgress) return;
-        var namedViewRequest = _canvas.NamedViewsUseThumbnails && _namedViewThumbnailQueue.Count > 0
+        var namedViewRequest = (_canvas.NamedViewsUseThumbnails || _inspector.UsesNamedViewThumbnails) &&
+                               _namedViewThumbnailQueue.Count > 0
             ? _namedViewThumbnailQueue.Dequeue()
             : null;
         var request = namedViewRequest is null ? _thumbnailQueue.TakeNext() : null;
@@ -672,10 +717,12 @@ public sealed class ObserverFoundryPanel : Panel
                     _snapshot.DocumentRuntimeSerialNumber == namedViewRequest.Key.DocumentRuntimeSerialNumber &&
                     _snapshot.NamedViews.Contains(namedViewRequest.Key.NamedViewName))
                 {
+                    var bitmap = new Bitmap(namedResult.PngBytes!);
                     _canvas.SetNamedViewPreview(
                         namedResult.Key.NamedViewName,
                         namedResult.Key.ContentVersion,
-                        new Bitmap(namedResult.PngBytes!));
+                        bitmap);
+                    _inspector.SetNamedViewPreview(namedResult.Key.NamedViewName, bitmap);
                 }
             }
             else if (request is not null)
@@ -691,7 +738,10 @@ public sealed class ObserverFoundryPanel : Panel
                     _snapshot.DocumentRuntimeSerialNumber == request.Key.DocumentRuntimeSerialNumber)
                 {
                     _thumbnailCache.Store(result.Key, result.PngBytes!);
-                    _canvas.SetPreview(result.Key, new Bitmap(result.PngBytes!));
+                    var retainDecoded = _canvas.VisibleSheets(includeOverscan: true)
+                        .Any(card => card.Sheet.PageViewId == request.Key.SheetPageViewId);
+                    if (retainDecoded)
+                        _canvas.SetPreview(result.Key, new Bitmap(result.PngBytes!));
                 }
             }
         }
@@ -706,10 +756,14 @@ public sealed class ObserverFoundryPanel : Panel
 
     private void QueueNamedViewPreviews()
     {
-        if (!_snapshot.HasDocument || !_canvas.NamedViewsUseThumbnails) return;
-        foreach (var name in _canvas.VisibleNamedViews())
+        if (!_snapshot.HasDocument ||
+            (!_canvas.NamedViewsUseThumbnails && !_inspector.UsesNamedViewThumbnails)) return;
+        foreach (var name in _canvas.VisibleNamedViews()
+                     .Concat(_inspector.VisibleNamedViews())
+                     .Distinct(StringComparer.OrdinalIgnoreCase))
         {
-            if (_canvas.HasNamedViewPreview(name, _namedViewPreviewContentVersion)) continue;
+            if (_canvas.HasNamedViewPreview(name, _namedViewPreviewContentVersion) ||
+                _inspector.HasNamedViewPreview(name)) continue;
             var key = new NamedViewThumbnailKey(
                 _snapshot.DocumentRuntimeSerialNumber,
                 name,
@@ -780,6 +834,16 @@ public sealed class ObserverFoundryPanel : Panel
             result = await LayoutFoundryUiHost.MoveSheetsAsync(eventArgs.DestinationFolderId, eventArgs.SheetIds);
         else
             result = await LayoutFoundryUiHost.MoveFoldersAsync(eventArgs.DestinationFolderId, eventArgs.FolderIds);
+        _status.Text = ResultMessage(result, "Hierarchy updated.");
+        if (result.Succeeded) RefreshSnapshot(fit: false);
+    }
+
+    private async Task ReorganizeHierarchyAsync(ObserverHierarchyPlacementRequestedEventArgs eventArgs)
+    {
+        var result = await LayoutFoundryUiHost.ReorganizeHierarchyAsync(
+            eventArgs.FolderIds,
+            eventArgs.SheetIds,
+            eventArgs.Target);
         _status.Text = ResultMessage(result, "Hierarchy updated.");
         if (result.Succeeded) RefreshSnapshot(fit: false);
     }
@@ -879,7 +943,7 @@ public sealed class ObserverFoundryPanel : Panel
             return;
         }
 
-        var dialog = new BatchPropertiesDialog(snapshot, targets);
+        var dialog = new BatchCreateLayoutsDialog(snapshot, targets);
         dialog.ShowModal(this);
         if (dialog.Succeeded) RefreshSnapshot(fit: false);
     }

@@ -30,7 +30,7 @@ When adding or changing UI:
 5. Toolbar buttons need an opaque neutral resting surface because they can overlap white canvas sheets. Active controls use a neutral dark surface (`#151515` in dark mode), not a blue underline or saturated fill.
 6. Mutually exclusive view toggles belong in one shared background capsule; only the active segment gets its own border.
 7. Separate toolbar groups with a 1 × 20px `CanvasBorder` rule and `Space1` gaps.
-8. Fields use a quiet surface, legible value text, a low-contrast border, internal padding, and a neutral focus ring. Search icons stay inside the field and never overlap the caret.
+8. Fields use a quiet surface, legible value text, a low-contrast border, internal padding, and one neutral focus treatment owned by the outer Foundry shell. Center native single-line editors vertically inside the 32px shell; do not stretch them to the shell height. Suppress native focus bezels rather than stacking an inner ring inside the shared shell. Search icons stay inside the field and never overlap the caret.
 9. Interactive preview cards may keep larger geometry but must reuse the same border, hover, focus, selected, and disabled tokens.
 10. Use neutral hierarchy/zebra surfaces for differentiation. Preserve native selected-row colors over zebra backgrounds.
 11. Keep the existing blue selection accent only for genuine selection affordances such as canvas lasso/selection; do not use it for routine button or field focus chrome.

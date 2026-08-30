@@ -20,6 +20,8 @@ public sealed record ThumbnailGridLayout(
     double Padding,
     double Gap)
 {
+    private const double MinimumCardWidth = 104;
+
     public static ThumbnailGridLayout Create(
         int itemCount,
         double availableWidth,
@@ -29,10 +31,64 @@ public sealed record ThumbnailGridLayout(
     {
         itemCount = Math.Max(0, itemCount);
         availableWidth = Math.Max(1, availableWidth);
-        requestedCardWidth = Math.Clamp(requestedCardWidth, 104, 420);
+        requestedCardWidth = double.IsFinite(requestedCardWidth)
+            ? Math.Max(MinimumCardWidth, requestedCardWidth)
+            : MinimumCardWidth;
         var usableWidth = Math.Max(1, availableWidth - padding * 2);
         var columns = Math.Max(1, (int)Math.Floor((usableWidth + gap) / (requestedCardWidth + gap)));
         columns = Math.Min(Math.Max(1, itemCount), columns);
+        return CreateWithColumns(itemCount, availableWidth, columns, padding, gap);
+    }
+
+    /// <summary>
+    /// Maps a normalized size control to the useful column-count states instead
+    /// of raw pixels. This prevents the one-column state from occupying most of
+    /// the slider on wide viewports.
+    /// </summary>
+    public static ThumbnailGridLayout CreateForDensity(
+        int itemCount,
+        double availableWidth,
+        double density,
+        double padding = 16,
+        double gap = 16)
+    {
+        itemCount = Math.Max(0, itemCount);
+        availableWidth = Math.Max(1, availableWidth);
+        density = double.IsFinite(density) ? Math.Clamp(density, 0, 1) : 0;
+        var maximumColumns = MaximumColumns(itemCount, availableWidth, padding, gap);
+        var columns = Math.Clamp(
+            (int)Math.Round(
+                maximumColumns - density * (maximumColumns - 1),
+                MidpointRounding.AwayFromZero),
+            1,
+            maximumColumns);
+        return CreateWithColumns(itemCount, availableWidth, columns, padding, gap);
+    }
+
+    public static int MaximumColumns(
+        int itemCount,
+        double availableWidth,
+        double padding = 16,
+        double gap = 16)
+    {
+        itemCount = Math.Max(0, itemCount);
+        availableWidth = Math.Max(1, availableWidth);
+        var usableWidth = Math.Max(1, availableWidth - padding * 2);
+        var columns = Math.Max(
+            1,
+            (int)Math.Floor((usableWidth + gap) / (MinimumCardWidth + gap)));
+        return Math.Min(Math.Max(1, itemCount), columns);
+    }
+
+    private static ThumbnailGridLayout CreateWithColumns(
+        int itemCount,
+        double availableWidth,
+        int columns,
+        double padding,
+        double gap)
+    {
+        var usableWidth = Math.Max(1, availableWidth - padding * 2);
+        columns = Math.Clamp(columns, 1, Math.Max(1, itemCount));
         var cardWidth = Math.Max(1, (usableWidth - Math.Max(0, columns - 1) * gap) / columns);
         var imageAreaHeight = cardWidth * 0.78;
         var rowHeight = imageAreaHeight + 42 + gap;

@@ -73,6 +73,23 @@ public sealed class ObserverBoardLayoutTests
     }
 
     [Fact]
+    public void SpatialIndexKeepsCardVisibleWhenViewportIsEntirelyInsideIt()
+    {
+        var layout = new ObserverPlacementPlanner().Arrange(Snapshot());
+        var first = layout.Sheets.Values.First();
+        var index = new ObserverSpatialIndex(layout);
+        var closeZoomViewport = new ObserverRect(
+            first.Bounds.Center.X - 1,
+            first.Bounds.Center.Y - 1,
+            2,
+            2);
+
+        var visible = index.QuerySheets(closeZoomViewport);
+
+        Assert.Contains(visible, card => card.Sheet.PageViewId == first.Sheet.PageViewId);
+    }
+
+    [Fact]
     public void SpatialIndexHitsAndQueriesIndividualDetailsInsideASheet()
     {
         var snapshot = Snapshot();

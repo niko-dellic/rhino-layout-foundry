@@ -11,8 +11,12 @@ namespace RhinoLayoutFoundry.UI;
 internal sealed class BatchCreateLayoutsDialog : Dialog
 {
     private const string InheritDisplayMode = "Use layout/template setting";
+    private const string InheritPageDisplayMode = "Use page display mode";
+    private const string MixedDisplayMode = "Mixed";
     private const string InheritNamedView = "Use detail/template camera";
     private readonly DocumentSnapshot _snapshot;
+    private readonly BatchTarget[] _editTargets;
+    private readonly bool _isEditMode;
     private readonly IReadOnlyList<(Guid Id, string Label)> _folders;
     private readonly LayoutChoice[] _layoutChoices;
     private readonly TitleBlockChoice[] _titleBlockChoices;
@@ -31,6 +35,12 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
     private readonly DropDown _unitDropDown;
     private readonly FilteredPicker _displayModePicker;
     private readonly FoundryCheckBox _dedicatedDetailLayerCheck;
+    private readonly FoundryCheckBox _renameChangeCheck;
+    private readonly FoundryCheckBox _paperChangeCheck;
+    private readonly FoundryCheckBox _displayModeChangeCheck;
+    private readonly FoundryCheckBox _titleBlockChangeCheck;
+    private readonly FoundryCheckBox _revisionChangeCheck;
+    private readonly TextArea _revisionEditor;
     private readonly TitleBlockPreviewTray _titleBlockPreviewTray;
     private readonly TitleBlockSelectionDrawable _titleBlockSelectorPreview;
     private readonly NamedViewPreviewTray _namedViewPreviewTray;
@@ -63,14 +73,29 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
     private bool _updatingPreviewSelection;
 
     internal BatchCreateLayoutsDialog(DocumentSnapshot snapshot, Guid? preferredFolderId)
+        : this(snapshot, preferredFolderId, null)
+    {
+    }
+
+    internal BatchCreateLayoutsDialog(DocumentSnapshot snapshot, IReadOnlyList<BatchTarget> targets)
+        : this(snapshot, null, targets)
+    {
+    }
+
+    private BatchCreateLayoutsDialog(
+        DocumentSnapshot snapshot,
+        Guid? preferredFolderId,
+        IReadOnlyList<BatchTarget>? editTargets)
     {
         _snapshot = snapshot;
+        _editTargets = editTargets?.ToArray() ?? [];
+        _isEditMode = _editTargets.Length > 0;
         _folders = FolderChoices(snapshot);
         _layoutChoices = LayoutChoices(snapshot);
-        _titleBlockChoices = TitleBlockChoices(snapshot);
+        _titleBlockChoices = TitleBlockChoices(snapshot, _isEditMode);
         _namedViewChoices = NamedViewChoices(snapshot);
-        Title = "Create layouts";
-        MinimumSize = new Size(1360, 760);
+        Title = _isEditMode ? "Edit layouts" : "Create layouts";
+        MinimumSize = new Size(1080, 760);
         Resizable = true;
         Padding = new Padding(FoundryTheme.Space4);
         BackgroundColor = FoundryTheme.PanelBackground;
@@ -78,8 +103,13 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         _destinationDropDown = new DropDown { DataStore = _folders.Select(item => item.Label).ToArray() };
         _destinationDropDown.SelectedIndex = PreferredFolderIndex(preferredFolderId);
         _quantityStepper = IntegerStepper(1, 1, 999);
-        _patternBox = new TextBox { Text = "Page {index}" };
-        _startStepper = IntegerStepper(FirstAvailablePageNumber(snapshot), -999999, 999999);
+        _patternBox = new TextBox
+        {
+            Text = _isEditMode ? string.Empty : "Page {index}",
+            PlaceholderText = _isEditMode ? "Example: A-{index:000}" : string.Empty,
+        };
+        _startStepper = IntegerStepper(
+            _isEditMode ? 1 : FirstAvailablePageNumber(snapshot), -999999, 999999);
         _stepStepper = IntegerStepper(1, -999999, 999999);
         _paperPresetDropDown = new DropDown
         {
@@ -105,12 +135,34 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         _displayModePicker = new FilteredPicker(
             new[] { InheritDisplayMode }.Concat(snapshot.DisplayModes.Values),
             "Search display modes");
+        _displayModePicker.Width = 280;
         _displayModePicker.Text = InheritDisplayMode;
+        _renameChangeCheck = new FoundryCheckBox("Change layout names");
+        _paperChangeCheck = new FoundryCheckBox("Change page size");
+        _displayModeChangeCheck = new FoundryCheckBox("Change page display mode");
+        _titleBlockChangeCheck = new FoundryCheckBox("Change title block");
+        _revisionChangeCheck = new FoundryCheckBox(_isEditMode
+            ? _editTargets.Length == 1 ? "Replace revision schedule" : "Append revision"
+            : "Add initial revisions");
+        _renameChangeCheck.Visible = _isEditMode;
+        _paperChangeCheck.Visible = _isEditMode;
+        _displayModeChangeCheck.Visible = _isEditMode;
+        _titleBlockChangeCheck.Visible = _isEditMode;
+        _revisionEditor = new TextArea
+        {
+            Height = 76,
+            Wrap = false,
+            ToolTip = "One row per line: Code | Date | Description | Issued by | Checked by",
+        };
+        if (_isEditMode && _editTargets.Length == 1 &&
+            snapshot.Sheets.GetValueOrDefault(_editTargets[0].Key.Id)?.TitleBlockData is { } titleBlockData)
+            _revisionEditor.Text = FormatRevisions(titleBlockData.Revisions);
         _dedicatedDetailLayerCheck = new FoundryCheckBox(
             "Place details on dedicated .details layer",
             isChecked: true)
         {
             ToolTip = "Foundry tracks this layer by identity, so it can be renamed or moved in the layer hierarchy.",
+            Visible = !_isEditMode,
         };
         _titleBlockPreviewTray = new TitleBlockPreviewTray(_titleBlockChoices, selectedIndex: 0);
         _titleBlockSelectorPreview = new TitleBlockSelectionDrawable(_titleBlockChoices, selectedIndex: 0);
@@ -147,7 +199,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         _status.Wrap = WrapMode.Word;
         _status.Visible = false;
         _createButton = new FoundryDialogButton(
-            "Create layouts",
+            _isEditMode ? "Apply changes" : "Create layouts",
             FoundryDialogButtonStyle.Primary,
             118);
         var cancel = new FoundryDialogButton(
@@ -157,7 +209,24 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         _createButton.Click += async (_, _) => await CreateAsync();
         FoundryDialogActions.Bind(this, _createButton, cancel);
 
-        _drafts.Add(DraftFromEditors());
+        if (_isEditMode)
+        {
+            foreach (var target in _editTargets)
+                if (_snapshot.Sheets.TryGetValue(target.Key.Id, out var sheet))
+                    _drafts.Add(DraftFromSheet(sheet));
+        }
+        else
+        {
+            _drafts.Add(DraftFromEditors());
+        }
+        if (_isEditMode && _drafts.Count > 0)
+        {
+            LoadEditors(_drafts[0]);
+            var firstSheet = _snapshot.Sheets[_drafts[0].ExistingPageViewId!.Value];
+            var destinationIndex = _folders.Select((folder, index) => (folder, index))
+                .FirstOrDefault(item => item.folder.Id == firstSheet.FolderId).index;
+            _destinationDropDown.SelectedIndex = Math.Max(0, destinationIndex);
+        }
 
         _destinationDropDown.SelectedIndexChanged += (_, _) => QueueRefreshPreview();
         _quantityStepper.ValueChanged += (_, _) => ResizeDrafts();
@@ -173,6 +242,17 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         _layoutPreviewTray.SelectedIndexChanged += OnLayoutSelectionChanged;
         _layoutPreviewTray.SelectionCommitted += (_, _) => HideLayoutGallery();
         _displayModePicker.ValueChanged += (_, _) => ApplyDisplayModeToTargets();
+        _revisionEditor.TextChanged += (_, _) => RefreshPreview();
+        foreach (var check in new[]
+                 {
+                     _renameChangeCheck, _paperChangeCheck, _displayModeChangeCheck,
+                     _titleBlockChangeCheck, _revisionChangeCheck,
+                 })
+            check.CheckedChanged += (_, _) =>
+            {
+                RefreshEditControlState();
+                RefreshPreview();
+            };
         _dedicatedDetailLayerCheck.CheckedChanged += (_, _) => ApplyDedicatedDetailLayerToTargets();
         _titleBlockSelectorPreview.Activated += (_, _) => ToggleTitleBlockGallery();
         _titleBlockPreviewTray.SelectedIndexChanged += OnTitleBlockSelectionChanged;
@@ -208,7 +288,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Items =
             {
-                Header(),
+                Header(_isEditMode, _editTargets.Length),
                 new StackLayoutItem(CreateLayoutsTab(), true),
                 _status,
                 new TableLayout
@@ -218,6 +298,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                 },
             },
         };
+        RefreshEditControlState();
         RefreshPreview();
     }
 
@@ -231,17 +312,23 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         HorizontalContentAlignment = HorizontalAlignment.Stretch,
         Items =
         {
-            new TableLayout
+            new Scrollable
             {
-                Spacing = new Size(FoundryTheme.Space3, 0),
-                Rows =
+                Border = BorderType.None,
+                ExpandContentWidth = false,
+                ExpandContentHeight = false,
+                Content = new StackLayout
                 {
-                    new TableRow(
-                        new TableCell(Card("Batch", CreateBatchEditor())),
-                        new TableCell(Card("Page size", CreatePaperEditor())),
-                        new TableCell(Card("Details", CreateDetailEditor())),
-                        new TableCell(Card("Title block", CreateTitleBlockEditor())),
-                        new TableCell(Card("Layout && views", CreateLayoutEditor()), true)),
+                    Orientation = Orientation.Horizontal,
+                    VerticalContentAlignment = VerticalAlignment.Top,
+                    Spacing = FoundryTheme.Space3,
+                    Items =
+                    {
+                        FixedWidthCard("Batch", CreateBatchEditor(), 300),
+                        FixedWidthCard("Page size", CreatePaperEditor(), 250),
+                        FixedWidthCard("Layout && views", CreateLayoutEditor(), 720),
+                        FixedWidthCard("Revisions", CreateRevisionEditor(), 360),
+                    },
                 },
             },
             _layoutGroupChipScroll,
@@ -262,39 +349,101 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         },
     };
 
-    private Control CreateBatchEditor() => new TableLayout
+    private Control CreateBatchEditor()
     {
-        Spacing = new Size(FoundryTheme.Space2, FoundryTheme.Space2),
-        Rows =
+        var table = new TableLayout
         {
-            new TableRow(new Label { Text = "Destination" }, new TableCell(new FoundryFormField(_destinationDropDown), true)),
-            new TableRow(new Label { Text = "Quantity" }, new FoundryFormField(_quantityStepper)),
-            new TableRow(new Label { Text = "Name / pattern" }, new TableCell(new FoundryFormField(_patternBox), true)),
-            new TableRow(new Label { Text = "Start / step" }, new StackLayout
-            {
-                Orientation = Orientation.Horizontal,
-                Spacing = FoundryTheme.Space1,
-                Items = { new FoundryFormField(_startStepper), new FoundryFormField(_stepStepper) },
-            }),
+            Spacing = new Size(FoundryTheme.Space2, FoundryTheme.Space2),
+        };
+        table.Rows.Add(new TableRow(new Label { Text = "Destination" },
+            new TableCell(new FoundryFormField(_destinationDropDown), true)));
+        if (!_isEditMode)
+            table.Rows.Add(new TableRow(new Label { Text = "Quantity" }, new FoundryFormField(_quantityStepper)));
+        else
+            table.Rows.Add(new TableRow(new TableCell(_renameChangeCheck, true)));
+        table.Rows.Add(new TableRow(new Label { Text = "Name / pattern" },
+            new TableCell(new FoundryFormField(_patternBox), true)));
+        table.Rows.Add(new TableRow(new Label { Text = "Start / step" }, new StackLayout
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = FoundryTheme.Space1,
+            Items = { new FoundryFormField(_startStepper), new FoundryFormField(_stepStepper) },
+        }));
+        return table;
+    }
+
+    private Control CreateRevisionEditor() => new StackLayout
+    {
+        Spacing = FoundryTheme.Space2,
+        Items =
+        {
+            _revisionChangeCheck,
+            FoundryTheme.MutedLabel(_isEditMode && _editTargets.Length > 1
+                ? "Enter one row to append: Code | Date | Description | Issued by | Checked by"
+                : "One row per line: Code | Date | Description | Issued by | Checked by"),
+            new FoundryFormField(_revisionEditor),
         },
     };
 
-    private Control CreateLayoutEditor() => new StackLayout
+    private Control CreateLayoutEditor()
     {
-        Spacing = FoundryTheme.Space2,
-        HorizontalContentAlignment = HorizontalAlignment.Stretch,
-        Items =
+        var editor = new StackLayout
         {
-            _layoutSelectorPreview,
-            new Label
+            Spacing = FoundryTheme.Space3,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+        };
+        if (_isEditMode)
+            editor.Items.Add(FoundryTheme.MutedLabel(
+                "Existing detail arrangements and cameras are retained."));
+        else
+            editor.Items.Add(_layoutSelectorPreview);
+        editor.Items.Add(SectionLabel("Sheet defaults"));
+        editor.Items.Add(CreateSheetDefaultsEditor());
+        editor.Items.Add(SectionLabel("Title block"));
+        editor.Items.Add(CreateTitleBlockEditor());
+        if (!_isEditMode)
+        {
+            editor.Items.Add(SectionLabel("Per-detail views & overrides"));
+            editor.Items.Add(_detailViewAssignmentsHost);
+        }
+        return editor;
+    }
+
+    private Control CreateSheetDefaultsEditor()
+    {
+        var modeEditor = new StackLayout
+        {
+            Spacing = FoundryTheme.Space1,
+            Items =
             {
-                Text = "Assign a named view independently to each detail.",
-                TextColor = FoundryTheme.MutedText,
-                Wrap = WrapMode.Word,
+                _displayModeChangeCheck,
+                new Label { Text = "Sheet display mode" },
+                new Panel { Width = 280, Content = _displayModePicker },
+                FoundryTheme.MutedLabel("Each detail inherits this unless it has an override."),
             },
-            _detailViewAssignmentsHost,
-        },
-    };
+        };
+        if (_isEditMode) return modeEditor;
+        return new StackLayout
+        {
+            Orientation = Orientation.Horizontal,
+            VerticalContentAlignment = VerticalAlignment.Top,
+            Spacing = FoundryTheme.Space3,
+            Items =
+            {
+                new Panel { Width = 300, Content = modeEditor },
+                new StackLayoutItem(new StackLayout
+                {
+                    Spacing = FoundryTheme.Space1,
+                    Items =
+                    {
+                        _dedicatedDetailLayerCheck,
+                        FoundryTheme.MutedLabel(
+                            "Foundry keeps tracking this layer if it is renamed or moved."),
+                    },
+                }, true),
+            },
+        };
+    }
 
     private Control CreatePaperEditor() => new StackLayout
     {
@@ -302,6 +451,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         HorizontalContentAlignment = HorizontalAlignment.Stretch,
         Items =
         {
+            _paperChangeCheck,
             new FoundryFormField(_paperPresetDropDown),
             new FoundryFormField(_orientationDropDown),
             new TableLayout
@@ -317,30 +467,13 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         },
     };
 
-    private Control CreateDetailEditor() => new StackLayout
-    {
-        Spacing = FoundryTheme.Space2,
-        HorizontalContentAlignment = HorizontalAlignment.Stretch,
-        Items =
-        {
-            new Label { Text = "Apply one Rhino display mode to every created detail." },
-            _displayModePicker,
-            _dedicatedDetailLayerCheck,
-            new Label
-            {
-                Text = "The layer can be renamed or moved later; Foundry will continue using the same layer.",
-                TextColor = FoundryTheme.MutedText,
-                Wrap = WrapMode.Word,
-            },
-        },
-    };
-
     private Control CreateTitleBlockEditor() => new StackLayout
     {
         Spacing = FoundryTheme.Space2,
         HorizontalContentAlignment = HorizontalAlignment.Stretch,
         Items =
         {
+            _titleBlockChangeCheck,
             _titleBlockSelectorPreview,
         },
     };
@@ -381,6 +514,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
 
     private BatchCreateSheetsRequest Request()
     {
+        var revisions = ParseRevisions(out _);
         return new BatchCreateSheetsRequest(
             _snapshot.DocumentRuntimeSerialNumber,
             _snapshot.Revision,
@@ -390,12 +524,47 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             (int)_startStepper.Value,
             (int)_stepStepper.Value,
             CreationSpecs: _drafts.Select(draft => draft.ToSpec()).ToArray(),
-            ProjectData: _snapshot.ProjectInfo);
+            ProjectData: _snapshot.ProjectInfo,
+            InitialRevisions: _revisionChangeCheck.Checked == true ? revisions : null);
+    }
+
+    private BatchUpdateSheetsRequest UpdateRequest()
+    {
+        var displayModeId = _displayModeChangeCheck.Checked == true
+            ? DisplayModeId(_displayModePicker.Text.Trim())
+            : null;
+        var titleBlock = _titleBlockChoices[Math.Max(0, _titleBlockPreviewTray.SelectedIndex)];
+        var revisions = ParseRevisions(out _);
+        return new BatchUpdateSheetsRequest(
+            _snapshot.DocumentRuntimeSerialNumber,
+            _snapshot.Revision,
+            TargetDraftIndices().Select(index => _drafts[index].ExistingPageViewId)
+                .OfType<Guid>().ToArray(),
+            _renameChangeCheck.Checked == true ? _patternBox.Text : null,
+            (int)_startStepper.Value,
+            (int)_stepStepper.Value,
+            _paperChangeCheck.Checked == true ? _widthStepper.Value : null,
+            _paperChangeCheck.Checked == true ? _heightStepper.Value : null,
+            _paperChangeCheck.Checked == true ? Units[Math.Max(0, _unitDropDown.SelectedIndex)] : null,
+            displayModeId,
+            ChangeTitleBlock: _titleBlockChangeCheck.Checked == true,
+            TitleBlockSourceInstanceObjectId: titleBlock.SourceInstanceObjectId,
+            ReplaceRevisionSchedule: _revisionChangeCheck.Checked == true && _editTargets.Length == 1
+                ? revisions
+                : null,
+            AppendRevision: _revisionChangeCheck.Checked == true && _editTargets.Length > 1
+                ? revisions.FirstOrDefault()
+                : null);
     }
 
     private void RefreshPreview(bool refreshDetailAssignments = true)
     {
         if (_updatingPaper || _folders.Count == 0) return;
+        if (_isEditMode)
+        {
+            RefreshEditPreview();
+            return;
+        }
         var selectedDraftIds = SelectedDraftIds().ToHashSet();
         var plan = new BatchCreateSheetsPlanner().Plan(Request(), _snapshot);
         var changes = plan.Changes.OfType<CreateSheetFromTemplateChange>().ToArray();
@@ -436,13 +605,86 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         UpdateSelectionHint();
         if (refreshDetailAssignments) RefreshDetailAssignments();
         var pickerError = PickerError();
+        ParseRevisions(out var revisionError);
         var diagnostics = string.Join(" ", plan.Diagnostics
             .Where(item => item.Severity is DiagnosticSeverity.Error or DiagnosticSeverity.Warning)
             .Where(item => item.Code != "batch.undo_unavailable")
             .Select(item => item.Message));
-        SetStatus(pickerError ?? diagnostics);
+        SetStatus(pickerError ?? (_revisionChangeCheck.Checked == true ? revisionError : null) ?? diagnostics);
         _createButton.Text = CreatedCount == 1 ? "Create layout" : $"Create {CreatedCount} layouts";
-        _createButton.Enabled = plan.CanApply && pickerError is null;
+        _createButton.Enabled = plan.CanApply && pickerError is null && revisionError is null;
+    }
+
+    private void RefreshEditPreview()
+    {
+        var selectedDraftIds = SelectedDraftIds().ToHashSet();
+        var plan = new BatchUpdateSheetsPlanner().Plan(UpdateRequest(), _snapshot);
+        var change = plan.Changes.OfType<BatchUpdateSheetsChange>().SingleOrDefault();
+        var targetIds = change?.SheetPageViewIds.ToHashSet() ?? [];
+        var allRows = _drafts.Select((draft, index) =>
+        {
+            var sheet = _snapshot.Sheets[draft.ExistingPageViewId!.Value];
+            var targeted = targetIds.Contains(sheet.PageViewId);
+            var paperWidth = targeted && change?.PaperWidth is { } width ? width : sheet.PageWidth;
+            var paperHeight = targeted && change?.PaperHeight is { } height ? height : sheet.PageHeight;
+            var paperUnit = targeted && change?.PaperUnitSystem is { } unit ? unit : sheet.PageUnitSystem;
+            var mode = targeted && change?.DetailDisplayModeId is { } modeId
+                ? _snapshot.DisplayModes.GetValueOrDefault(modeId) ?? "Unavailable"
+                : BatchTargetDisplayMode(sheet);
+            var titleBlock = targeted && change?.ChangeTitleBlock == true
+                ? _titleBlockChoices.FirstOrDefault(choice =>
+                    choice.SourceInstanceObjectId == change.TitleBlockSourceInstanceObjectId)?.Label ?? "No title block"
+                : sheet.TitleBlockDefinitionName ?? "None";
+            return new CreationPreviewRow(
+                draft.DraftId,
+                LayoutGroupKey.For(draft.Layout),
+                (index + 1).ToString(),
+                targeted && change is not null && change.NewNames.TryGetValue(sheet.PageViewId, out var name)
+                    ? name
+                    : sheet.Name,
+                draft.Layout.Label,
+                $"{paperWidth:0.###} × {paperHeight:0.###} {paperUnit}",
+                sheet.Details.Count.ToString(),
+                "Retained",
+                mode,
+                titleBlock);
+        }).ToArray();
+        EnsureActiveGroupExists();
+        _visiblePreviewRows.Clear();
+        _visiblePreviewRows.AddRange(allRows.Where(row =>
+            _activeGroupFilter is null || row.GroupKey == _activeGroupFilter));
+        _updatingPreviewSelection = true;
+        try
+        {
+            _previewGrid.DataStore = _visiblePreviewRows.ToArray();
+            _previewGrid.SelectedRows = _visiblePreviewRows
+                .Select((row, index) => (row, index))
+                .Where(item => selectedDraftIds.Contains(item.row.DraftId))
+                .Select(item => item.index).ToArray();
+        }
+        finally
+        {
+            _updatingPreviewSelection = false;
+        }
+        _countLabel.Text = $"Existing layouts  ·  {_drafts.Count}";
+        RefreshGroupChips();
+        UpdateSelectionHint();
+        var pickerError = PickerError();
+        ParseRevisions(out var revisionError);
+        var diagnostics = string.Join(" ", plan.Diagnostics
+            .Where(item => item.Severity == DiagnosticSeverity.Error && item.Code != "batch.no_changes")
+            .Select(item => item.Message));
+        SetStatus(pickerError ?? (_revisionChangeCheck.Checked == true ? revisionError : null) ?? diagnostics);
+        _createButton.Text = "Apply changes";
+        _createButton.Enabled = plan.CanApply && pickerError is null && revisionError is null;
+    }
+
+    private static string BatchTargetDisplayMode(SheetSnapshot sheet)
+    {
+        var modes = sheet.Details.Select(detail => detail.DisplayModeName)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        return modes.Length switch { 0 => "Rhino default", 1 => modes[0], _ => "Mixed" };
     }
 
     private void QueueRefreshPreview()
@@ -452,15 +694,24 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
 
     private string? PickerError()
     {
-        if (!string.Equals(_displayModePicker.Text.Trim(), InheritDisplayMode, StringComparison.OrdinalIgnoreCase) &&
+        if ((!_isEditMode || _displayModeChangeCheck.Checked == true) &&
+            !string.Equals(_displayModePicker.Text.Trim(), InheritDisplayMode, StringComparison.OrdinalIgnoreCase) &&
             !_snapshot.DisplayModes.Values.Any(name => string.Equals(
                 name, _displayModePicker.Text.Trim(), StringComparison.OrdinalIgnoreCase)))
             return "Choose an available Rhino display mode or use the layout/template setting.";
+        if (_isEditMode && _displayModeChangeCheck.Checked == true &&
+            string.Equals(_displayModePicker.Text.Trim(), InheritDisplayMode, StringComparison.OrdinalIgnoreCase))
+            return "Choose a Rhino display mode to apply to the existing details.";
         return null;
     }
 
     private async Task CreateAsync()
     {
+        if (_isEditMode)
+        {
+            await ApplyEditsAsync();
+            return;
+        }
         try
         {
             _createButton.Enabled = false;
@@ -488,11 +739,88 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         }
     }
 
+    private async Task ApplyEditsAsync()
+    {
+        try
+        {
+            _createButton.Enabled = false;
+            _createButton.Text = "Applying…";
+            SetStatus("Applying layout changes…");
+            var result = await LayoutFoundryUiHost.BatchUpdateSheetsAsync(UpdateRequest());
+            if (!result.Succeeded)
+            {
+                RefreshPreview();
+                SetStatus(string.Join(" ", result.Diagnostics.Select(item => item.Message)));
+                MessageBox.Show(this, _status.Text, "Edit layouts", MessageBoxType.Error);
+                return;
+            }
+            Succeeded = true;
+            Close();
+        }
+        catch (Exception exception)
+        {
+            RefreshPreview();
+            SetStatus($"Layout update failed: {exception.Message}");
+            MessageBox.Show(this, _status.Text, "Edit layouts", MessageBoxType.Error);
+        }
+    }
+
     private void SetStatus(string? message)
     {
         _status.Text = message ?? string.Empty;
         _status.Visible = !string.IsNullOrWhiteSpace(_status.Text);
     }
+
+    private void RefreshEditControlState()
+    {
+        if (!_isEditMode)
+        {
+            _revisionEditor.Enabled = _revisionChangeCheck.Checked == true;
+            return;
+        }
+        _destinationDropDown.Enabled = false;
+        var rename = _renameChangeCheck.Checked == true;
+        _patternBox.Enabled = rename;
+        _startStepper.Enabled = rename;
+        _stepStepper.Enabled = rename;
+        var paper = _paperChangeCheck.Checked == true;
+        _paperPresetDropDown.Enabled = paper;
+        _orientationDropDown.Enabled = paper;
+        _widthStepper.Enabled = paper;
+        _heightStepper.Enabled = paper;
+        _unitDropDown.Enabled = paper;
+        _displayModePicker.Enabled = _displayModeChangeCheck.Checked == true;
+        _titleBlockSelectorPreview.Enabled = _titleBlockChangeCheck.Checked == true;
+        _revisionEditor.Enabled = _revisionChangeCheck.Checked == true;
+    }
+
+    private IReadOnlyList<SheetRevisionRecord> ParseRevisions(out string? error)
+    {
+        error = null;
+        var result = new List<SheetRevisionRecord>();
+        foreach (var raw in _revisionEditor.Text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
+        {
+            var parts = raw.Split('|').Select(part => part.Trim()).ToArray();
+            if (parts.Length is < 1 or > 5)
+            {
+                error = "Revision rows must contain at most five pipe-separated values.";
+                return result;
+            }
+            Array.Resize(ref parts, 5);
+            for (var index = 0; index < parts.Length; index++) parts[index] ??= string.Empty;
+            result.Add(new SheetRevisionRecord(parts[0], parts[1], parts[2], parts[3], parts[4]));
+        }
+        if (_revisionChangeCheck.Checked != true) return result;
+        if (!_isEditMode && result.Count == 0)
+            error = "Enter at least one revision row or turn off initial revisions.";
+        else if (_isEditMode && _editTargets.Length > 1 && result.Count != 1)
+            error = "Enter exactly one revision row when editing multiple layouts.";
+        return result;
+    }
+
+    private static string FormatRevisions(IEnumerable<SheetRevisionRecord> revisions) =>
+        string.Join(Environment.NewLine, revisions.Select(revision => string.Join(" | ",
+            revision.Code, revision.Date, revision.Description, revision.IssuedBy, revision.CheckedBy)));
 
     private void ResizeDrafts()
     {
@@ -512,12 +840,49 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         var titleBlock = _titleBlockChoices[Math.Max(0, _titleBlockPreviewTray.SelectedIndex)];
         return new CreationDraft(
             Guid.NewGuid(),
+            null,
             _layoutChoices[Math.Max(0, _layoutPreviewTray.SelectedIndex)],
             CurrentPaper(),
             displayModeId == Guid.Empty ? null : displayModeId,
             _dedicatedDetailLayerCheck.Checked == true,
             titleBlock,
-            DefaultNamedViews(_layoutChoices[Math.Max(0, _layoutPreviewTray.SelectedIndex)]));
+            DefaultNamedViews(_layoutChoices[Math.Max(0, _layoutPreviewTray.SelectedIndex)]),
+            DefaultDetailDisplayModes(_layoutChoices[Math.Max(0, _layoutPreviewTray.SelectedIndex)]));
+    }
+
+    private CreationDraft DraftFromSheet(SheetSnapshot sheet)
+    {
+        var layout = sheet.Details.Count switch
+        {
+            0 => _layoutChoices[0],
+            1 => _layoutChoices[1],
+            2 => _layoutChoices[3],
+            4 => _layoutChoices[4],
+            _ => new LayoutChoice(
+                $"Existing — {sheet.Details.Count} details",
+                BuiltInLayoutKind.Blank,
+                sheet.PageViewId,
+                null),
+        };
+        var modes = sheet.Details.Select(detail => detail.DisplayModeId).Distinct().ToArray();
+        var pageMode = modes.Length == 1 ? modes[0] : (Guid?)null;
+        var titleBlock = _titleBlockChoices.FirstOrDefault(choice =>
+            choice.SourceInstanceObjectId == sheet.TitleBlockInstanceObjectId) ?? _titleBlockChoices[0];
+        return new CreationDraft(
+            Guid.NewGuid(),
+            sheet.PageViewId,
+            layout,
+            new PaperRecipe(
+                sheet.PageWidth > 0 ? sheet.PageWidth : 420,
+                sheet.PageHeight > 0 ? sheet.PageHeight : 297,
+                string.IsNullOrWhiteSpace(sheet.PageUnitSystem) ? "Millimeters" : sheet.PageUnitSystem),
+            pageMode,
+            true,
+            titleBlock,
+            DefaultNamedViews(layout),
+            sheet.Details.Select(detail => pageMode == detail.DisplayModeId
+                ? (Guid?)null
+                : detail.DisplayModeId).ToArray());
     }
 
     private void ApplyLayoutToTargets()
@@ -530,6 +895,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             {
                 Layout = layout,
                 NamedViewsByDetail = DefaultNamedViews(layout),
+                DetailDisplayModesByDetail = DefaultDetailDisplayModes(layout),
             };
         _activeGroupFilter = LayoutGroupKey.For(layout);
         RefreshPreview();
@@ -1057,7 +1423,40 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             }
             displayModeId = match.Key;
         }
-        ApplyToTargets(draft => draft with { DisplayModeId = displayModeId });
+        ApplyToTargets(draft => draft with { PageDisplayModeId = displayModeId });
+    }
+
+    private void ApplyDetailDisplayModeToTargets(int detailIndex, Guid? displayModeId)
+    {
+        if (_updatingEditors) return;
+        foreach (var index in TargetDraftIndices())
+        {
+            var values = _drafts[index].DetailDisplayModesByDetail.ToArray();
+            if (detailIndex >= values.Length) continue;
+            values[detailIndex] = displayModeId;
+            _drafts[index] = _drafts[index] with { DetailDisplayModesByDetail = values };
+        }
+        RefreshPreview();
+    }
+
+    private Guid? DisplayModeId(string? label)
+    {
+        if (string.IsNullOrWhiteSpace(label) ||
+            string.Equals(label, InheritPageDisplayMode, StringComparison.OrdinalIgnoreCase))
+            return null;
+        var match = _snapshot.DisplayModes.FirstOrDefault(pair => string.Equals(
+            pair.Value, label, StringComparison.OrdinalIgnoreCase));
+        return match.Key == Guid.Empty ? null : match.Key;
+    }
+
+    private int DetailDisplayModeIndex(IReadOnlyList<string> choices, Guid? displayModeId)
+    {
+        var label = displayModeId is { } id
+            ? _snapshot.DisplayModes.GetValueOrDefault(id) ?? InheritPageDisplayMode
+            : InheritPageDisplayMode;
+        var index = choices.Select((choice, choiceIndex) => (choice, choiceIndex))
+            .FirstOrDefault(item => string.Equals(item.choice, label, StringComparison.OrdinalIgnoreCase));
+        return index.choice is null ? 0 : index.choiceIndex;
     }
 
     private void ApplyDedicatedDetailLayerToTargets()
@@ -1157,6 +1556,11 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         var selected = SelectedDraftIndices();
         UpdateSelectionHint();
         if (selected.Length > 0) LoadEditors(_drafts[selected[0]]);
+        if (_isEditMode)
+        {
+            RefreshPreview(refreshDetailAssignments: false);
+            return;
+        }
         RefreshDetailAssignments();
     }
 
@@ -1164,6 +1568,11 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
     {
         _previewGrid.SelectedRows = [];
         UpdateSelectionHint();
+        if (_isEditMode)
+        {
+            RefreshPreview(refreshDetailAssignments: false);
+            return;
+        }
         RefreshDetailAssignments();
     }
 
@@ -1279,35 +1688,75 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             return;
         }
 
+        var detailCards = new List<Control>();
         for (var detailIndex = 0; detailIndex < details.Count; detailIndex++)
         {
-            var values = targets.Select(index => _drafts[index].NamedViewsByDetail[detailIndex]).ToArray();
-            var mixed = values.Skip(1).Any(value => !string.Equals(
-                value, values[0], StringComparison.OrdinalIgnoreCase));
+            var namedViewValues = targets.Select(index => _drafts[index].NamedViewsByDetail[detailIndex]).ToArray();
+            var mixedNamedViews = namedViewValues.Skip(1).Any(value => !string.Equals(
+                value, namedViewValues[0], StringComparison.OrdinalIgnoreCase));
             var selector = new NamedViewSelectionDrawable(
                 _namedViewChoices,
                 _namedViewPreviewTray,
                 details[detailIndex],
-                NamedViewIndex(values[0]),
-                mixed);
+                NamedViewIndex(namedViewValues[0]),
+                mixedNamedViews);
             var capturedIndex = detailIndex;
             selector.Activated += (_, _) => ToggleNamedViewGallery(selector, capturedIndex);
             _detailViewSelectors.Add(selector);
+
+            var displayModeValues = targets
+                .Select(index => _drafts[index].DetailDisplayModesByDetail[detailIndex])
+                .ToArray();
+            var mixedDisplayModes = displayModeValues.Skip(1).Any(value => value != displayModeValues[0]);
+            var choices = (mixedDisplayModes ? new[] { MixedDisplayMode } : Array.Empty<string>())
+                .Concat(new[] { InheritPageDisplayMode })
+                .Concat(_snapshot.DisplayModes.Values.OrderBy(value => value, StringComparer.OrdinalIgnoreCase))
+                .ToArray();
+            var displayModeDropDown = new DropDown
+            {
+                Width = 145,
+                DataStore = choices,
+                SelectedIndex = mixedDisplayModes
+                    ? 0
+                    : DetailDisplayModeIndex(choices, displayModeValues[0]),
+                ToolTip = $"Override the page display mode for {details[detailIndex]}",
+            };
+            displayModeDropDown.SelectedIndexChanged += (_, _) =>
+            {
+                var selected = displayModeDropDown.SelectedValue as string;
+                if (string.Equals(selected, MixedDisplayMode, StringComparison.Ordinal)) return;
+                ApplyDetailDisplayModeToTargets(capturedIndex, DisplayModeId(selected));
+            };
+            detailCards.Add(new StackLayout
+            {
+                Spacing = FoundryTheme.Space1,
+                Items =
+                {
+                    selector,
+                    new StackLayout
+                    {
+                        Orientation = Orientation.Horizontal,
+                        VerticalContentAlignment = VerticalAlignment.Center,
+                        Spacing = FoundryTheme.Space1,
+                        Items = { new Label { Text = "Display mode" }, new FoundryFormField(displayModeDropDown) },
+                    },
+                },
+            });
         }
 
-        if (_detailViewSelectors.Count == 1)
+        if (detailCards.Count == 1)
         {
-            _detailViewAssignmentsHost.Content = _detailViewSelectors[0];
+            _detailViewAssignmentsHost.Content = detailCards[0];
             return;
         }
 
         var table = new TableLayout { Spacing = new Size(FoundryTheme.Space2, FoundryTheme.Space2) };
-        for (var index = 0; index < _detailViewSelectors.Count; index += 2)
+        for (var index = 0; index < detailCards.Count; index += 2)
         {
             table.Rows.Add(new TableRow(
-                new TableCell(_detailViewSelectors[index], true),
-                index + 1 < _detailViewSelectors.Count
-                    ? new TableCell(_detailViewSelectors[index + 1], true)
+                new TableCell(detailCards[index], true),
+                index + 1 < detailCards.Count
+                    ? new TableCell(detailCards[index + 1], true)
                     : new TableCell(null, true)));
         }
         _detailViewAssignmentsHost.Content = table;
@@ -1332,6 +1781,9 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
     private static IReadOnlyList<string?> DefaultNamedViews(LayoutChoice layout) =>
         Enumerable.Repeat<string?>(null, DetailLabels(layout).Count).ToArray();
 
+    private static IReadOnlyList<Guid?> DefaultDetailDisplayModes(LayoutChoice layout) =>
+        Enumerable.Repeat<Guid?>(null, DetailLabels(layout).Count).ToArray();
+
     private void LoadEditors(CreationDraft draft)
     {
         _updatingEditors = true;
@@ -1347,7 +1799,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             _layoutSelectorPreview.SetPaper(draft.Paper);
             _titleBlockPreviewTray.SetPaper(draft.Paper);
             _titleBlockSelectorPreview.SetPaper(draft.Paper);
-            _displayModePicker.Text = draft.DisplayModeId is { } modeId
+            _displayModePicker.Text = draft.PageDisplayModeId is { } modeId
                 ? _snapshot.DisplayModes.GetValueOrDefault(modeId) ?? InheritDisplayMode
                 : InheritDisplayMode;
             _dedicatedDetailLayerCheck.Checked = draft.UseDedicatedDetailLayer;
@@ -1459,6 +1911,19 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         },
     });
 
+    private static Control FixedWidthCard(string title, Control content, int width) => new Panel
+    {
+        Width = width,
+        Content = Card(title, content),
+    };
+
+    private static Label SectionLabel(string text) => new()
+    {
+        Text = text,
+        Font = SystemFonts.Bold(10),
+        TextColor = FoundryTheme.PrimaryText,
+    };
+
     private static GridColumn TextColumn(
         string header,
         Expression<Func<CreationPreviewRow, string>> property,
@@ -1515,19 +1980,23 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                 $"Template — {template.Name}", BuiltInLayoutKind.Blank, template.Id, template)),
     ];
 
-    private static TitleBlockChoice[] TitleBlockChoices(DocumentSnapshot snapshot) =>
-    [
-        new TitleBlockChoice(true, null, null, "Use layout template", null),
-        new TitleBlockChoice(false, null, null, "No title block", null),
-        new TitleBlockChoice(false, null, BuiltInTitleBlockKind.CompactLowerRight,
-            "Built-in — Compact lower-right", null),
-        new TitleBlockChoice(false, null, BuiltInTitleBlockKind.FullWidthBottom,
-            "Built-in — Full-width bottom band", null),
-        new TitleBlockChoice(false, null, BuiltInTitleBlockKind.RightSidebar,
-            "Built-in — Right-side vertical", null),
-        new TitleBlockChoice(false, null, BuiltInTitleBlockKind.MinimalLowerRight,
-            "Built-in — Minimal lower-right", null),
-        .. snapshot.TitleBlockInstances.Values
+    private static TitleBlockChoice[] TitleBlockChoices(DocumentSnapshot snapshot, bool editMode)
+    {
+        var choices = new List<TitleBlockChoice>();
+        if (!editMode)
+        {
+            choices.Add(new TitleBlockChoice(true, null, null, "Use layout template", null));
+            choices.Add(new TitleBlockChoice(false, null, BuiltInTitleBlockKind.CompactLowerRight,
+                "Built-in — Compact lower-right", null));
+            choices.Add(new TitleBlockChoice(false, null, BuiltInTitleBlockKind.FullWidthBottom,
+                "Built-in — Full-width bottom band", null));
+            choices.Add(new TitleBlockChoice(false, null, BuiltInTitleBlockKind.RightSidebar,
+                "Built-in — Right-side vertical", null));
+            choices.Add(new TitleBlockChoice(false, null, BuiltInTitleBlockKind.MinimalLowerRight,
+                "Built-in — Minimal lower-right", null));
+        }
+        choices.Add(new TitleBlockChoice(false, null, null, "No title block", null));
+        choices.AddRange(snapshot.TitleBlockInstances.Values
             .Where(instance => instance.Transform is { Count: 16 })
             .OrderBy(instance => instance.InstanceDefinitionName, StringComparer.OrdinalIgnoreCase)
             .ThenBy(instance => instance.SourcePageName, StringComparer.OrdinalIgnoreCase)
@@ -1536,8 +2005,9 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                 instance.InstanceObjectId,
                 null,
                 $"{instance.InstanceDefinitionName} — {instance.SourcePageName}",
-                instance)),
-    ];
+                instance)));
+        return choices.ToArray();
+    }
 
     private static NamedViewChoice[] NamedViewChoices(DocumentSnapshot snapshot) =>
     [
@@ -1566,13 +2036,20 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             .Select(folder => (folder.Id, Path(folder.Id))).ToArray();
     }
 
-    private static Control Header() => new StackLayout
+    private static Control Header(bool editMode, int targetCount) => new StackLayout
     {
         Spacing = FoundryTheme.Space1,
         Items =
         {
-            new Label { Text = "Create layouts", Font = SystemFonts.Bold(17), TextColor = FoundryTheme.PrimaryText },
-            FoundryTheme.MutedLabel("Configure the batch once, review every resulting layout, then create it atomically."),
+            new Label
+            {
+                Text = editMode ? "Edit layouts" : "Create layouts",
+                Font = SystemFonts.Bold(17),
+                TextColor = FoundryTheme.PrimaryText,
+            },
+            FoundryTheme.MutedLabel(editMode
+                ? $"Review {targetCount} existing layout{(targetCount == 1 ? string.Empty : "s")}, then apply only the enabled fields."
+                : "Configure the batch once, review every resulting layout, then create it atomically."),
         },
     };
 
@@ -1613,24 +2090,27 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
     }
     private sealed record CreationDraft(
         Guid DraftId,
+        Guid? ExistingPageViewId,
         LayoutChoice Layout,
         PaperRecipe Paper,
-        Guid? DisplayModeId,
+        Guid? PageDisplayModeId,
         bool UseDedicatedDetailLayer,
         TitleBlockChoice TitleBlock,
-        IReadOnlyList<string?> NamedViewsByDetail)
+        IReadOnlyList<string?> NamedViewsByDetail,
+        IReadOnlyList<Guid?> DetailDisplayModesByDetail)
     {
         internal LayoutCreationSpec ToSpec() => new(
             Quantity: 1,
             Paper: Paper,
             BuiltInLayout: Layout.BuiltInLayout,
             TemplateId: Layout.TemplateId,
-            DetailDisplayModeId: DisplayModeId,
+            DetailDisplayModeId: PageDisplayModeId,
             UseTemplateTitleBlock: TitleBlock.UseTemplate,
             TitleBlockSourceInstanceObjectId: TitleBlock.SourceInstanceObjectId,
             BuiltInTitleBlock: TitleBlock.BuiltInKind,
             UseDedicatedDetailLayer: UseDedicatedDetailLayer,
-            NamedViewsByDetail: NamedViewsByDetail);
+            NamedViewsByDetail: NamedViewsByDetail,
+            DetailDisplayModesByDetail: DetailDisplayModesByDetail);
     }
 
     private sealed record CreationPreviewRow(
