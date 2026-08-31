@@ -74,7 +74,7 @@ public sealed class BatchUpdateSheetsPlanner : IOperationPlanner<BatchUpdateShee
                 AdaptiveTitleBlockLayoutSolver.Solve(managedKind.Value, new PaperRecipe(
                     request.PaperWidth ?? sheet.PageWidth,
                     request.PaperHeight ?? sheet.PageHeight,
-                    request.PaperUnitSystem ?? sheet.PageUnitSystem), snapshot.ProjectInfo);
+                    request.PaperUnitSystem ?? sheet.PageUnitSystem), snapshot.ProjectInfo, sheet.Details.Count);
             }
             catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
             {

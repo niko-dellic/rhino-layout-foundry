@@ -37,6 +37,13 @@ internal sealed class FilteredPicker : Panel
             Filter(showResults: true);
             ValueChanged?.Invoke(this, EventArgs.Empty);
         };
+        _textBox.KeyDown += (_, eventArgs) =>
+        {
+            if (eventArgs.Key != Keys.Escape) return;
+            CloseResults();
+            DismissRequested?.Invoke(this, EventArgs.Empty);
+            eventArgs.Handled = true;
+        };
         _toggleButton.Click += (_, _) =>
         {
             Filter(showResults: _resultsPopup?.Visible != true, showAllForExactValue: true);
@@ -49,6 +56,7 @@ internal sealed class FilteredPicker : Panel
             var mousePoint = new Point((int)Math.Round(mouse.X), (int)Math.Round(mouse.Y));
             if (_resultsPopup.Bounds.Contains(mousePoint) || _results.HasFocus || _toggleButton.HasFocus) return;
             CloseResults();
+            DismissRequested?.Invoke(this, EventArgs.Empty);
         });
         _results.SelectedIndexChanged += (_, _) =>
         {
@@ -59,6 +67,7 @@ internal sealed class FilteredPicker : Panel
             _settingValue = false;
             CloseResults();
             ValueChanged?.Invoke(this, EventArgs.Empty);
+            SelectionCommitted?.Invoke(this, EventArgs.Empty);
         };
         UnLoad += (_, _) => ClosePopup();
         var textField = new Panel
@@ -83,6 +92,8 @@ internal sealed class FilteredPicker : Panel
 
     internal event EventHandler? ValueChanged;
     internal event EventHandler? Opened;
+    internal event EventHandler? SelectionCommitted;
+    internal event EventHandler? DismissRequested;
 
     internal string Text
     {
@@ -108,6 +119,12 @@ internal sealed class FilteredPicker : Panel
     internal bool ContainsChoice(string? label) =>
         !string.IsNullOrWhiteSpace(label) &&
         _allLabels.Contains(label.Trim(), StringComparer.OrdinalIgnoreCase);
+
+    internal void OpenResults()
+    {
+        _textBox.Focus();
+        Filter(showResults: true, showAllForExactValue: true);
+    }
 
     public new bool Enabled
     {
@@ -178,6 +195,7 @@ internal sealed class FilteredPicker : Panel
             if (eventArgs.Key != Keys.Escape) return;
             CloseResults();
             _textBox.Focus();
+            DismissRequested?.Invoke(this, EventArgs.Empty);
             eventArgs.Handled = true;
         };
         popup.LostFocus += (_, _) => Application.Instance.AsyncInvoke(() =>
@@ -187,6 +205,7 @@ internal sealed class FilteredPicker : Panel
             var mousePoint = new Point((int)Math.Round(mouse.X), (int)Math.Round(mouse.Y));
             if (popup.Bounds.Contains(mousePoint) || _results.HasFocus || _textBox.HasFocus) return;
             CloseResults();
+            DismissRequested?.Invoke(this, EventArgs.Empty);
         });
         popup.Closed += (_, _) =>
         {

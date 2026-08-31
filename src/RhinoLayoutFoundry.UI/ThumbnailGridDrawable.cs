@@ -62,7 +62,10 @@ internal sealed class ThumbnailGridDrawable : Drawable
 
     internal void SetGridDensity(double availableWidth, double density, double minimumHeight = 0)
     {
-        _layout = ThumbnailGridLayout.CreateForDensity(_snapshot.Sheets.Count, availableWidth, density);
+        _layout = ThumbnailGridLayout.CreateForDensity(
+            _snapshot.Sheets.Select(PaperHeightToWidthRatio).ToArray(),
+            availableWidth,
+            density);
         Size = new Size(
             Math.Max(1, (int)Math.Ceiling(availableWidth)),
             Math.Max(1, (int)Math.Ceiling(Math.Max(_layout.ContentHeight, minimumHeight))));
@@ -197,7 +200,8 @@ internal sealed class ThumbnailGridDrawable : Drawable
     private RectangleF PageBounds(ThumbnailGridRect cell, ObserverSheetSnapshot sheet)
     {
         var availableWidth = Math.Max(1, cell.Width - 12);
-        var availableHeight = Math.Max(1, _layout.ImageAreaHeight - 12);
+        var imageAreaHeight = Math.Max(1, cell.Height - 42);
+        var availableHeight = Math.Max(1, imageAreaHeight - 12);
         var paperWidth = sheet.PaperWidthMillimeters > 0 ? sheet.PaperWidthMillimeters : 1.414;
         var paperHeight = sheet.PaperHeightMillimeters > 0 ? sheet.PaperHeightMillimeters : 1;
         var scale = Math.Min(availableWidth / paperWidth, availableHeight / paperHeight);
@@ -205,19 +209,24 @@ internal sealed class ThumbnailGridDrawable : Drawable
         var height = paperHeight * scale;
         return new RectangleF(
             (float)(cell.X + (cell.Width - width) / 2),
-            (float)(cell.Y + (_layout.ImageAreaHeight - height) / 2),
+            (float)(cell.Y + (imageAreaHeight - height) / 2),
             (float)width,
             (float)height);
     }
 
+    private static double PaperHeightToWidthRatio(ObserverSheetSnapshot sheet) =>
+        sheet.PaperWidthMillimeters > 0 && sheet.PaperHeightMillimeters > 0
+            ? sheet.PaperHeightMillimeters / sheet.PaperWidthMillimeters
+            : 1 / 1.414;
+
     private int? HitIndex(PointF location)
     {
         if (_snapshot.Sheets.Count == 0 || location.Y < _layout.Padding) return null;
-        var row = (int)Math.Floor((location.Y - _layout.Padding) / _layout.RowHeight);
-        if (row < 0 || row >= _layout.Rows) return null;
+        var row = _layout.RowAt(location.Y);
+        if (row is null) return null;
         for (var column = 0; column < _layout.Columns; column++)
         {
-            var index = row * _layout.Columns + column;
+            var index = row.Value * _layout.Columns + column;
             if (index >= _snapshot.Sheets.Count) break;
             var cell = _layout.CellBounds(index);
             if (location.X >= cell.X && location.X <= cell.X + cell.Width &&

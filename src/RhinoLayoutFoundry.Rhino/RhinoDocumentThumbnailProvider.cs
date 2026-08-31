@@ -95,16 +95,17 @@ internal sealed class RhinoDocumentThumbnailProvider : IDocumentThumbnailProvide
         // DPI instead so Rhino builds every detail viewport at the same scale.
         using var captureSettings = new ViewCaptureSettings(page, requestedSize, captureDpi)
         {
-            // Preserve Rhino's canonical per-detail display pipeline. The
-            // configured gray viewport background is intentionally retained so
-            // previews never infer or rewrite drawing colors.
-            DrawBackground = true,
+            // Preserve Rhino's canonical per-detail display pipeline while
+            // presenting page and object colors as Rhino would for print. A
+            // transparent capture background composites onto the observer's
+            // white paper surface instead of retaining the viewport gray.
+            DrawBackground = false,
             DrawBackgroundBitmap = false,
             DrawWallpaper = false,
             DrawGrid = false,
             DrawAxis = false,
             RasterMode = true,
-            OutputColor = ViewCaptureSettings.ColorMode.DisplayColor,
+            OutputColor = ViewCaptureSettings.ColorMode.PrintColor,
             UsePrintWidths = false,
         };
         captureSettings.SetLayout(

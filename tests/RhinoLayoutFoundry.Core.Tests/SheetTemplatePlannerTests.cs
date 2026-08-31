@@ -250,6 +250,63 @@ public sealed class SheetTemplatePlannerTests
     }
 
     [Fact]
+    public void SelectedDetailLayerIsPreservedByIdentity()
+    {
+        var layerId = Guid.Parse("60000000-0000-0000-0000-000000000001");
+        var snapshot = WithTemplates(TestSnapshots.Create(), []) with
+        {
+            LayerNames = new Dictionary<Guid, string> { [layerId] = "Documentation::Details" },
+        };
+        var plan = new BatchCreateSheetsPlanner().Plan(new BatchCreateSheetsRequest(
+            42,
+            1,
+            TestSnapshots.RootFolderId,
+            [],
+            "Layer {index}",
+            1,
+            1,
+            CreationSpecs:
+            [
+                new LayoutCreationSpec(
+                    1,
+                    new PaperRecipe(594, 420, "Millimeters"),
+                    UseDedicatedDetailLayer: false,
+                    DetailLayerId: layerId),
+            ]), snapshot);
+
+        Assert.True(plan.CanApply);
+        var change = Assert.IsType<CreateSheetFromTemplateChange>(Assert.Single(plan.Changes));
+        Assert.False(change.UseDedicatedDetailLayer);
+        Assert.Equal(layerId, change.DetailLayerId);
+    }
+
+    [Fact]
+    public void MissingSelectedDetailLayerBlocksBatchBeforeMutation()
+    {
+        var snapshot = WithTemplates(TestSnapshots.Create(), []);
+        var plan = new BatchCreateSheetsPlanner().Plan(new BatchCreateSheetsRequest(
+            42,
+            1,
+            TestSnapshots.RootFolderId,
+            [],
+            "Layer {index}",
+            1,
+            1,
+            CreationSpecs:
+            [
+                new LayoutCreationSpec(
+                    1,
+                    new PaperRecipe(594, 420, "Millimeters"),
+                    UseDedicatedDetailLayer: false,
+                    DetailLayerId: Guid.NewGuid()),
+            ]), snapshot);
+
+        Assert.False(plan.CanApply);
+        Assert.Contains(plan.Diagnostics, diagnostic => diagnostic.Code == "batch.detail_layer_missing");
+        Assert.Empty(plan.Changes);
+    }
+
+    [Fact]
     public void InitialRevisionScheduleIsPreservedForEveryCreatedLayout()
     {
         var snapshot = WithTemplates(TestSnapshots.Create(), []);

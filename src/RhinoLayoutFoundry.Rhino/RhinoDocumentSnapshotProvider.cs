@@ -107,6 +107,10 @@ internal sealed class RhinoDocumentSnapshotProvider : IDocumentSnapshotProvider
         {
             displayMode.Dispose();
         }
+        var layerNames = document.Layers
+            .Where(layer => !layer.IsDeleted && !layer.IsReference)
+            .OrderBy(layer => layer.FullPath, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(layer => layer.Id, layer => layer.FullPath);
 
         return new DocumentSnapshot(
             document.RuntimeSerialNumber,
@@ -123,7 +127,8 @@ internal sealed class RhinoDocumentSnapshotProvider : IDocumentSnapshotProvider
             displayModeNames,
             titleBlockInstances,
             state.Canvas,
-            state.ProjectInfo);
+            state.ProjectInfo,
+            layerNames);
     }
 
     private static IReadOnlyList<double> TransformValues(global::Rhino.Geometry.Transform transform) =>

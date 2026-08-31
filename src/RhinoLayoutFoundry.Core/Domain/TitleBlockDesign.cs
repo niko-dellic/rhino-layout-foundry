@@ -184,12 +184,18 @@ public static class AdaptiveTitleBlockLayoutSolver
     public const int StyleVersion = 5;
 
     public static AdaptiveTitleBlockLayout Solve(BuiltInTitleBlockKind kind, PaperRecipe paper) =>
-        Solve(kind, paper, ProjectInformation.Empty);
+        Solve(kind, paper, ProjectInformation.Empty, detailCount: 1);
 
     public static AdaptiveTitleBlockLayout Solve(
         BuiltInTitleBlockKind kind,
         PaperRecipe paper,
-        ProjectInformation project)
+        ProjectInformation project) => Solve(kind, paper, project, detailCount: 1);
+
+    public static AdaptiveTitleBlockLayout Solve(
+        BuiltInTitleBlockKind kind,
+        PaperRecipe paper,
+        ProjectInformation project,
+        int detailCount)
     {
         ArgumentNullException.ThrowIfNull(paper);
         ArgumentNullException.ThrowIfNull(project);
@@ -208,12 +214,16 @@ public static class AdaptiveTitleBlockLayoutSolver
         var normalizedKind = kind == BuiltInTitleBlockKind.FullWidthBottom
             ? BuiltInTitleBlockKind.FullWidthBottom
             : BuiltInTitleBlockKind.RightSidebar;
+        var includeScale = detailCount == 1;
         var options = project.ContentOptions;
         var descriptors = FieldDescriptors(project, options).ToArray();
         var composition = normalizedKind == BuiltInTitleBlockKind.RightSidebar
-            ? ComposeRight(widthMm, heightMm, marginMm, gutterMm, bodyMm, project, options, descriptors)
-            : ComposeBottom(widthMm, heightMm, marginMm, gutterMm, bodyMm, project, options, descriptors);
-        var signature = Signature(normalizedKind, widthMm, heightMm, composition.Block, project, options);
+            ? ComposeRight(widthMm, heightMm, marginMm, gutterMm, bodyMm, project, options, descriptors,
+                includeScale)
+            : ComposeBottom(widthMm, heightMm, marginMm, gutterMm, bodyMm, project, options, descriptors,
+                includeScale);
+        var signature = Signature(normalizedKind, widthMm, heightMm, composition.Block, project, options,
+            includeScale);
 
         double U(double value) => value * unitsPerMillimeter;
         TitleBlockRectangle R(TitleBlockRectangle rectangle) => new(
@@ -252,7 +262,8 @@ public static class AdaptiveTitleBlockLayoutSolver
         double body,
         ProjectInformation project,
         TitleBlockContentOptions options,
-        IReadOnlyList<FieldDescriptor> descriptors)
+        IReadOnlyList<FieldDescriptor> descriptors,
+        bool includeScale)
     {
         var blockHeight = pageHeight - margin * 2;
         var inset = Math.Max(gutter * 0.55, body * 0.7);
@@ -264,7 +275,7 @@ public static class AdaptiveTitleBlockLayoutSolver
         var statusHeight = status is null ? 0 : 15;
         var projectHeight = projectName is null ? 0 : 18;
         var projectNumberHeight = projectNumber is null ? 0 : 10;
-        var sheetHeight = 39d;
+        var sheetHeight = includeScale ? 39d : 31d;
         var revisionHeight = options.ReserveRevisionArea ? Clamp(blockHeight * 0.25, 45, 110) : 0;
         var fixedHeight = inset * 2 + logoHeight + statusHeight + revisionHeight + projectHeight +
                           projectNumberHeight + sheetHeight;
@@ -317,8 +328,9 @@ public static class AdaptiveTitleBlockLayoutSolver
         fields.Add(new TitleBlockFieldPlacement("sheet.number", "Sheet no.",
             new TitleBlockRectangle(block.Left, y - 19, block.Width, 19), TitleBlockFieldStyle.SheetNumber));
         y -= 19;
-        fields.Add(new TitleBlockFieldPlacement("sheet.scale", "Scale",
-            new TitleBlockRectangle(block.Left, y - 8, block.Width, 8)));
+        if (includeScale)
+            fields.Add(new TitleBlockFieldPlacement("sheet.scale", "Scale",
+                new TitleBlockRectangle(block.Left, y - 8, block.Width, 8)));
         var content = new TitleBlockRectangle(margin, margin, block.Left - gutter - margin, blockHeight);
         return new Composition(block, content, fields, logo, revision);
     }
@@ -331,7 +343,8 @@ public static class AdaptiveTitleBlockLayoutSolver
         double body,
         ProjectInformation project,
         TitleBlockContentOptions options,
-        IReadOnlyList<FieldDescriptor> descriptors)
+        IReadOnlyList<FieldDescriptor> descriptors,
+        bool includeScale)
     {
         var blockWidth = pageWidth - margin * 2;
         var inset = Math.Max(gutter * 0.55, body * 0.7);
@@ -378,11 +391,13 @@ public static class AdaptiveTitleBlockLayoutSolver
         }
         fields.Add(new TitleBlockFieldPlacement("sheet.title", "Sheet title",
             new TitleBlockRectangle(x, block.Top - 14, sheetWidth, 14)));
+        var sheetNumberBottom = includeScale ? block.Bottom + 11 : block.Bottom;
         fields.Add(new TitleBlockFieldPlacement("sheet.number", "Sheet no.",
-            new TitleBlockRectangle(x, block.Bottom + 11, sheetWidth, block.Height - 25),
+            new TitleBlockRectangle(x, sheetNumberBottom, sheetWidth, block.Top - 14 - sheetNumberBottom),
             TitleBlockFieldStyle.SheetNumber));
-        fields.Add(new TitleBlockFieldPlacement("sheet.scale", "Scale",
-            new TitleBlockRectangle(x, block.Bottom, sheetWidth, 11)));
+        if (includeScale)
+            fields.Add(new TitleBlockFieldPlacement("sheet.scale", "Scale",
+                new TitleBlockRectangle(x, block.Bottom, sheetWidth, 11)));
         var contentBottom = block.Top + gutter;
         var content = new TitleBlockRectangle(margin, contentBottom, blockWidth, pageHeight - margin - contentBottom);
         return new Composition(block, content, fields, logo, revision);
@@ -487,12 +502,14 @@ public static class AdaptiveTitleBlockLayoutSolver
         double pageHeight,
         TitleBlockRectangle block,
         ProjectInformation project,
-        TitleBlockContentOptions options)
+        TitleBlockContentOptions options,
+        bool includeScale)
     {
         var source = string.Join("|",
             string.Join(",", options.IncludedFields.Select(value => (int)value)),
             string.Join(";", options.CustomFields.Select(value => $"{value.Label}:{value.IsIncluded}")),
             options.ReserveRevisionArea.ToString(),
+            includeScale.ToString(),
             project.Logo?.Sha256 ?? "no-logo");
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source)))[..12].ToLowerInvariant();
         return FormattableString.Invariant(

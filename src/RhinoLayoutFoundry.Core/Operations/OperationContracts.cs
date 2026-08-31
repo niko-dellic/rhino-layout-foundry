@@ -131,7 +131,8 @@ public sealed record CreateSheetFromTemplateChange(
     bool UseDedicatedDetailLayer = true,
     string SheetNumber = "",
     ProjectInformation? ProjectData = null,
-    IReadOnlyList<SheetRevisionRecord>? InitialRevisions = null) : OperationChange;
+    IReadOnlyList<SheetRevisionRecord>? InitialRevisions = null,
+    Guid? DetailLayerId = null) : OperationChange;
 
 public sealed record UpdateProjectInformationChange(
     ProjectInformation ExpectedInformation,

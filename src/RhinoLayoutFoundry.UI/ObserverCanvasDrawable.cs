@@ -57,7 +57,6 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
     private ObserverPoint _lastScreen;
     private ObserverPoint _dragWorldDelta;
     private Guid? _dragFolderId;
-    private Guid? _reorderSheetId;
     private ObserverRect? _lassoWorld;
     private ObserverPoint _contextWorld;
     private bool _spaceHeld;
@@ -152,7 +151,6 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
     internal event EventHandler<ObserverNavigationRequestedEventArgs>? NavigationRequested;
     internal event EventHandler<ObserverHierarchyMoveRequestedEventArgs>? HierarchyMoveRequested;
     internal event EventHandler<ObserverHierarchyPlacementRequestedEventArgs>? HierarchyPlacementRequested;
-    internal event EventHandler<ObserverReorderRequestedEventArgs>? ReorderRequested;
     internal event EventHandler<ObserverReorderStepRequestedEventArgs>? ReorderStepRequested;
     internal event EventHandler<ObserverNamedViewRequestedEventArgs>? NamedViewRequested;
     internal event EventHandler<ObserverNamedViewSelectionRequestedEventArgs>? AssignNamedViewToSelectionRequested;
@@ -597,55 +595,15 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
                 : FoundryTheme.WithAlpha(FoundryTheme.CanvasBorder, 64);
         graphics.DrawRectangle(new Pen(border, selected ? 3 : hasSelectedDetail ? 2 : 1), bounds);
         if (bounds.Width >= 70 && bounds.Height >= 50)
-        {
             DrawDetailOverlays(graphics, card, bounds, selected);
-            graphics.FillRectangle(
-                card.Sheet.IncludeInPrintAll
-                    ? emphasized
-                        ? FoundryTheme.PrimaryText
-                        : FoundryTheme.WithAlpha(FoundryTheme.PrimaryText, 64)
-                    : emphasized
-                        ? FoundryTheme.MutedText
-                        : FoundryTheme.WithAlpha(FoundryTheme.MutedText, 64),
-                bounds.Right - 18,
-                bounds.Top + 6,
-                10,
-                10);
-            graphics.DrawRectangle(FoundryTheme.CanvasBorder,
-                bounds.Right - 18, bounds.Top + 6, 10, 10);
-            graphics.FillRectangle(FoundryTheme.WithAlpha(
-                    FoundryTheme.CanvasSubtleSurface,
-                    emphasized ? 230 : 58),
-                bounds.Left + 6, bounds.Top + 6, 12, 12);
-            graphics.DrawText(
-                _smallFont,
-                emphasized ? Colors.White : FoundryTheme.WithAlpha(Colors.White, 64),
-                bounds.Left + 8,
-                bounds.Top + 5,
-                "↕");
-        }
 
-        var useInternalLabel = ObserverPlacementPlanner.SheetGap * _camera.Zoom < 18;
-        if (useInternalLabel)
-        {
-            DrawSheetNameScrim(graphics, bounds, card.Sheet.Name, emphasized);
-        }
-        else
-        {
-            var labelColor = emphasized
-                ? FoundryTheme.PrimaryText
-                : FoundryTheme.WithAlpha(FoundryTheme.PrimaryText, 64);
-            FoundryHierarchyIcons.DrawLayout(
-                graphics,
-                labelColor,
-                new RectangleF(bounds.Left, bounds.Bottom + 4, 14, 14));
-            graphics.DrawText(
-                _sheetFont,
-                labelColor,
-                bounds.Left + 20,
-                bounds.Bottom + 5,
-                FitText(graphics, _sheetFont, card.Sheet.Name, Math.Max(8, bounds.Width - 20)));
-        }
+        var useInternalLabel = ObserverPlacementPlanner.SheetGap * _camera.Zoom < 26;
+        DrawSheetNameBadge(
+            graphics,
+            bounds,
+            card.Sheet.Name,
+            emphasized,
+            internalLabel: useInternalLabel);
         if (selected && _dragMode == DragMode.Sheets && _dragWorldDelta != new ObserverPoint())
         {
             graphics.DrawRectangle(
@@ -699,7 +657,7 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
                 ? FoundryTheme.CanvasBorder
                 : FoundryTheme.WithAlpha(FoundryTheme.CanvasBorder, 90);
         graphics.DrawRectangle(new Pen(border, selected ? 3 : hasSelectedDetail ? 2 : 1), bounds);
-        DrawSheetNameScrim(graphics, bounds, card.Sheet.Name, emphasized);
+        DrawSheetNameBadge(graphics, bounds, card.Sheet.Name, emphasized, internalLabel: true);
 
         var selectedDetailCount = card.Sheet.Details.Count(detail =>
             _selection.Contains(new OverviewNodeKey(OverviewNodeKind.Detail, detail.DetailViewportId)));
@@ -707,33 +665,44 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
             DrawSelectionBadge(graphics, bounds.Right - 8, bounds.Top + 8, selectedDetailCount);
     }
 
-    private void DrawSheetNameScrim(
+    private void DrawSheetNameBadge(
         Graphics graphics,
         RectangleF bounds,
         string name,
-        bool emphasized)
+        bool emphasized,
+        bool internalLabel)
     {
         if (bounds.Width < 16 || bounds.Height < 12) return;
-        var maximumWidth = Math.Max(8, bounds.Width - 10);
-        var fitted = FitText(graphics, _sheetFont, name, maximumWidth - 10);
-        var measured = graphics.MeasureString(_sheetFont, fitted);
-        var scrimWidth = Math.Min(maximumWidth, Math.Max(30, measured.Width + 10));
-        var scrimHeight = Math.Min(22, bounds.Height);
-        var scrim = new RectangleF(
-            bounds.Left + 5,
-            bounds.Bottom - scrimHeight - 5,
-            scrimWidth,
-            scrimHeight);
-        if (scrim.Top < bounds.Top) scrim.Y = bounds.Top;
-        graphics.FillRectangle(
-            FoundryTheme.WithAlpha(FoundryTheme.CanvasOverlayBackground, emphasized ? 235 : 205),
-            scrim);
-        graphics.DrawText(
+        var horizontalInset = internalLabel ? 5f : 0f;
+        var maximumWidth = Math.Max(8, bounds.Width - horizontalInset * 2);
+        var fitted = FitText(
+            graphics,
             _sheetFont,
-            emphasized ? FoundryTheme.PrimaryText : FoundryTheme.SecondaryText,
-            scrim.Left + 5,
-            scrim.Top + Math.Max(1, (scrim.Height - measured.Height) / 2),
-            fitted);
+            name,
+            maximumWidth - FoundryBadgeRenderer.HorizontalPadding * 2);
+        var badgeHeight = internalLabel
+            ? Math.Min(FoundryBadgeRenderer.StandardHeight, Math.Max(12, bounds.Height - 10))
+            : FoundryBadgeRenderer.StandardHeight;
+        var badgeWidth = FoundryBadgeRenderer.MeasureWidth(
+            graphics,
+            _sheetFont,
+            fitted,
+            minimumWidth: 30,
+            maximumWidth: maximumWidth);
+        var badge = new RectangleF(
+            bounds.Left + horizontalInset,
+            internalLabel ? bounds.Bottom - badgeHeight - 5 : bounds.Bottom + 3,
+            badgeWidth,
+            badgeHeight);
+        if (internalLabel && badge.Top < bounds.Top) badge.Y = bounds.Top;
+        FoundryBadgeRenderer.Draw(
+            graphics,
+            badge,
+            fitted,
+            _sheetFont,
+            FoundryTheme.WithAlpha(FoundryTheme.CanvasOverlayBackground, emphasized ? 245 : 215),
+            FoundryTheme.WithAlpha(FoundryTheme.SecondaryText, emphasized ? 150 : 70),
+            emphasized ? FoundryTheme.PrimaryText : FoundryTheme.SecondaryText);
     }
 
     private void DrawFolderSummary(
@@ -1776,25 +1745,18 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
             _presentation.TierForSheet(card.Sheet.PageViewId) != ObserverCanvasLodTier.Folder)
         {
             var tier = _presentation.TierForSheet(card.Sheet.PageViewId);
-            var screenBounds = ScreenRect(card.Bounds, ViewportSize());
-            var reorderHandle = tier == ObserverCanvasLodTier.Detail &&
-                                eventArgs.Location.X <= screenBounds.Left + 24 &&
-                                eventArgs.Location.Y <= screenBounds.Top + 24;
-            var detail = tier == ObserverCanvasLodTier.Detail && !reorderHandle
+            var detail = tier == ObserverCanvasLodTier.Detail
                 ? _spatialIndex.HitDetail(_pressWorld)
                 : null;
             if (detail is not null && detail.SheetPageViewId == card.Sheet.PageViewId)
                 SelectKey(new OverviewNodeKey(OverviewNodeKind.Detail, detail.Detail.DetailViewportId), eventArgs.Modifiers);
             else
                 SelectSheet(card.Sheet.PageViewId, eventArgs.Modifiers);
-            _reorderSheetId = card.Sheet.PageViewId;
-            _dragMode = reorderHandle
-                ? DragMode.Reorder
-                : detail is not null
-                    ? DragMode.Detail
-                    : _packingMode == ObserverPackingMode.CompactSheets
-                        ? DragMode.CompactSheet
-                        : DragMode.Sheets;
+            _dragMode = detail is not null
+                ? DragMode.Detail
+                : _packingMode == ObserverPackingMode.CompactSheets
+                    ? DragMode.CompactSheet
+                    : DragMode.Sheets;
         }
         else
         {
@@ -2016,17 +1978,6 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
             BoardStateRequested?.Invoke(this, new ObserverBoardStateRequestedEventArgs(
                 state,
                 "Move observer folder"));
-        }
-        else if (_dragMode == DragMode.Reorder && _reorderSheetId is { } movingId &&
-                 Distance(_pressScreen, Point(eventArgs.Location)) > 4)
-        {
-            var target = _spatialIndex.HitSheet(releaseWorld);
-            if (target is not null &&
-                _presentation.TierForSheet(target.Sheet.PageViewId) != ObserverCanvasLodTier.Folder &&
-                target.Sheet.PageViewId != movingId)
-                ReorderRequested?.Invoke(this, new ObserverReorderRequestedEventArgs(
-                    movingId,
-                    target.Sheet.PageViewId));
         }
         else if (_dragMode == DragMode.Lasso && _lassoWorld is { } lasso)
         {
@@ -2750,7 +2701,6 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
         _dragNamedView = null;
         _dragWorldDelta = new ObserverPoint();
         _dragFolderId = null;
-        _reorderSheetId = null;
         _lassoWorld = null;
         _navigatorPressRow = null;
         _navigatorDragKeys = [];
@@ -2815,7 +2765,6 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
         Sheets,
         CompactSheet,
         Folder,
-        Reorder,
         Detail,
         Lasso,
         NamedView,
@@ -2910,18 +2859,6 @@ internal sealed class ObserverHierarchyMoveRequestedEventArgs : EventArgs
     internal Guid DestinationFolderId { get; }
     internal IReadOnlyList<Guid> SheetIds { get; }
     internal IReadOnlyList<Guid> FolderIds { get; }
-}
-
-internal sealed class ObserverReorderRequestedEventArgs : EventArgs
-{
-    internal ObserverReorderRequestedEventArgs(Guid movingSheetId, Guid beforeSheetId)
-    {
-        MovingSheetId = movingSheetId;
-        BeforeSheetId = beforeSheetId;
-    }
-
-    internal Guid MovingSheetId { get; }
-    internal Guid BeforeSheetId { get; }
 }
 
 internal sealed class ObserverReorderStepRequestedEventArgs : EventArgs

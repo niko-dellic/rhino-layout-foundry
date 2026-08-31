@@ -52,6 +52,8 @@ public sealed class LayoutFoundryPanel : Panel
     private readonly GridColumn _displayModeColumn;
     private readonly TextBoxCell _paperCell;
     private readonly TextBoxCell _displayModeCell;
+    private readonly FilteredPicker _hierarchyDisplayModePicker;
+    private readonly Panel _hierarchyDisplayModePopup;
     private readonly Panel _contentHost;
     private readonly Panel _toolbarSurface;
     private readonly Panel _renameActions;
@@ -108,6 +110,8 @@ public sealed class LayoutFoundryPanel : Panel
     private HierarchyTreeItem? _dragSourceItem;
     private IReadOnlyList<OverviewNodeKey> _dragSourceKeys = [];
     private IReadOnlyList<OverviewNodeKey> _propertyInteractionTargets = [];
+    private IReadOnlyList<OverviewNodeKey> _hierarchyDisplayModeTargets = [];
+    private Dictionary<string, Guid> _hierarchyDisplayModes = new(StringComparer.OrdinalIgnoreCase);
     private CellInteractionGuard? _cellInteractionGuard;
     private InlineDraft? _inlineDraft;
     private Guid? _contextDestinationFolderId;
@@ -263,6 +267,14 @@ public sealed class LayoutFoundryPanel : Panel
         {
             Binding = Binding.Property<HierarchyTreeItem, string>(item => item.DisplayModeCellText),
         };
+        _hierarchyDisplayModePicker = new FilteredPicker([], "Search display modes");
+        _hierarchyDisplayModePopup = new Panel
+        {
+            BackgroundColor = FoundryTheme.CanvasBorder,
+            Padding = new Padding(1),
+            Visible = false,
+            Content = _hierarchyDisplayModePicker,
+        };
         (_treeGrid, _layoutsColumn, _printColumn, _templateColumn, _paperColumn, _detailsColumn,
             _displayModeColumn) = CreateTreeGrid();
         CreateHierarchyContextMenu();
@@ -322,6 +334,7 @@ public sealed class LayoutFoundryPanel : Panel
             BackgroundColor = FoundryTheme.PanelBackground,
         };
         _panelOverlayHost.Add(_panelShell, 0, 0);
+        _panelOverlayHost.Add(_hierarchyDisplayModePopup, 0, 0);
         _panelOverlayHost.Add(_deleteConfirmationOverlay, 0, 0);
         _panelOverlayHost.SizeChanged += (_, _) => LayoutPanelOverlay();
         Content = _panelOverlayHost;
@@ -338,6 +351,10 @@ public sealed class LayoutFoundryPanel : Panel
         _treeGrid.DragEnd += (_, _) => ResetPendingDrag();
         _treeGrid.CellClick += async (_, eventArgs) => await OnTreeCellClickAsync(eventArgs);
         _treeGrid.CellEdited += async (_, eventArgs) => await OnTreeCellEditedAsync(eventArgs);
+        _hierarchyDisplayModePicker.SelectionCommitted += async (_, _) =>
+            await CommitHierarchyDisplayModeAsync();
+        _hierarchyDisplayModePicker.DismissRequested += (_, _) =>
+            CloseHierarchyDisplayModePicker();
         _treeGrid.ColumnHeaderClick += (_, eventArgs) => OnColumnHeaderClick(eventArgs);
         _treeGrid.Collapsed += (_, eventArgs) =>
         {
@@ -774,6 +791,7 @@ public sealed class LayoutFoundryPanel : Panel
 
     private void LayoutPanelOverlay()
     {
+        CloseHierarchyDisplayModePicker();
         var size = _panelOverlayHost.ClientSize;
         if (size.Width <= 0 || size.Height <= 0)
             return;
@@ -1499,6 +1517,7 @@ public sealed class LayoutFoundryPanel : Panel
     private void OnPanelUnloaded(object? sender, EventArgs eventArgs)
     {
         _fullscreenWindow?.Close();
+        CloseHierarchyDisplayModePicker();
 
         if (!_isLoaded)
         {
@@ -2020,7 +2039,10 @@ public sealed class LayoutFoundryPanel : Panel
                 return;
             }
 
-            ShowDisplayModeMenu(PropertyInteractionTargets(item.Node.Key), eventArgs.Location);
+            ShowDisplayModePicker(
+                PropertyInteractionTargets(item.Node.Key),
+                item.DisplayModeText,
+                eventArgs.Location);
             return;
         }
 
@@ -2084,7 +2106,10 @@ public sealed class LayoutFoundryPanel : Panel
         new ContextMenu(menuItems).Show(_treeGrid, location);
     }
 
-    private void ShowDisplayModeMenu(IReadOnlyList<OverviewNodeKey> targets, PointF location)
+    private void ShowDisplayModePicker(
+        IReadOnlyList<OverviewNodeKey> targets,
+        string currentDisplayMode,
+        PointF location)
     {
         var snapshot = LayoutFoundryUiHost.CaptureSnapshot();
         var modes = snapshot?.DisplayModes
@@ -2097,17 +2122,61 @@ public sealed class LayoutFoundryPanel : Panel
             return;
         }
 
-        var menuItems = new List<MenuItem>();
-        foreach (var mode in modes)
+        _hierarchyDisplayModes = modes
+            .GroupBy(mode => mode.Value, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First().Key, StringComparer.OrdinalIgnoreCase);
+        _hierarchyDisplayModeTargets = targets.Distinct().ToArray();
+        _hierarchyDisplayModePicker.SetChoices(_hierarchyDisplayModes.Keys);
+        _hierarchyDisplayModePicker.Text = _hierarchyDisplayModes.ContainsKey(currentDisplayMode)
+            ? currentDisplayMode
+            : string.Empty;
+
+        var hostSize = _panelOverlayHost.ClientSize;
+        var popupWidth = Math.Min(340, Math.Max(240, hostSize.Width - FoundryTheme.Space4 * 2));
+        var popupSize = new Size(popupWidth, 34);
+        _hierarchyDisplayModePopup.Size = popupSize;
+        _hierarchyDisplayModePicker.Width = popupWidth - 2;
+
+        var screenAnchor = _treeGrid.PointToScreen(new PointF(location.X, location.Y + 18));
+        var anchor = _panelOverlayHost.PointFromScreen(screenAnchor);
+        var x = Math.Clamp(
+            (int)Math.Round(anchor.X),
+            FoundryTheme.Space2,
+            Math.Max(FoundryTheme.Space2, hostSize.Width - popupWidth - FoundryTheme.Space2));
+        var y = Math.Clamp(
+            (int)Math.Round(anchor.Y),
+            FoundryTheme.Space2,
+            Math.Max(FoundryTheme.Space2, hostSize.Height - popupSize.Height - FoundryTheme.Space2));
+        _panelOverlayHost.Move(_hierarchyDisplayModePopup, x, y);
+        _hierarchyDisplayModePopup.Visible = true;
+
+        Application.Instance.AsyncInvoke(() =>
         {
-            var capturedMode = mode;
-            var menuItem = new ButtonMenuItem { Text = mode.Value };
-            menuItem.Click += (_, _) => Application.Instance.AsyncInvoke(
-                async () => await SetDisplayModeAsync(targets, capturedMode.Key, capturedMode.Value));
-            menuItems.Add(menuItem);
+            if (_hierarchyDisplayModePopup.Visible)
+                _hierarchyDisplayModePicker.OpenResults();
+        });
+    }
+
+    private async Task CommitHierarchyDisplayModeAsync()
+    {
+        var modeName = _hierarchyDisplayModePicker.Text.Trim();
+        if (!_hierarchyDisplayModes.TryGetValue(modeName, out var modeId) ||
+            _hierarchyDisplayModeTargets.Count == 0)
+        {
+            return;
         }
 
-        new ContextMenu(menuItems).Show(_treeGrid, location);
+        var targets = _hierarchyDisplayModeTargets.ToArray();
+        CloseHierarchyDisplayModePicker();
+        await SetDisplayModeAsync(targets, modeId, modeName);
+    }
+
+    private void CloseHierarchyDisplayModePicker()
+    {
+        _hierarchyDisplayModePicker.CloseResults();
+        _hierarchyDisplayModePopup.Visible = false;
+        _hierarchyDisplayModeTargets = [];
+        _hierarchyDisplayModes.Clear();
     }
 
     private async Task SetPaperSizeAsync(
@@ -2405,6 +2474,7 @@ public sealed class LayoutFoundryPanel : Panel
 
     private void OnTreeMouseDown(object? sender, MouseEventArgs eventArgs)
     {
+        CloseHierarchyDisplayModePicker();
         var cell = _treeGrid.GetCellAt(eventArgs.Location);
         var item = cell.Item as HierarchyTreeItem;
         var column = cell.Column;

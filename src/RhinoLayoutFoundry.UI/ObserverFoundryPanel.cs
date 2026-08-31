@@ -181,8 +181,6 @@ public sealed class ObserverFoundryPanel : Panel
             await MoveHierarchyAsync(eventArgs);
         _canvas.HierarchyPlacementRequested += async (_, eventArgs) =>
             await ReorganizeHierarchyAsync(eventArgs);
-        _canvas.ReorderRequested += async (_, eventArgs) =>
-            await ReorderAsync(eventArgs);
         _canvas.ReorderStepRequested += async (_, eventArgs) =>
             await ReorderSelectionByStepAsync(eventArgs.Direction);
         _canvas.NamedViewRequested += async (_, eventArgs) =>
@@ -845,15 +843,6 @@ public sealed class ObserverFoundryPanel : Panel
             eventArgs.SheetIds,
             eventArgs.Target);
         _status.Text = ResultMessage(result, "Hierarchy updated.");
-        if (result.Succeeded) RefreshSnapshot(fit: false);
-    }
-
-    private async Task ReorderAsync(ObserverReorderRequestedEventArgs eventArgs)
-    {
-        var result = await LayoutFoundryUiHost.ReorderSheetAsync(
-            eventArgs.MovingSheetId,
-            eventArgs.BeforeSheetId);
-        _status.Text = ResultMessage(result, "Layout order updated.");
         if (result.Succeeded) RefreshSnapshot(fit: false);
     }
 

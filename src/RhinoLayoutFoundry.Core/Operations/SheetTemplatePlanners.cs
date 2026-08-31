@@ -86,7 +86,8 @@ public sealed record LayoutCreationSpec(
     string? NamedView = null,
     bool UseDedicatedDetailLayer = true,
     IReadOnlyList<string?>? NamedViewsByDetail = null,
-    IReadOnlyList<Guid?>? DetailDisplayModesByDetail = null);
+    IReadOnlyList<Guid?>? DetailDisplayModesByDetail = null,
+    Guid? DetailLayerId = null);
 
 public sealed record BatchCreateSheetsRequest(
     uint DocumentRuntimeSerialNumber,
@@ -121,7 +122,8 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
 
         var templates = snapshot.Templates.ToDictionary(item => item.Id);
         var expanded = new List<(Guid DraftId, SheetTemplateRecipe Template,
-            IReadOnlyDictionary<Guid, string> NamedViewAssignments, bool UseDedicatedDetailLayer)>();
+            IReadOnlyDictionary<Guid, string> NamedViewAssignments, bool UseDedicatedDetailLayer,
+            Guid? DetailLayerId)>();
         if (hasCreationSpecs)
         {
             foreach (var spec in request.CreationSpecs!)
@@ -142,9 +144,14 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
                 }
 
                 ValidateTemplate(resolved.Template, snapshot, resolved.NamedViewAssignments, diagnostics);
+                if (!spec.UseDedicatedDetailLayer && spec.DetailLayerId is { } detailLayerId &&
+                    !snapshot.Layers.ContainsKey(detailLayerId))
+                    diagnostics.Add(CaptureSheetTemplatePlanner.Error(
+                        "batch.detail_layer_missing", "The selected detail layer is no longer available."));
                 for (var index = 0; index < spec.Quantity; index++)
                     expanded.Add((Guid.NewGuid(), resolved.Template, resolved.NamedViewAssignments,
-                        spec.UseDedicatedDetailLayer));
+                        spec.UseDedicatedDetailLayer,
+                        spec.UseDedicatedDetailLayer ? null : spec.DetailLayerId));
             }
         }
         else foreach (var item in request.TemplateQuantities)
@@ -162,7 +169,7 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
             ValidateTemplate(template, snapshot, request.NamedViewAssignments, diagnostics);
             for (var index = 0; index < item.Quantity; index++)
                 expanded.Add((Guid.NewGuid(), template,
-                    request.NamedViewAssignments ?? new Dictionary<Guid, string>(), true));
+                    request.NamedViewAssignments ?? new Dictionary<Guid, string>(), true, null));
         }
 
         var pattern = request.NamingPattern?.Trim() ?? string.Empty;
@@ -204,7 +211,8 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
                     expanded[index].UseDedicatedDetailLayer,
                     (request.Start + index * request.Step).ToString(CultureInfo.InvariantCulture),
                     request.ProjectData ?? snapshot.ProjectInfo,
-                    request.InitialRevisions));
+                    request.InitialRevisions,
+                    expanded[index].DetailLayerId));
             }
             diagnostics.Add(new Diagnostic("batch.undo_unavailable", DiagnosticSeverity.Warning,
                 "Rhino does not expose native Undo for layout creation. Foundry will roll back the entire batch if any sheet fails."));
@@ -299,7 +307,7 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
             try
             {
                 adaptiveTitleBlock = AdaptiveTitleBlockLayoutSolver.Solve(
-                    builtInKind, spec.Paper, projectInformation);
+                    builtInKind, spec.Paper, projectInformation, source.DetailSlots.Count);
                 titleBlock = new TitleBlockTemplateRecipe(
                     Guid.Empty,
                     $"Foundry — {AdaptiveTitleBlockLayoutSolver.Label(builtInKind)}",

@@ -102,6 +102,24 @@ public sealed class AdaptiveTitleBlockLayoutSolverTests
     [Theory]
     [InlineData(BuiltInTitleBlockKind.RightSidebar)]
     [InlineData(BuiltInTitleBlockKind.FullWidthBottom)]
+    public void ScaleCellOnlyExistsForExactlyOneDetail(BuiltInTitleBlockKind kind)
+    {
+        var paper = new PaperRecipe(594, 420, "Millimeters");
+        var noDetails = AdaptiveTitleBlockLayoutSolver.Solve(kind, paper, ProjectInformation.Empty, 0);
+        var oneDetail = AdaptiveTitleBlockLayoutSolver.Solve(kind, paper, ProjectInformation.Empty, 1);
+        var multipleDetails = AdaptiveTitleBlockLayoutSolver.Solve(kind, paper, ProjectInformation.Empty, 2);
+
+        Assert.DoesNotContain(noDetails.Fields, field => field.Key == "sheet.scale");
+        Assert.Contains(oneDetail.Fields, field => field.Key == "sheet.scale");
+        Assert.DoesNotContain(multipleDetails.Fields, field => field.Key == "sheet.scale");
+        Assert.NotEqual(oneDetail.Signature, noDetails.Signature);
+        Assert.NotEqual(oneDetail.Signature, multipleDetails.Signature);
+        Assert.Equal(noDetails.Signature, multipleDetails.Signature);
+    }
+
+    [Theory]
+    [InlineData(BuiltInTitleBlockKind.RightSidebar)]
+    [InlineData(BuiltInTitleBlockKind.FullWidthBottom)]
     public void RevisionOptionCreatesOnlyABlankBay(BuiltInTitleBlockKind kind)
     {
         var project = ProjectInformation.Empty with

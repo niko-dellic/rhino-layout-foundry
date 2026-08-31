@@ -1569,6 +1569,15 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
         DetailLayerResolution? detailLayer = null;
         try
         {
+            var selectedLayerIndices = creates
+                .Where(create => !create.UseDedicatedDetailLayer && create.DetailLayerId is not null)
+                .Select(create => create.DetailLayerId!.Value)
+                .Distinct()
+                .ToDictionary(
+                    layerId => layerId,
+                    layerId => document.Layers.FirstOrDefault(layer =>
+                        layer.Id == layerId && !layer.IsDeleted && !layer.IsReference)?.Index
+                        ?? throw new InvalidOperationException("The selected detail layer is no longer available."));
             if (creates.Any(create => create.UseDedicatedDetailLayer && create.Template.DetailSlots.Count > 0))
                 detailLayer = ResolveDedicatedDetailLayer(document, beforeState.DedicatedDetailLayerId);
 
@@ -1588,7 +1597,11 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
                 foreach (var slot in create.Template.DetailSlots)
                     CreateDetail(document, page, slot, recipeUnit, pageScale,
                         create.NamedViewAssignments.GetValueOrDefault(slot.Id),
-                        create.UseDedicatedDetailLayer ? detailLayer?.LayerIndex : null);
+                        create.UseDedicatedDetailLayer
+                            ? detailLayer?.LayerIndex
+                            : create.DetailLayerId is { } detailLayerId
+                                ? selectedLayerIndices[detailLayerId]
+                                : null);
 
                 var revisions = create.InitialRevisions?.ToArray() ?? [];
                 var titleBlockData = new SheetTitleBlockData(create.SheetNumber, revisions);
@@ -1892,7 +1905,7 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
     {
         var recipeUnit = ParseUnitSystem(paper.UnitSystem);
         var pageScale = RhinoMath.UnitScale(recipeUnit, document.PageUnitSystem);
-        var layout = AdaptiveTitleBlockLayoutSolver.Solve(kind, paper, projectInfo);
+        var layout = AdaptiveTitleBlockLayoutSolver.Solve(kind, paper, projectInfo, details.Count);
         var definitionName = $"RLF {layout.Signature.Replace(':', '-')}";
         var definition = document.InstanceDefinitions.Find(definitionName);
         if (definition is null)
@@ -2146,8 +2159,9 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
             ["issue.approved_by"] = project.ApprovedBy,
             ["sheet.number"] = sheet.SheetNumber,
             ["sheet.title"] = sheetTitle,
-            ["sheet.scale"] = ScaleSummary(details),
         };
+        if (details.Count == 1)
+            result["sheet.scale"] = ScaleSummary(details);
         for (var index = 1; index <= 6; index++)
             result[$"revision.{index}.summary"] = string.Empty;
         foreach (var pair in project.CustomFields) result[$"custom.{pair.Key}"] = pair.Value;

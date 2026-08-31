@@ -51,6 +51,37 @@ public sealed class ThumbnailGridLayoutTests
     }
 
     [Fact]
+    public void LandscapeRowsReserveOnlyTheirRenderedPaperHeight()
+    {
+        var layout = ThumbnailGridLayout.CreateForDensity(
+            [420d / 594d, 420d / 594d],
+            1200,
+            1);
+        var first = layout.CellBounds(0);
+        var second = layout.CellBounds(1);
+
+        Assert.Equal(1, layout.Columns);
+        Assert.InRange(second.Y - first.Bottom, layout.Gap - 0.001, layout.Gap + 0.001);
+        Assert.True(first.Height < layout.CardWidth * 0.78 + 42);
+    }
+
+    [Fact]
+    public void EachRowUsesItsTallestPaperAndVariableOffsetsRemainHittable()
+    {
+        var layout = ThumbnailGridLayout.CreateForDensity(
+            [420d / 594d, 594d / 420d, 420d / 594d],
+            300,
+            0);
+        var firstRow = layout.CellBounds(0);
+        var secondRow = layout.CellBounds(2);
+
+        Assert.Equal(2, layout.Columns);
+        Assert.True(firstRow.Height > secondRow.Height);
+        Assert.Equal(0, layout.RowAt(firstRow.Y + 1));
+        Assert.Equal(1, layout.RowAt(secondRow.Y + 1));
+    }
+
+    [Fact]
     public void VisibleQueryReturnsOnlyViewportRowsAndOverscan()
     {
         var layout = ThumbnailGridLayout.Create(100, 900, 180);
