@@ -111,11 +111,73 @@ internal static class FoundryViewIcons
         DrawPlus(graphics, color, 12.5f, 3.5f);
     });
 
+    internal static Icon Add() => NewIcon(graphics =>
+        DrawPlus(graphics, FoundryTheme.PrimaryText, 8, 8));
+
+    internal static Icon Folder() => NewIcon(graphics =>
+    {
+        var pen = new Pen(FoundryTheme.PrimaryText, Emphasis);
+        graphics.DrawLine(pen, 1.5f, 4.5f, 6, 4.5f);
+        graphics.DrawLine(pen, 6, 4.5f, 7.5f, 6);
+        graphics.DrawLine(pen, 7.5f, 6, 14.5f, 6);
+        graphics.DrawLine(pen, 14.5f, 6, 14.5f, 13.5f);
+        graphics.DrawLine(pen, 14.5f, 13.5f, 1.5f, 13.5f);
+        graphics.DrawLine(pen, 1.5f, 13.5f, 1.5f, 4.5f);
+    });
+
+    internal static Icon Layout() => NewIcon(graphics =>
+    {
+        var pen = new Pen(FoundryTheme.PrimaryText, Emphasis);
+        graphics.DrawRectangle(pen, 2.5f, 1.5f, 11, 13);
+        graphics.DrawRectangle(new Pen(FoundryTheme.PrimaryText, Hairline), 4.5f, 4.5f, 7, 7);
+    });
+
+    internal static Icon LayerState() => NewIcon(graphics =>
+    {
+        var color = FoundryTheme.PrimaryText;
+        var pen = new Pen(color, Emphasis);
+        graphics.DrawLine(pen, 2, 4, 14, 4);
+        graphics.DrawLine(pen, 2, 8, 14, 8);
+        graphics.DrawLine(pen, 2, 12, 14, 12);
+        graphics.FillEllipse(color, 4, 3.1f, 1.8f, 1.8f);
+        graphics.FillEllipse(color, 9, 7.1f, 1.8f, 1.8f);
+        graphics.FillEllipse(color, 6, 11.1f, 1.8f, 1.8f);
+    });
+
+    internal static Icon ObjectDisplayState() => NewIcon(graphics =>
+    {
+        var pen = new Pen(FoundryTheme.PrimaryText, Emphasis);
+        graphics.DrawRectangle(pen, 2, 3, 8.5f, 8.5f);
+        graphics.DrawRectangle(pen, 5.5f, 6.5f, 8.5f, 7);
+    });
+
     internal static Icon NewLayout() => NewIcon(graphics =>
     {
         var color = FoundryTheme.PrimaryText;
         graphics.DrawRectangle(new Pen(color, Emphasis), 1.5f, 3.5f, 9, 10.5f);
         graphics.DrawRectangle(new Pen(color, Hairline), 3.5f, 6, 5, 5.5f);
+        DrawPlus(graphics, color, 12.5f, 3.5f);
+    });
+
+    internal static Icon NewLayerState() => NewIcon(graphics =>
+    {
+        var color = FoundryTheme.PrimaryText;
+        var pen = new Pen(color, Hairline);
+        graphics.DrawLine(pen, 1.5f, 5, 9.5f, 5);
+        graphics.DrawLine(pen, 1.5f, 8.5f, 9.5f, 8.5f);
+        graphics.DrawLine(pen, 1.5f, 12, 9.5f, 12);
+        graphics.FillEllipse(color, 3, 4.25f, 1.5f, 1.5f);
+        graphics.FillEllipse(color, 6.5f, 7.75f, 1.5f, 1.5f);
+        graphics.FillEllipse(color, 4.5f, 11.25f, 1.5f, 1.5f);
+        DrawPlus(graphics, color, 12.5f, 3.5f);
+    });
+
+    internal static Icon NewObjectDisplayState() => NewIcon(graphics =>
+    {
+        var color = FoundryTheme.PrimaryText;
+        var pen = new Pen(color, Hairline);
+        graphics.DrawRectangle(pen, 2, 5.5f, 7.5f, 7.5f);
+        graphics.DrawRectangle(pen, 4.5f, 8, 7.5f, 5);
         DrawPlus(graphics, color, 12.5f, 3.5f);
     });
 

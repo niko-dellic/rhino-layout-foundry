@@ -21,9 +21,11 @@ public sealed record DocumentState(
     ProjectInformation? ProjectData = null,
     IReadOnlyList<HierarchyViewportRuleSet>? ViewportRuleSets = null,
     IReadOnlyList<CapabilityTemplateRegistration>? CapabilityTemplates = null,
-    IReadOnlyList<CapabilityTemplateLink>? CapabilityLinks = null)
+    IReadOnlyList<CapabilityTemplateLink>? CapabilityLinks = null,
+    IReadOnlyList<AppearanceStateRecord>? AppearanceStateResources = null,
+    IReadOnlyList<AppearanceStateAssignment>? AppearanceStateAssignments = null)
 {
-    public const int CurrentSchemaVersion = 9;
+    public const int CurrentSchemaVersion = 11;
 
     [JsonIgnore]
     public IReadOnlyList<SheetTemplateRecipe> Templates => SheetTemplates ?? [];
@@ -45,6 +47,12 @@ public sealed record DocumentState(
 
     [JsonIgnore]
     public IReadOnlyList<CapabilityTemplateLink> TemplateLinks => CapabilityLinks ?? [];
+
+    [JsonIgnore]
+    public IReadOnlyList<AppearanceStateRecord> AppearanceStates => AppearanceStateResources ?? [];
+
+    [JsonIgnore]
+    public IReadOnlyList<AppearanceStateAssignment> StateAssignments => AppearanceStateAssignments ?? [];
 
     public DocumentState RemoveTemplatesForMissingSources(IReadOnlySet<Guid> existingPageViewIds)
     {
@@ -84,9 +92,15 @@ public sealed record DocumentState(
                 registrationIds.Contains(item.SourceRegistrationId) &&
                 (item.Target.Kind != HierarchyScopeKind.Sheet || existingPageViewIds.Contains(item.Target.Id)))
             .ToArray();
+        var stateIds = AppearanceStates.Select(item => item.Id).ToHashSet();
+        var assignments = StateAssignments.Where(item =>
+                stateIds.Contains(item.StateId) &&
+                (item.Target.Kind != HierarchyScopeKind.Sheet || existingPageViewIds.Contains(item.Target.Id)))
+            .ToArray();
         return retained.Length == Templates.Count &&
                registrations.Length == TemplateRegistrations.Count &&
                links.Length == TemplateLinks.Count &&
+               assignments.Length == StateAssignments.Count &&
                rules.Count == AppearanceRules.Count
             ? this
             : this with
@@ -95,6 +109,7 @@ public sealed record DocumentState(
                 CapabilityTemplates = registrations,
                 CapabilityLinks = links,
                 ViewportRuleSets = rules.ToArray(),
+                AppearanceStateAssignments = assignments,
             };
     }
 
@@ -173,7 +188,19 @@ public sealed record SheetRecord(
     IReadOnlyDictionary<string, string> Metadata,
     TitleBlockRole? TitleBlock,
     bool IncludeInPrintAll = true,
-    SheetTitleBlockData? TitleBlockData = null);
+    SheetTitleBlockData? TitleBlockData = null,
+    SheetNamingBinding? NamingBinding = null);
+
+public sealed record SheetNamingBinding(
+    string Pattern,
+    int Index,
+    string LastGeneratedName,
+    IReadOnlyDictionary<Guid, string>? NamedViewAssignments = null)
+{
+    [JsonIgnore]
+    public IReadOnlyDictionary<Guid, string> NamedViews =>
+        NamedViewAssignments ?? new Dictionary<Guid, string>();
+}
 
 public sealed record TitleBlockRole(
     Guid InstanceObjectId,

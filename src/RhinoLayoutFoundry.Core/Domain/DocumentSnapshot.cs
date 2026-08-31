@@ -23,7 +23,9 @@ public sealed record DocumentSnapshot(
     IReadOnlyList<DetailObjectDisplayOverrideSnapshot>? DetailObjectDisplayOverrides = null,
     IReadOnlyList<HierarchyViewportRuleSet>? ViewportRuleSets = null,
     IReadOnlyList<CapabilityTemplateRegistration>? CapabilityTemplates = null,
-    IReadOnlyList<CapabilityTemplateLink>? CapabilityLinks = null)
+    IReadOnlyList<CapabilityTemplateLink>? CapabilityLinks = null,
+    IReadOnlyList<AppearanceStateRecord>? AppearanceStateResources = null,
+    IReadOnlyList<AppearanceStateAssignment>? AppearanceStateAssignments = null)
 {
     public IReadOnlyList<SheetTemplateRecipe> Templates => SheetTemplates ?? [];
     public IReadOnlyDictionary<string, string> Metadata =>
@@ -48,6 +50,8 @@ public sealed record DocumentSnapshot(
     public IReadOnlyList<HierarchyViewportRuleSet> AppearanceRules => ViewportRuleSets ?? [];
     public IReadOnlyList<CapabilityTemplateRegistration> TemplateRegistrations => CapabilityTemplates ?? [];
     public IReadOnlyList<CapabilityTemplateLink> TemplateLinks => CapabilityLinks ?? [];
+    public IReadOnlyList<AppearanceStateRecord> AppearanceStates => AppearanceStateResources ?? [];
+    public IReadOnlyList<AppearanceStateAssignment> StateAssignments => AppearanceStateAssignments ?? [];
 }
 
 public sealed record SheetSnapshot(
@@ -65,9 +69,12 @@ public sealed record SheetSnapshot(
     string? TitleBlockDefinitionName = null,
     bool IncludeInPrintAll = true,
     SheetTitleBlockData? TitleBlockData = null,
-    BuiltInTitleBlockKind? TitleBlockBuiltInKind = null)
+    BuiltInTitleBlockKind? TitleBlockBuiltInKind = null,
+    IReadOnlyList<string>? SheetTags = null,
+    SheetNamingBinding? NamingBinding = null)
 {
     public IReadOnlyList<DetailSnapshot> Details => DetailSettings ?? [];
+    public IReadOnlyList<string> Tags => SheetTags ?? [];
 }
 
 public sealed record DetailSnapshot(

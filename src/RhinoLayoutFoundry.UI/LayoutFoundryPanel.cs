@@ -32,8 +32,7 @@ public sealed partial class LayoutFoundryPanel : Panel
     private readonly FoundryDialogButton _folderDraftCancelButton;
     private readonly Panel _folderDraftStrip;
     private readonly FoundryToolbarIconButton _manageButton;
-    private readonly FoundryToolbarIconButton _addFolderButton;
-    private readonly FoundryToolbarIconButton _batchCreateButton;
+    private readonly FoundryToolbarIconButton _createButton;
     private readonly FoundryToolbarIconButton _deleteButton;
     private readonly FoundryToolbarIconButton _projectInfoButton;
     private readonly FoundryToolbarIconButton _importButton;
@@ -67,10 +66,13 @@ public sealed partial class LayoutFoundryPanel : Panel
     private readonly Control _panelShell;
     private readonly PixelLayout _panelOverlayHost;
     private readonly DeleteConfirmationOverlay _deleteConfirmationOverlay;
+    private readonly CreateResourceMenuOverlay _createMenuOverlay;
     private readonly TemplateRolesOverlay _templateRolesOverlay;
     private ButtonMenuItem _setCurrentMenuItem = null!;
     private ButtonMenuItem _newFolderMenuItem = null!;
     private ButtonMenuItem _newPageMenuItem = null!;
+    private ButtonMenuItem _newLayerStateMenuItem = null!;
+    private ButtonMenuItem _newObjectStateMenuItem = null!;
     private ButtonMenuItem _duplicateSelectionMenuItem = null!;
     private ButtonMenuItem _copySelectionMenuItem = null!;
     private ButtonMenuItem _pasteSelectionMenuItem = null!;
@@ -90,7 +92,7 @@ public sealed partial class LayoutFoundryPanel : Panel
     private readonly OverviewThumbnailRequestQueue _thumbnailQueue = new();
     private readonly Dictionary<OverviewThumbnailKey, Bitmap> _thumbnailBitmaps = [];
     private readonly Dictionary<Guid, HierarchyTreeItem> _sheetItems = [];
-    private readonly HashSet<OverviewNodeKey> _collapsedNodeKeys = [];
+    private readonly HierarchyExpansionState _hierarchyExpansion = new();
     private IReadOnlyList<HierarchyTreeItem> _renderedTreeItems = [];
     private readonly object _invalidationSyncRoot = new();
     private DocumentOverview _overview = DocumentOverview.NoDocument;
@@ -204,15 +206,9 @@ public sealed partial class LayoutFoundryPanel : Panel
             CreateFolderDraftContent(),
             new Padding(FoundryTheme.Space2));
         _folderDraftStrip.Visible = false;
-        _addFolderButton = new FoundryToolbarIconButton(
-            FoundryViewIcons.NewFolder(),
-            "New folder")
-        {
-            Enabled = false,
-        };
-        _batchCreateButton = new FoundryToolbarIconButton(
-            FoundryViewIcons.NewLayout(),
-            "New layout")
+        _createButton = new FoundryToolbarIconButton(
+            FoundryViewIcons.Add(),
+            "Create folder, layout, or appearance state")
         {
             Enabled = false,
         };
@@ -327,11 +323,15 @@ public sealed partial class LayoutFoundryPanel : Panel
         _templateRolesOverlay = new TemplateRolesOverlay();
         _templateRolesOverlay.CommitRequested += async (_, eventArgs) =>
             await CommitTemplateRolesAsync(eventArgs.Values);
+        _createMenuOverlay = new CreateResourceMenuOverlay();
+        _createMenuOverlay.ItemInvoked += (_, eventArgs) =>
+            QueueCreateMenuItem(eventArgs.Kind);
         _panelOverlayHost = new PixelLayout
         {
             BackgroundColor = FoundryTheme.PanelBackground,
         };
         _panelOverlayHost.Add(_panelShell, 0, 0);
+        _panelOverlayHost.Add(_createMenuOverlay, 0, 0);
         _panelOverlayHost.Add(_templateRolesOverlay, 0, 0);
         _panelOverlayHost.Add(_deleteConfirmationOverlay, 0, 0);
         _panelOverlayHost.SizeChanged += (_, _) => LayoutPanelOverlay();
@@ -342,10 +342,16 @@ public sealed partial class LayoutFoundryPanel : Panel
         _treeGrid.CellFormatting += OnHierarchyCellFormatting;
         _treeGrid.CellDoubleClick += (_, eventArgs) =>
         {
+            if ((eventArgs.Buttons & MouseButtons.Primary) == 0)
+            {
+                return;
+            }
+
             if (eventArgs.Item is HierarchyTreeItem item &&
                 ReferenceEquals(eventArgs.GridColumn, _layoutsColumn) &&
                 IsInlineRenameTarget(item))
             {
+                BeginInlineNameRename(item);
                 return;
             }
 
@@ -362,19 +368,20 @@ public sealed partial class LayoutFoundryPanel : Panel
         _treeGrid.ColumnHeaderClick += (_, eventArgs) => OnColumnHeaderClick(eventArgs);
         _treeGrid.Collapsed += (_, eventArgs) =>
         {
-            if (eventArgs.Item is HierarchyTreeItem item) _collapsedNodeKeys.Add(item.Node.Key);
+            if (!_isPopulatingTree && eventArgs.Item is HierarchyTreeItem item)
+                _hierarchyExpansion.Record(item.Node.Key, expanded: false);
         };
         _treeGrid.Expanded += (_, eventArgs) =>
         {
-            if (eventArgs.Item is HierarchyTreeItem item) _collapsedNodeKeys.Remove(item.Node.Key);
+            if (!_isPopulatingTree && eventArgs.Item is HierarchyTreeItem item)
+                _hierarchyExpansion.Record(item.Node.Key, expanded: true);
         };
         _filterTextBox.TextChanged += (_, _) => OnFilterChanged();
         _filterTextBox.KeyDown += OnSearchKeyDown;
         _filterKindDropDown.SelectedIndexChanged += (_, _) => OnFilterChanged();
         _clearFilterButton.Click += (_, _) => ClearFilter();
-        _addFolderButton.Click += (_, _) => BeginFolderCreationForCurrentView();
-        _batchCreateButton.Click += (_, _) => OpenCreateLayouts(ResolveCreationDestinationFolderId());
-        _manageButton.Click += (_, _) => OpenBatchProperties();
+        _createButton.Click += (_, _) => ToggleCreateMenu();
+        _manageButton.Click += (_, _) => OpenSelectedProperties();
         _deleteButton.Click += (_, _) => RequestDeleteSelection(SelectedKeys());
         _projectInfoButton.Click += (_, _) => OpenProjectInformation();
         _importButton.Click += async (_, _) => await ImportLayoutPackageAsync();
@@ -441,7 +448,7 @@ public sealed partial class LayoutFoundryPanel : Panel
         var layoutsColumn = new GridColumn
         {
             HeaderText = "Layouts",
-            DataCell = CreateLayoutsDataCell(inlineEditing: false),
+            DataCell = CreateLayoutsDataCell(),
             Width = 260,
             MinWidth = 220,
             Editable = false,
@@ -561,17 +568,14 @@ public sealed partial class LayoutFoundryPanel : Panel
             : FoundryTheme.HierarchyFolderBackground;
     }
 
-    private Cell CreateLayoutsDataCell(bool inlineEditing)
+    private static Cell CreateLayoutsDataCell()
     {
-        return inlineEditing
-            ? new TextBoxCell
-            {
-                Binding = Binding.Property<HierarchyTreeItem, string>(item => item.DisplayText),
-                VerticalAlignment = VerticalAlignment.Center,
-            }
-            : new ImageTextCell(
-                nameof(HierarchyTreeItem.RowIcon),
-                nameof(HierarchyTreeItem.DisplayText));
+        return new ImageTextCell(
+            nameof(HierarchyTreeItem.RowIcon),
+            nameof(HierarchyTreeItem.DisplayText))
+        {
+            VerticalAlignment = VerticalAlignment.Center,
+        };
     }
 
     private CustomCell CreateDisplayModeCell()
@@ -643,7 +647,6 @@ public sealed partial class LayoutFoundryPanel : Panel
 
     private void SetInlineEditing(bool enabled)
     {
-        _layoutsColumn.DataCell = CreateLayoutsDataCell(enabled);
         _layoutsColumn.Editable = enabled;
     }
 
@@ -797,35 +800,150 @@ public sealed partial class LayoutFoundryPanel : Panel
         _fullscreenButton.ToolTip = _fullscreenWindow is null
             ? $"Expand {ViewModeLabel(mode)} to a maximized workspace"
             : "Return Layout Foundry to the Rhino panel (Esc)";
-        UpdateFolderCreationAvailability();
+        _createButton.Enabled = _overview.DocumentRuntimeSerialNumber is not null;
     }
 
-    private void BeginFolderCreationForCurrentView()
+    private void ToggleCreateMenu()
+    {
+        if (_createMenuOverlay.Visible)
+        {
+            _createMenuOverlay.Dismiss();
+            return;
+        }
+        if (_overview.DocumentRuntimeSerialNumber is null) return;
+        var screenAnchor = _createButton.PointToScreen(new PointF(0, _createButton.Height));
+        var anchor = _panelOverlayHost.PointFromScreen(screenAnchor);
+        _createMenuOverlay.ShowMenu(new Point(
+            (int)Math.Round(anchor.X),
+            (int)Math.Round(anchor.Y + FoundryTheme.Space1)));
+    }
+
+    private void QueueCreateMenuItem(CreateResourceKind kind)
+    {
+        Application.Instance.AsyncInvoke(() =>
+        {
+            _ = InvokeCreateMenuItemSafelyAsync(kind);
+        });
+    }
+
+    private async Task InvokeCreateMenuItemSafelyAsync(CreateResourceKind kind)
+    {
+        try
+        {
+            await InvokeCreateMenuItemAsync(kind);
+        }
+        catch (Exception exception)
+        {
+            _statusLabel.Text = $"Could not start creation: {exception.Message}";
+        }
+    }
+
+    private Task InvokeCreateMenuItemAsync(CreateResourceKind kind)
     {
         var destination = ResolveCreationDestinationFolderId();
-        if (_viewMode == FoundryPanelViewMode.Canvas)
+        switch (kind)
         {
-            _observerView.BeginInlineFolderCreation(destination);
-            return;
+            case CreateResourceKind.Folder:
+                BeginFolderCreation(destination);
+                break;
+            case CreateResourceKind.Layout:
+                OpenCreateLayouts(destination);
+                break;
+            case CreateResourceKind.LayerState:
+                PromptAppearanceStateCreation(AppearanceStateKind.LayerState, destination);
+                break;
+            case CreateResourceKind.ObjectDisplayState:
+                PromptAppearanceStateCreation(AppearanceStateKind.ObjectDisplayState, destination);
+                break;
         }
 
-        if (_viewMode == FoundryPanelViewMode.List)
-            BeginInlineCreation(InlineDraftKind.Folder, destination);
+        return Task.CompletedTask;
     }
 
-    private void UpdateFolderCreationAvailability()
+    private void QueueAppearanceStateCreation(AppearanceStateKind kind, Guid? destinationFolderId)
     {
-        var hasDocument = _overview.DocumentRuntimeSerialNumber is not null;
-        _addFolderButton.Enabled = hasDocument && _viewMode != FoundryPanelViewMode.Thumbnail;
-        if (_viewMode == FoundryPanelViewMode.Thumbnail)
+        Application.Instance.AsyncInvoke(() =>
         {
-            _addFolderButton.ToolTip = "Folder creation is available in Hierarchy and Canvas views";
+            try
+            {
+                PromptAppearanceStateCreation(kind, destinationFolderId);
+            }
+            catch (Exception exception)
+            {
+                _statusLabel.Text = $"Could not start creation: {exception.Message}";
+            }
+        });
+    }
+
+    private void PromptAppearanceStateCreation(AppearanceStateKind kind, Guid? destinationFolderId = null)
+    {
+        if (_overview.DocumentRuntimeSerialNumber is null) return;
+        var resolvedFolderId = destinationFolderId ?? ResolveCreationDestinationFolderId() ?? _overview.RootFolderId;
+        if (resolvedFolderId is not { } folderId)
+        {
+            _statusLabel.Text = "The layout root is unavailable.";
+            return;
+        }
+        var folderName = FolderDestinationName(folderId);
+        var siblingNames = _overview.AppearanceStates
+            .Where(state => state.FolderId == folderId)
+            .Select(state => state.Name);
+        var dialog = new AppearanceStateNameDialog(kind, folderName, siblingNames);
+        dialog.ShowModal(this);
+        if (!dialog.Accepted) return;
+
+        var name = dialog.StateName;
+        Application.Instance.AsyncInvoke(async () =>
+        {
+            try
+            {
+                await CommitAppearanceStateCreationAsync(folderId, name, kind);
+            }
+            catch (Exception exception)
+            {
+                _statusLabel.Text = $"Could not create the appearance state: {exception.Message}";
+            }
+        });
+    }
+
+    private async Task CommitAppearanceStateCreationAsync(
+        Guid folderId,
+        string name,
+        AppearanceStateKind kind)
+    {
+        _statusLabel.Text = kind == AppearanceStateKind.LayerState
+            ? "Creating layer state…"
+            : "Creating object display state…";
+        var result = await LayoutFoundryUiHost.CreateAppearanceStateAsync(folderId, name, kind);
+        if (!result.Succeeded)
+        {
+            _statusLabel.Text = DiagnosticMessage(result);
             return;
         }
 
-        var destinationId = ResolveCreationDestinationFolderId();
-        var destinationName = destinationId is { } id ? FolderDestinationName(id) : "Layouts";
-        _addFolderButton.ToolTip = $"Create a folder in {destinationName}";
+        _overview = LayoutFoundryUiHost.CaptureOverview();
+        var created = _overview.AppearanceStates.LastOrDefault(state =>
+            state.FolderId == folderId && state.Kind == kind &&
+            string.Equals(state.Name, name, StringComparison.OrdinalIgnoreCase));
+        if (created is not null)
+        {
+            var key = new OverviewNodeKey(
+                kind == AppearanceStateKind.LayerState
+                    ? OverviewNodeKind.LayerState
+                    : OverviewNodeKind.ObjectDisplayState,
+                created.Id);
+            _selection.Replace([key], key);
+            LayoutFoundryUiHost.Selection.Replace(
+                _overview.DocumentRuntimeSerialNumber,
+                [key],
+                key,
+                this);
+        }
+
+        _statusLabel.Text = kind == AppearanceStateKind.LayerState
+            ? $"Created layer state '{name}'."
+            : $"Created object display state '{name}'.";
+        PopulateTree();
     }
 
     private void ToggleFullscreen()
@@ -893,9 +1011,11 @@ public sealed partial class LayoutFoundryPanel : Panel
             return;
 
         _panelShell.Size = size;
+        _createMenuOverlay.Size = size;
         _templateRolesOverlay.Size = size;
         _deleteConfirmationOverlay.Size = size;
         _panelOverlayHost.Move(_panelShell, 0, 0);
+        _panelOverlayHost.Move(_createMenuOverlay, 0, 0);
         _panelOverlayHost.Move(_templateRolesOverlay, 0, 0);
         _panelOverlayHost.Move(_deleteConfirmationOverlay, 0, 0);
     }
@@ -918,8 +1038,7 @@ public sealed partial class LayoutFoundryPanel : Panel
             VerticalContentAlignment = VerticalAlignment.Center,
             Items =
             {
-                _addFolderButton,
-                _batchCreateButton,
+                _createButton,
                 _manageButton,
                 _deleteButton,
                 new Panel
@@ -978,6 +1097,8 @@ public sealed partial class LayoutFoundryPanel : Panel
         _setCurrentMenuItem = new ButtonMenuItem { Text = "Set Current" };
         _newFolderMenuItem = new ButtonMenuItem { Text = "New Folder" };
         _newPageMenuItem = new ButtonMenuItem { Text = "New Layout…" };
+        _newLayerStateMenuItem = new ButtonMenuItem { Text = "New Layer State" };
+        _newObjectStateMenuItem = new ButtonMenuItem { Text = "New Object Display State" };
         _duplicateSelectionMenuItem = new ButtonMenuItem { Text = "Duplicate" };
         _copySelectionMenuItem = new ButtonMenuItem { Text = "Copy" };
         _pasteSelectionMenuItem = new ButtonMenuItem { Text = "Paste" };
@@ -993,6 +1114,10 @@ public sealed partial class LayoutFoundryPanel : Panel
         _newFolderMenuItem.Click += (_, _) =>
             BeginInlineCreation(InlineDraftKind.Folder, _contextDestinationFolderId);
         _newPageMenuItem.Click += (_, _) => QueueOpenCreateLayouts(_contextDestinationFolderId);
+        _newLayerStateMenuItem.Click += (_, _) =>
+            QueueAppearanceStateCreation(AppearanceStateKind.LayerState, _contextDestinationFolderId);
+        _newObjectStateMenuItem.Click += (_, _) =>
+            QueueAppearanceStateCreation(AppearanceStateKind.ObjectDisplayState, _contextDestinationFolderId);
         _duplicateSelectionMenuItem.Click += async (_, _) => await DuplicateSelectionAsync();
         _copySelectionMenuItem.Click += (_, _) => CopySelection();
         _pasteSelectionMenuItem.Click += async (_, _) => await PasteSelectionAsync();
@@ -1001,7 +1126,7 @@ public sealed partial class LayoutFoundryPanel : Panel
         _newDetailMenuItem.Click += (_, _) => RunSelectedSheetCommand(LayoutSheetCommand.NewDetail);
         _printPageMenuItem.Click += (_, _) => RunSelectedSheetCommand(LayoutSheetCommand.Print);
         _printScopeMenuItem.Click += async (_, _) => await PrintHierarchyScopeAsync();
-        _propertiesPageMenuItem.Click += (_, _) => OpenBatchProperties();
+        _propertiesPageMenuItem.Click += (_, _) => OpenSelectedProperties();
         _renameFolderMenuItem.Click += async (_, _) => await RenameSelectedFolderAsync();
 
         var contextMenu = new ContextMenu(
@@ -1009,6 +1134,8 @@ public sealed partial class LayoutFoundryPanel : Panel
             new SeparatorMenuItem(),
             _newFolderMenuItem,
             _newPageMenuItem,
+            _newLayerStateMenuItem,
+            _newObjectStateMenuItem,
             new SeparatorMenuItem(),
             _copySelectionMenuItem,
             _pasteSelectionMenuItem,
@@ -1195,13 +1322,29 @@ public sealed partial class LayoutFoundryPanel : Panel
         }
         else if (eventArgs.Key == Keys.Escape)
         {
-            if (_inlineDraft is not null)
+            if (_inlineDraft is { } draft)
             {
                 _inlineDraft = null;
                 SetInlineEditing(false);
                 _treeGrid.CancelEdit();
-                PopulateTree();
-                _statusLabel.Text = "Creation cancelled.";
+                if (IsRenameDraft(draft.Kind))
+                {
+                    var item = Flatten(_renderedTreeItems)
+                        .FirstOrDefault(candidate => candidate.Node.Key.Id == draft.Id);
+                    if (item is not null)
+                    {
+                        item.CancelInlineEdit();
+                        _treeGrid.ReloadItem(item, reloadChildren: false);
+                    }
+
+                    _statusLabel.Text = "Rename cancelled.";
+                }
+                else
+                {
+                    PopulateTree();
+                    _statusLabel.Text = "Creation cancelled.";
+                }
+
                 eventArgs.Handled = true;
                 return;
             }
@@ -1376,18 +1519,30 @@ public sealed partial class LayoutFoundryPanel : Panel
 
         var folderCount = resolved.ExpandedFolderIds.Count;
         var sheetCount = resolved.AllSheetPageViewIds.Count;
-        var summary = folderCount > 0 && sheetCount > 0
-            ? $"{folderCount} folder{(folderCount == 1 ? string.Empty : "s")} and {sheetCount} Rhino layout{(sheetCount == 1 ? string.Empty : "s")}"
-            : folderCount > 0
-                ? $"{folderCount} folder{(folderCount == 1 ? string.Empty : "s")}"
-                : $"{sheetCount} Rhino layout{(sheetCount == 1 ? string.Empty : "s")}";
+        var stateIds = resolved.StandaloneAppearanceStateIds
+            .Concat(snapshot.AppearanceStates
+                .Where(state => resolved.ExpandedFolderIds.Contains(state.FolderId))
+                .Select(state => state.Id))
+            .Distinct().ToHashSet();
+        var stateCount = stateIds.Count;
+        var parts = new List<string>();
+        if (folderCount > 0) parts.Add($"{folderCount} folder{(folderCount == 1 ? string.Empty : "s")}");
+        if (sheetCount > 0) parts.Add($"{sheetCount} Rhino layout{(sheetCount == 1 ? string.Empty : "s")}");
+        if (stateCount > 0) parts.Add($"{stateCount} appearance state{(stateCount == 1 ? string.Empty : "s")}");
+        var summary = parts.Count switch
+        {
+            0 => "selected items",
+            1 => parts[0],
+            2 => string.Join(" and ", parts),
+            _ => $"{string.Join(", ", parts.Take(parts.Count - 1))}, and {parts[^1]}",
+        };
         var pending = new PendingDeleteSelection(
             snapshot.DocumentRuntimeSerialNumber,
             snapshot.Revision,
             keys,
             summary);
 
-        if (sheetCount == 0)
+        if (sheetCount == 0 && stateCount == 0)
         {
             _ = ExecuteDeleteSelectionAsync(pending, showBusyOverlay: false);
             return;
@@ -1397,7 +1552,22 @@ public sealed partial class LayoutFoundryPanel : Panel
         _panelShell.Enabled = false;
         _deleteConfirmationOverlay.ShowConfirmation(
             summary,
-            resolved.SelectedItemCount == 1);
+            resolved.SelectedItemCount == 1,
+            stateCount == 0
+                ? null
+                : AppearanceStateDeletionMessage(stateIds));
+    }
+
+    private string AppearanceStateDeletionMessage(IReadOnlySet<Guid> stateIds)
+    {
+        var states = _overview.AppearanceStates.Where(state => stateIds.Contains(state.Id)).ToArray();
+        var folders = states.Sum(state => state.DependentFolderCount);
+        var sheets = states.Sum(state => state.DependentSheetCount);
+        var details = states.Sum(state => state.DependentDetailCount);
+        return $"The selected states currently affect {folders} folder{(folders == 1 ? string.Empty : "s")}, " +
+               $"{sheets} layout{(sheets == 1 ? string.Empty : "s")}, and " +
+               $"{details} detail{(details == 1 ? string.Empty : "s")}. Their assignments will return to inherit; " +
+               "all explicitly authored local overrides will remain. This action cannot be undone.";
     }
 
     private async Task ConfirmDeleteSelectionAsync()
@@ -1501,10 +1671,16 @@ public sealed partial class LayoutFoundryPanel : Panel
         }
 
         CloseHierarchyDisplayModePicker();
-        var kind = item.Node.Key.Kind == OverviewNodeKind.Folder
-            ? InlineDraftKind.RenameFolder
-            : InlineDraftKind.RenameSheet;
+        var kind = item.Node.Key.Kind switch
+        {
+            OverviewNodeKind.Folder => InlineDraftKind.RenameFolder,
+            OverviewNodeKind.Sheet => InlineDraftKind.RenameSheet,
+            OverviewNodeKind.LayerState => InlineDraftKind.RenameLayerState,
+            OverviewNodeKind.ObjectDisplayState => InlineDraftKind.RenameObjectDisplayState,
+            _ => throw new ArgumentOutOfRangeException(),
+        };
         var parentFolderId = item.Node.Sheet?.FolderId ??
+                             item.Node.AppearanceState?.FolderId ??
                              _overview.Folders.FirstOrDefault(folder => folder.Id == item.Node.Key.Id)?.ParentId ??
                              _overview.RootFolderId ?? Guid.Empty;
         _inlineDraft = new InlineDraft(
@@ -1512,12 +1688,14 @@ public sealed partial class LayoutFoundryPanel : Panel
             item.Node.Key.Id,
             parentFolderId,
             item.Node.Label);
+        item.BeginInlineEdit();
         SetInlineEditing(true);
-        _statusLabel.Text = kind == InlineDraftKind.RenameFolder
-            ? "Rename the folder, then press Return."
-            : "Rename the layout, then press Return. Rhino does not support Undo for this change.";
-        PopulateTree();
-
+        _statusLabel.Text = kind switch
+        {
+            InlineDraftKind.RenameFolder => "Rename the folder, then press Return.",
+            InlineDraftKind.RenameSheet => "Rename the layout, then press Return. Rhino does not support Undo for this change.",
+            _ => "Rename the appearance state, then press Return.",
+        };
         Application.Instance.AsyncInvoke(() =>
         {
             var rows = VisibleTreeRows.Flatten(
@@ -1679,7 +1857,7 @@ public sealed partial class LayoutFoundryPanel : Panel
             {
                 LayoutFoundryUiHost.Selection.Clear(_overview.DocumentRuntimeSerialNumber, this);
             }
-            _collapsedNodeKeys.Clear();
+            _hierarchyExpansion.Clear();
             _documentSerialNumber = _overview.DocumentRuntimeSerialNumber;
         }
 
@@ -1696,9 +1874,16 @@ public sealed partial class LayoutFoundryPanel : Panel
             _sortProperty,
             _sortDirection);
         var nodeKeys = Flatten(nodes).Select(node => node.Key).ToHashSet();
+        _hierarchyExpansion.Prune(nodeKeys);
         var draftKey = _inlineDraft is { } draft
             ? new OverviewNodeKey(
-                draft.Kind == InlineDraftKind.Folder ? OverviewNodeKind.Folder : OverviewNodeKind.Sheet,
+                draft.Kind switch
+                {
+                    InlineDraftKind.Folder => OverviewNodeKind.Folder,
+                    InlineDraftKind.LayerState => OverviewNodeKind.LayerState,
+                    InlineDraftKind.ObjectDisplayState => OverviewNodeKind.ObjectDisplayState,
+                    _ => OverviewNodeKind.Sheet,
+                },
                 draft.Id)
             : (OverviewNodeKey?)null;
         var preferredSelection = draftKey is { } visibleDraft && nodeKeys.Contains(visibleDraft)
@@ -1713,7 +1898,7 @@ public sealed partial class LayoutFoundryPanel : Panel
                 preferredSelection,
                 _usesMacSafeHierarchy,
                 _inlineDraft?.Id,
-                _collapsedNodeKeys))
+                _hierarchyExpansion))
             .ToArray();
         _renderedTreeItems = items;
         var visibleItems = Flatten(items).ToDictionary(item => item.Node.Key);
@@ -1821,7 +2006,20 @@ public sealed partial class LayoutFoundryPanel : Panel
                     [],
                     [])).ToArray(),
             },
-            InlineDraftKind.RenameFolder or InlineDraftKind.RenameSheet => _overview,
+            InlineDraftKind.LayerState or InlineDraftKind.ObjectDisplayState => _overview with
+            {
+                AppearanceStateResources = _overview.AppearanceStates.Append(new AppearanceStateOverview(
+                    draft.Id,
+                    draft.ParentFolderId,
+                    int.MaxValue,
+                    draft.Name,
+                    draft.Kind == InlineDraftKind.LayerState
+                        ? AppearanceStateKind.LayerState
+                        : AppearanceStateKind.ObjectDisplayState,
+                    0, 0, 0, 0, 0)).ToArray(),
+            },
+            InlineDraftKind.RenameFolder or InlineDraftKind.RenameSheet or
+                InlineDraftKind.RenameLayerState or InlineDraftKind.RenameObjectDisplayState => _overview,
             _ => _overview,
         };
     }
@@ -1926,11 +2124,10 @@ public sealed partial class LayoutFoundryPanel : Panel
         _importButton.Enabled = _overview.DocumentRuntimeSerialNumber is not null;
         _exportButton.Enabled = _overview.DocumentRuntimeSerialNumber is not null;
         _projectInfoButton.Enabled = _overview.DocumentRuntimeSerialNumber is not null;
-        _batchCreateButton.Enabled = _overview.DocumentRuntimeSerialNumber is not null;
+        _createButton.Enabled = _overview.DocumentRuntimeSerialNumber is not null;
         var destinationId = ResolveCreationDestinationFolderId();
         var destinationName = destinationId is { } id ? FolderDestinationName(id) : "Layouts";
-        _batchCreateButton.ToolTip = $"Create layouts in {destinationName}";
-        UpdateFolderCreationAvailability();
+        _createButton.ToolTip = $"Create in {destinationName}";
         _manageButton.Enabled = selectionCount > 0;
         _deleteButton.Enabled = selectionCount > 0 &&
                                 selectedKeys.All(key => !IsDocumentRootKey(key));
@@ -2087,11 +2284,21 @@ public sealed partial class LayoutFoundryPanel : Panel
             kind,
             Guid.NewGuid(),
             destination,
-            kind == InlineDraftKind.Folder ? "New Folder" : "New Page");
+            kind switch
+            {
+                InlineDraftKind.Folder => "New Folder",
+                InlineDraftKind.Sheet => "New Page",
+                InlineDraftKind.LayerState => "New Layer State",
+                InlineDraftKind.ObjectDisplayState => "New Object Display State",
+                _ => string.Empty,
+            });
         SetInlineEditing(true);
-        _statusLabel.Text = kind == InlineDraftKind.Folder
-            ? "Name the new folder, then press Return."
-            : "Name the new layout, then press Return.";
+        _statusLabel.Text = kind switch
+        {
+            InlineDraftKind.Folder => "Name the new folder, then press Return.",
+            InlineDraftKind.Sheet => "Name the new layout, then press Return.",
+            _ => "Name the new appearance state, then press Return.",
+        };
         PopulateTree();
 
         Application.Instance.AsyncInvoke(() =>
@@ -2122,7 +2329,8 @@ public sealed partial class LayoutFoundryPanel : Panel
 
     private async Task OnTreeCellClickAsync(GridCellMouseEventArgs eventArgs)
     {
-        if (eventArgs.Item is not HierarchyTreeItem item)
+        if ((eventArgs.Buttons & MouseButtons.Primary) == 0 ||
+            eventArgs.Item is not HierarchyTreeItem item)
         {
             return;
         }
@@ -2134,18 +2342,11 @@ public sealed partial class LayoutFoundryPanel : Panel
             return;
         }
 
-        if ((IsInteractivePropertyColumn(eventArgs.GridColumn) ||
-             IsInlineRenameTarget(item, eventArgs.GridColumn)) &&
+        if (IsInteractivePropertyColumn(eventArgs.GridColumn) &&
             ConsumeCellInteractionGuard(item, eventArgs.GridColumn))
         {
             _propertyInteractionTargets = [];
             _statusLabel.Text = "Row selected. Click the property again to change it.";
-            return;
-        }
-
-        if (IsInlineRenameTarget(item, eventArgs.GridColumn))
-        {
-            BeginInlineNameRename(item);
             return;
         }
 
@@ -2426,6 +2627,8 @@ public sealed partial class LayoutFoundryPanel : Panel
             InlineDraftKind.Sheet => "Creating layout…",
             InlineDraftKind.RenameFolder => "Renaming folder…",
             InlineDraftKind.RenameSheet => "Renaming layout…",
+            InlineDraftKind.LayerState or InlineDraftKind.ObjectDisplayState => "Creating appearance state…",
+            InlineDraftKind.RenameLayerState or InlineDraftKind.RenameObjectDisplayState => "Renaming appearance state…",
             _ => string.Empty,
         };
         var result = draft.Kind switch
@@ -2443,6 +2646,12 @@ public sealed partial class LayoutFoundryPanel : Panel
                 name),
             InlineDraftKind.RenameSheet => ToOperationResult(
                 LayoutFoundryUiHost.RenameSheetDirect(draft.Id, name)),
+            InlineDraftKind.LayerState => await LayoutFoundryUiHost.CreateAppearanceStateAsync(
+                draft.ParentFolderId, name, AppearanceStateKind.LayerState),
+            InlineDraftKind.ObjectDisplayState => await LayoutFoundryUiHost.CreateAppearanceStateAsync(
+                draft.ParentFolderId, name, AppearanceStateKind.ObjectDisplayState),
+            InlineDraftKind.RenameLayerState or InlineDraftKind.RenameObjectDisplayState =>
+                await LayoutFoundryUiHost.UpdateAppearanceStateAsync(draft.Id, name),
             _ => throw new ArgumentOutOfRangeException(),
         };
         if (!result.Succeeded)
@@ -2461,6 +2670,25 @@ public sealed partial class LayoutFoundryPanel : Panel
                 ? new OverviewNodeKey(OverviewNodeKind.Folder, draft.Id)
             : draft.Kind == InlineDraftKind.RenameSheet
                 ? new OverviewNodeKey(OverviewNodeKind.Sheet, draft.Id)
+            : draft.Kind is InlineDraftKind.RenameLayerState or InlineDraftKind.RenameObjectDisplayState
+                ? new OverviewNodeKey(
+                    draft.Kind == InlineDraftKind.RenameLayerState
+                        ? OverviewNodeKind.LayerState
+                        : OverviewNodeKind.ObjectDisplayState,
+                    draft.Id)
+            : draft.Kind is InlineDraftKind.LayerState or InlineDraftKind.ObjectDisplayState
+                ? _overview.AppearanceStates.FirstOrDefault(state =>
+                    state.FolderId == draft.ParentFolderId &&
+                    string.Equals(state.Name, name, StringComparison.Ordinal) &&
+                    state.Kind == (draft.Kind == InlineDraftKind.LayerState
+                        ? AppearanceStateKind.LayerState
+                        : AppearanceStateKind.ObjectDisplayState)) is { } state
+                    ? new OverviewNodeKey(
+                        state.Kind == AppearanceStateKind.LayerState
+                            ? OverviewNodeKind.LayerState
+                            : OverviewNodeKind.ObjectDisplayState,
+                        state.Id)
+                    : (OverviewNodeKey?)null
                 : _overview.Sheets
                     .Where(sheet => sheet.FolderId == draft.ParentFolderId)
                     .FirstOrDefault(sheet => string.Equals(sheet.Name, name, StringComparison.Ordinal)) is { } sheet
@@ -2477,6 +2705,10 @@ public sealed partial class LayoutFoundryPanel : Panel
             InlineDraftKind.Sheet => $"Created layout '{name}'. Rhino does not support Undo for layout creation.",
             InlineDraftKind.RenameFolder => $"Renamed folder to '{name}'.",
             InlineDraftKind.RenameSheet => $"Renamed layout to '{name}'. Rhino does not support Undo for this change.",
+            InlineDraftKind.LayerState => $"Created layer state '{name}'.",
+            InlineDraftKind.ObjectDisplayState => $"Created object display state '{name}'.",
+            InlineDraftKind.RenameLayerState or InlineDraftKind.RenameObjectDisplayState =>
+                $"Renamed appearance state to '{name}'.",
             _ => string.Empty,
         };
         PopulateTree();
@@ -2498,25 +2730,36 @@ public sealed partial class LayoutFoundryPanel : Panel
     {
         Application.Instance.AsyncInvoke(() =>
         {
-            if (_inlineDraft is null)
+            if (_inlineDraft is not { } draft)
             {
                 return;
             }
 
-            PopulateTree();
+            if (!IsRenameDraft(draft.Kind))
+            {
+                PopulateTree();
+            }
+
             var rows = VisibleTreeRows.Flatten(
                     _renderedTreeItems,
                     candidate => candidate.Children.OfType<HierarchyTreeItem>(),
                     candidate => candidate.Expanded)
                 .ToArray();
-            var row = Array.FindIndex(rows, candidate => candidate.IsInlineDraft);
+            var row = Array.FindIndex(rows, candidate => candidate.Node.Key.Id == draft.Id);
             if (row >= 0)
             {
+                rows[row].BeginInlineEdit();
                 _treeGrid.SelectedItem = rows[row];
                 _treeGrid.BeginEdit(row, 0);
             }
         });
     }
+
+    private static bool IsRenameDraft(InlineDraftKind kind) =>
+        kind is InlineDraftKind.RenameFolder or
+            InlineDraftKind.RenameSheet or
+            InlineDraftKind.RenameLayerState or
+            InlineDraftKind.RenameObjectDisplayState;
 
     private void UpdateContextMenuActions()
     {
@@ -2542,12 +2785,22 @@ public sealed partial class LayoutFoundryPanel : Panel
         _newFolderMenuItem.Enabled = _overview.DocumentRuntimeSerialNumber is not null;
         _newPageMenuItem.Visible = true;
         _newPageMenuItem.Enabled = _overview.DocumentRuntimeSerialNumber is not null;
+        _newLayerStateMenuItem.Visible = isFolderContext || isRootContext;
+        _newLayerStateMenuItem.Enabled = _overview.DocumentRuntimeSerialNumber is not null;
+        _newObjectStateMenuItem.Visible = isFolderContext || isRootContext;
+        _newObjectStateMenuItem.Enabled = _overview.DocumentRuntimeSerialNumber is not null;
         _newFolderMenuItem.Text = destinationName is null || _contextDestinationFolderId == _overview.RootFolderId
             ? "New Folder"
             : $"New Folder in {destinationName}";
         _newPageMenuItem.Text = destinationName is null || _contextDestinationFolderId == _overview.RootFolderId
             ? "New Layout…"
             : $"New Layout in {destinationName}…";
+        _newLayerStateMenuItem.Text = destinationName is null || _contextDestinationFolderId == _overview.RootFolderId
+            ? "New Layer State"
+            : $"New Layer State in {destinationName}";
+        _newObjectStateMenuItem.Text = destinationName is null || _contextDestinationFolderId == _overview.RootFolderId
+            ? "New Object Display State"
+            : $"New Object Display State in {destinationName}";
         _duplicateSelectionMenuItem.Visible = selectionCount > 0 && !isDocumentContext;
         _duplicateSelectionMenuItem.Enabled = selectionCount > 0 && !isDocumentContext;
         _copySelectionMenuItem.Visible = selectionCount > 0 && !isDocumentContext;
@@ -2575,8 +2828,11 @@ public sealed partial class LayoutFoundryPanel : Panel
         _printScopeMenuItem.Visible = isFolderContext || isRootContext;
         _printScopeMenuItem.Enabled = printScope.Exists && printScope.HasSheets;
         _printScopeMenuItem.Text = isFolderContext ? "Print Folder…" : "Print Enabled…";
-        _propertiesPageMenuItem.Visible = hasLayoutPropertyTargets;
-        _propertiesPageMenuItem.Enabled = hasLayoutPropertyTargets;
+        var hasAppearanceStateTarget = selectedItems.Count == 1 &&
+            selectedItems[0].Node.Key.Kind is OverviewNodeKind.LayerState or OverviewNodeKind.ObjectDisplayState;
+        _propertiesPageMenuItem.Visible = hasLayoutPropertyTargets || hasAppearanceStateTarget;
+        _propertiesPageMenuItem.Enabled = hasLayoutPropertyTargets || hasAppearanceStateTarget;
+        _propertiesPageMenuItem.Text = hasAppearanceStateTarget ? "Edit State…" : "Layout Properties…";
         _renameFolderMenuItem.Enabled = folder is not null && !isDocumentContext;
         _renameFolderMenuItem.Visible = folder is not null && !isDocumentContext;
     }
@@ -2668,7 +2924,7 @@ public sealed partial class LayoutFoundryPanel : Panel
             item is not null &&
             !item.IsInlineDraft &&
             column is not null &&
-            (IsInteractivePropertyColumn(column) || IsInlineRenameTarget(item, column)) &&
+            IsInteractivePropertyColumn(column) &&
             (eventArgs.Modifiers != Keys.None ||
              !_selection.Selected.Contains(item.Node.Key)))
         {
@@ -2729,7 +2985,8 @@ public sealed partial class LayoutFoundryPanel : Panel
         (column is null || ReferenceEquals(column, _layoutsColumn)) &&
         !item.IsInlineDraft &&
         !item.Node.IsDocumentRoot &&
-        item.Node.Key.Kind is OverviewNodeKind.Folder or OverviewNodeKind.Sheet;
+        item.Node.Key.Kind is OverviewNodeKind.Folder or OverviewNodeKind.Sheet or
+            OverviewNodeKind.LayerState or OverviewNodeKind.ObjectDisplayState;
 
     private bool IsSelectionPreservingCircleColumn(GridColumn column) =>
         ReferenceEquals(column, _printColumn) ||
@@ -2984,6 +3241,23 @@ public sealed partial class LayoutFoundryPanel : Panel
         }
     }
 
+    private void OpenSelectedProperties()
+    {
+        var selection = SelectedKeys().Distinct().ToArray();
+        if (selection.Length != 1 || selection[0].Kind is not
+                (OverviewNodeKind.LayerState or OverviewNodeKind.ObjectDisplayState))
+        {
+            OpenBatchProperties();
+            return;
+        }
+
+        OpenAppearanceSettings(
+            selection,
+            selection[0].Kind == OverviewNodeKind.LayerState
+                ? SelectionInspectorContent.Layers
+                : SelectionInspectorContent.ObjectModes);
+    }
+
     private void OpenAppearanceSettings(
         IReadOnlyList<OverviewNodeKey> selection,
         SelectionInspectorContent contentMode)
@@ -2995,6 +3269,32 @@ public sealed partial class LayoutFoundryPanel : Panel
             return;
         }
         var targets = selection.Distinct().ToArray();
+        if (targets.Length == 1 && targets[0].Kind is
+                OverviewNodeKind.LayerState or OverviewNodeKind.ObjectDisplayState)
+        {
+            var state = snapshot.AppearanceStates.FirstOrDefault(item => item.Id == targets[0].Id);
+            if (state is null)
+            {
+                _statusLabel.Text = "The selected appearance state is no longer available.";
+                return;
+            }
+            if (state.Kind == AppearanceStateKind.LayerState !=
+                (contentMode == SelectionInspectorContent.Layers))
+            {
+                _statusLabel.Text = state.Kind == AppearanceStateKind.LayerState
+                    ? "Edit this resource from the Layers column."
+                    : "Edit this resource from the Object modes column.";
+                return;
+            }
+            var stateDialog = new AppearanceStateEditorDialog(snapshot, state);
+            stateDialog.ShowModal(this);
+            if (stateDialog.Changed)
+            {
+                _statusLabel.Text = $"Updated '{state.Name}'.";
+                RefreshOverview();
+            }
+            return;
+        }
         if (targets.Length == 0)
         {
             _statusLabel.Text = "Select a folder, layout, or detail first.";
@@ -3411,7 +3711,7 @@ public sealed partial class LayoutFoundryPanel : Panel
             OverviewNodeKey preferredSelection,
             bool useMacSafeSingleColumn,
             Guid? inlineDraftId,
-            IReadOnlySet<OverviewNodeKey> collapsedNodeKeys)
+            HierarchyExpansionState expansionState)
         {
             Node = node;
             Presentation = OverviewRowPresentation.Create(node, useMacSafeSingleColumn: false);
@@ -3423,6 +3723,8 @@ public sealed partial class LayoutFoundryPanel : Panel
                     OverviewNodeKind.Folder => FoundryHierarchyIcons.Folder,
                     OverviewNodeKind.Sheet => FoundryHierarchyIcons.Layout,
                     OverviewNodeKind.Detail => FoundryHierarchyIcons.Detail,
+                    OverviewNodeKind.LayerState => FoundryHierarchyIcons.Detail,
+                    OverviewNodeKind.ObjectDisplayState => FoundryHierarchyIcons.Detail,
                     _ => null,
                 };
             _displayText = IsInlineDraft
@@ -3438,19 +3740,21 @@ public sealed partial class LayoutFoundryPanel : Panel
                     preferredSelection,
                     useMacSafeSingleColumn,
                     inlineDraftId,
-                    collapsedNodeKeys));
+                    expansionState));
             }
 
-            Expanded = expandAll ||
-                       Contains(node.Children, preferredSelection) ||
-                       (node.Key.Kind == OverviewNodeKind.Folder && !collapsedNodeKeys.Contains(node.Key));
+            Expanded = expansionState.Resolve(
+                node.Key,
+                expandedByDefault: node.Key.Kind == OverviewNodeKind.Folder,
+                forceExpanded: expandAll,
+                containsPreferredSelection: Contains(node.Children, preferredSelection));
         }
 
         public OverviewTreeNode Node { get; }
 
         public OverviewRowPresentation Presentation { get; }
 
-        public bool IsInlineDraft { get; }
+        public bool IsInlineDraft { get; private set; }
 
         public Image? RowIcon { get; }
 
@@ -3466,6 +3770,17 @@ public sealed partial class LayoutFoundryPanel : Panel
                     _displayText = value;
                 }
             }
+        }
+
+        public void BeginInlineEdit()
+        {
+            IsInlineDraft = true;
+        }
+
+        public void CancelInlineEdit()
+        {
+            _displayText = Node.Label;
+            IsInlineDraft = false;
         }
 
         public string PrimaryText => Presentation.PrimaryText;
@@ -3516,7 +3831,11 @@ public sealed partial class LayoutFoundryPanel : Panel
                                                         Node.Detail?.TemplateCapabilities ??
                                                         TemplateCapability.None);
 
-        public string LayerStateText => AppearanceSummary() is not { } appearance
+        public string LayerStateText => Node.AppearanceState is { Kind: AppearanceStateKind.LayerState } state
+            ? $"{state.RuleCount} rule{(state.RuleCount == 1 ? string.Empty : "s")} · {state.DirectAssignmentCount} use{(state.DirectAssignmentCount == 1 ? string.Empty : "s")}"
+            : StateBinding(AppearanceStateKind.LayerState) is { } binding
+                ? $"{binding.Name}{(binding.IsInherited ? " · inherited" : string.Empty)}"
+            : AppearanceSummary() is not { } appearance
             ? "—"
             : appearance.IsMixed
                 ? "Mixed"
@@ -3524,7 +3843,11 @@ public sealed partial class LayoutFoundryPanel : Panel
                     ? "Inherited"
                     : $"On {appearance.VisibleLayerCount} · Off {appearance.HiddenLayerCount}";
 
-        public string ObjectModesText => AppearanceSummary() is not { } appearance
+        public string ObjectModesText => Node.AppearanceState is { Kind: AppearanceStateKind.ObjectDisplayState } state
+            ? $"{state.RuleCount} rule{(state.RuleCount == 1 ? string.Empty : "s")} · {state.DirectAssignmentCount} use{(state.DirectAssignmentCount == 1 ? string.Empty : "s")}"
+            : StateBinding(AppearanceStateKind.ObjectDisplayState) is { } binding
+                ? $"{binding.Name}{(binding.IsInherited ? " · inherited" : string.Empty)}"
+            : AppearanceSummary() is not { } appearance
             ? "—"
             : appearance.IsMixed
                 ? "Mixed"
@@ -3537,15 +3860,22 @@ public sealed partial class LayoutFoundryPanel : Panel
         private ViewportAppearanceSummary? AppearanceSummary() =>
             Node.Folder?.Appearance ?? Node.Sheet?.Appearance ?? Node.Detail?.Appearance;
 
+        private AppearanceStateBindingOverview? StateBinding(AppearanceStateKind kind) => kind switch
+        {
+            AppearanceStateKind.LayerState =>
+                Node.Folder?.LayerState ?? Node.Sheet?.LayerState ?? Node.Detail?.LayerState,
+            AppearanceStateKind.ObjectDisplayState =>
+                Node.Folder?.ObjectDisplayState ?? Node.Sheet?.ObjectDisplayState ?? Node.Detail?.ObjectDisplayState,
+            _ => null,
+        };
+
         private static string CapabilitySummary(TemplateCapability capabilities)
         {
             if (capabilities == TemplateCapability.None) return "—";
-            var labels = new List<string>(4);
+            var labels = new List<string>(2);
             if (capabilities.HasFlag(TemplateCapability.Layout)) labels.Add("Layout");
             if (capabilities.HasFlag(TemplateCapability.TitleBlock)) labels.Add("Title block");
-            if (capabilities.HasFlag(TemplateCapability.LayerStates)) labels.Add("Layers");
-            if (capabilities.HasFlag(TemplateCapability.ObjectDisplayModes)) labels.Add("Objects");
-            return string.Join(" · ", labels);
+            return labels.Count == 0 ? "—" : string.Join(" · ", labels);
         }
 
         private string? _paperText;
@@ -3634,8 +3964,12 @@ public sealed partial class LayoutFoundryPanel : Panel
     {
         Folder,
         Sheet,
+        LayerState,
+        ObjectDisplayState,
         RenameFolder,
         RenameSheet,
+        RenameLayerState,
+        RenameObjectDisplayState,
     }
 
     private enum FoundryPanelViewMode

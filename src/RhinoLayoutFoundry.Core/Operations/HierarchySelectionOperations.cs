@@ -9,12 +9,18 @@ public sealed record HierarchySelection(
     IReadOnlySet<Guid> ExpandedFolderIds,
     IReadOnlyList<Guid> StandaloneSheetPageViewIds,
     IReadOnlyList<Guid> FolderSheetPageViewIds,
+    IReadOnlyList<Guid> StandaloneAppearanceStateIds,
+    IReadOnlyList<Guid> FolderAppearanceStateIds,
     IReadOnlyList<OverviewNodeKey> UnresolvedKeys)
 {
     public IReadOnlyList<Guid> AllSheetPageViewIds =>
         StandaloneSheetPageViewIds.Concat(FolderSheetPageViewIds).Distinct().ToArray();
 
-    public int SelectedItemCount => FolderRootIds.Count + StandaloneSheetPageViewIds.Count;
+    public IReadOnlyList<Guid> AllAppearanceStateIds =>
+        StandaloneAppearanceStateIds.Concat(FolderAppearanceStateIds).Distinct().ToArray();
+
+    public int SelectedItemCount =>
+        FolderRootIds.Count + StandaloneSheetPageViewIds.Count + StandaloneAppearanceStateIds.Count;
 }
 
 public static class HierarchySelectionResolver
@@ -30,6 +36,8 @@ public static class HierarchySelectionResolver
         var unresolved = new List<OverviewNodeKey>();
         var selectedFolders = new HashSet<Guid>();
         var selectedSheets = new HashSet<Guid>();
+        var selectedStates = new HashSet<Guid>();
+        var stateFolders = snapshot.AppearanceStates.ToDictionary(state => state.Id, state => state.FolderId);
         var detailOwners = snapshot.Sheets.Values
             .SelectMany(sheet => sheet.DetailIds.Select(detailId => (detailId, sheet.PageViewId)))
             .ToDictionary(pair => pair.detailId, pair => pair.PageViewId);
@@ -46,6 +54,10 @@ public static class HierarchySelectionResolver
                     break;
                 case OverviewNodeKind.Detail when detailOwners.TryGetValue(key.Id, out var sheetId):
                     selectedSheets.Add(sheetId);
+                    break;
+                case OverviewNodeKind.LayerState or OverviewNodeKind.ObjectDisplayState
+                    when stateFolders.ContainsKey(key.Id):
+                    selectedStates.Add(key.Id);
                     break;
                 default:
                     unresolved.Add(key);
@@ -72,12 +84,22 @@ public static class HierarchySelectionResolver
             .OrderBy(id => snapshot.Sheets[id].FolderId)
             .ThenBy(id => snapshot.Sheets[id].Order)
             .ToArray();
+        var folderStates = selectedStates
+            .Where(id => expandedFolders.Contains(stateFolders[id]))
+            .ToArray();
+        var standaloneStates = selectedStates
+            .Where(id => !expandedFolders.Contains(stateFolders[id]))
+            .OrderBy(id => stateFolders[id])
+            .ThenBy(id => snapshot.AppearanceStates.First(state => state.Id == id).Order)
+            .ToArray();
 
         return new HierarchySelection(
             folderRoots,
             expandedFolders,
             standaloneSheets,
             folderSheets,
+            standaloneStates,
+            folderStates,
             unresolved);
     }
 
@@ -152,6 +174,12 @@ public sealed class DeleteHierarchySelectionPlanner : IOperationPlanner<DeleteHi
                 changes.Add(new DeleteSheetChange(sheet.PageViewId, sheet.FolderId, sheet.Name));
             }
 
+            foreach (var stateId in resolved.StandaloneAppearanceStateIds)
+            {
+                var state = snapshot.AppearanceStates.First(item => item.Id == stateId);
+                changes.Add(new SetAppearanceStateResourceChange(state.Id, state, null));
+            }
+
             if (resolved.AllSheetPageViewIds.Count > 0)
                 diagnostics.Add(new Diagnostic(
                     "selection.delete_undo_unavailable",
@@ -196,7 +224,7 @@ public sealed class DeleteHierarchySelectionPlanner : IOperationPlanner<DeleteHi
         if (selection.UnresolvedKeys.Count > 0)
             diagnostics.Add(Error("selection.missing", "One or more selected items no longer exist."));
         if (selection.SelectedItemCount == 0)
-            diagnostics.Add(Error("selection.empty", "Select at least one folder, layout, or detail."));
+            diagnostics.Add(Error("selection.empty", "Select at least one folder, layout, detail, or appearance state."));
     }
 
     private static Diagnostic Error(string code, string message) =>

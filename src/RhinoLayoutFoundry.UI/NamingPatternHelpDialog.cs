@@ -8,7 +8,7 @@ internal sealed class NamingPatternHelpDialog : Dialog
     internal NamingPatternHelpDialog()
     {
         Title = "Naming-pattern wildcards";
-        MinimumSize = new Size(560, 430);
+        MinimumSize = new Size(560, 485);
         Padding = new Padding(FoundryTheme.Space4);
         BackgroundColor = FoundryTheme.PanelBackground;
 
@@ -52,6 +52,10 @@ internal sealed class NamingPatternHelpDialog : Dialog
                 }),
                 FoundryTheme.MutedLabel(
                     "Example: A-{discipline}-{index:000}  →  A-MECH-013"),
+                FoundryTheme.MutedLabel(
+                    "Created and batch-renamed layouts stay linked to non-index values. " +
+                    "Their assigned index is frozen, so moving or reordering a layout never renumbers it. " +
+                    "Renaming a layout manually detaches that link; applying a naming pattern again reattaches it."),
                 new StackLayoutItem(null, true),
                 new StackLayout
                 {

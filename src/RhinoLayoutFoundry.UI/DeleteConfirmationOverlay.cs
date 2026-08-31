@@ -127,13 +127,13 @@ internal sealed class DeleteConfirmationOverlay : Panel
 
     internal event EventHandler? ConfirmRequested;
 
-    internal void ShowConfirmation(string summary, bool singularSelection)
+    internal void ShowConfirmation(string summary, bool singularSelection, string? detail = null)
     {
         _busy = false;
         _title.Text = $"Delete {summary}?";
-        _message.Text = singularSelection
+        _message.Text = detail ?? (singularSelection
             ? "This item will be permanently removed. This action cannot be undone."
-            : "These items will be permanently removed. This action cannot be undone.";
+            : "These items will be permanently removed. This action cannot be undone.");
         _cancelButton.Text = "Cancel";
         _deleteButton.Text = "Delete";
         _cancelButton.Enabled = true;

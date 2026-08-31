@@ -1,5 +1,6 @@
 using RhinoLayoutFoundry.Core.Diagnostics;
 using RhinoLayoutFoundry.Core.Domain;
+using RhinoLayoutFoundry.Core.Naming;
 
 namespace RhinoLayoutFoundry.Core.Operations;
 
@@ -37,13 +38,43 @@ public sealed class AssignNamedViewPlanner : IOperationPlanner<AssignNamedViewRe
                 detailId));
         }
 
+        var changes = new List<OperationChange>();
+        if (diagnostics.All(item => item.Severity != DiagnosticSeverity.Error))
+        {
+            changes.Add(new AssignNamedViewToDetailsChange(detailIds, name));
+            var targetSet = detailIds.ToHashSet();
+            var affectedSheets = snapshot.Sheets.Values
+                .Where(sheet => sheet.DetailIds.Any(targetSet.Contains))
+                .ToArray();
+            var bindingOverrides = new Dictionary<Guid, SheetNamingBinding?>();
+            foreach (var sheet in affectedSheets.Where(sheet =>
+                         sheet.NamingBinding is not null && string.Equals(
+                             sheet.Name,
+                             sheet.NamingBinding.LastGeneratedName,
+                             StringComparison.Ordinal)))
+            {
+                var assigned = sheet.NamingBinding!.NamedViews
+                    .ToDictionary(pair => pair.Key, pair => pair.Value);
+                foreach (var detailId in sheet.DetailIds.Where(targetSet.Contains)) assigned[detailId] = name;
+                bindingOverrides[sheet.PageViewId] = sheet.NamingBinding with
+                {
+                    NamedViewAssignments = assigned,
+                };
+            }
+            var linked = LinkedSheetNaming.Preview(
+                snapshot,
+                bindingOverrides: bindingOverrides,
+                affectedSheetIds: affectedSheets.Select(sheet => sheet.PageViewId).ToHashSet());
+            diagnostics.AddRange(linked.Diagnostics);
+            if (linked.Change is not null) changes.Add(linked.Change);
+        }
+        if (diagnostics.Any(item => item.Severity == DiagnosticSeverity.Error)) changes.Clear();
+
         return new OperationPlan(
             snapshot.DocumentRuntimeSerialNumber,
             snapshot.Revision,
             $"Assign named view {name}",
-            diagnostics.Any(item => item.Severity == DiagnosticSeverity.Error)
-                ? []
-                : [new AssignNamedViewToDetailsChange(detailIds, name)],
+            changes,
             diagnostics);
     }
 

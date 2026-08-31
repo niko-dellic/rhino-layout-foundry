@@ -316,7 +316,13 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
                     record.Metadata,
                     record.TitleBlock,
                     record.IncludeInPrintAll,
-                    record.TitleBlockData));
+                    record.TitleBlockData,
+                    record.NamingBinding is { } binding && string.Equals(
+                        page.PageName,
+                        binding.LastGeneratedName,
+                        StringComparison.Ordinal)
+                        ? binding
+                        : null));
             }
 
             foreach (var rule in state.DisplayRules) referencedDisplayModes.Add(rule.DisplayModeId);
@@ -1147,6 +1153,11 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
                 ParentId = source.ParentId is { } parent ? folderMap[parent] : rootId,
             });
 
+        var metadata = mode == LayoutPackageImportMode.Replace
+            ? manifest.FoundryState.Metadata.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal)
+            : before.Metadata.Concat(manifest.FoundryState.Metadata.Where(pair => !before.Metadata.ContainsKey(pair.Key)))
+                .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
+
         var sheets = mode == LayoutPackageImportMode.Merge
             ? before.Sheets.ToDictionary(pair => pair.Key, pair => pair.Value)
             : new Dictionary<Guid, SheetRecord>();
@@ -1162,6 +1173,30 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
                         : role.InstanceDefinitionId,
                 }
                 : null;
+            var sourceFolderName = manifest.FoundryState.Folders
+                .FirstOrDefault(folder => folder.Id == source.SourceFolderId)?.Name ?? string.Empty;
+            var destinationFolderName = folders
+                .FirstOrDefault(folder => folder.Id == folderMap[source.SourceFolderId])?.Name ?? string.Empty;
+            var remappedViews = source.NamingBinding?.NamedViews
+                .Where(pair => detailsBySource.ContainsKey(pair.Key))
+                .ToDictionary(
+                    pair => detailsBySource[pair.Key],
+                    pair => namedViewMap.GetValueOrDefault(pair.Value, pair.Value)) ?? [];
+            var namingBinding = source.NamingBinding is { } binding &&
+                                string.Equals(page.PageName, binding.LastGeneratedName, StringComparison.Ordinal) &&
+                                BindingSourcesUnchanged(
+                                    binding,
+                                    source,
+                                    manifest.FoundryState.Metadata,
+                                    metadata,
+                                    sourceFolderName,
+                                    destinationFolderName,
+                                    remappedViews)
+                ? binding with
+                {
+                    NamedViewAssignments = remappedViews,
+                }
+                : null;
             sheets[page.MainViewport.Id] = new SheetRecord(
                 page.MainViewport.Id,
                 folderMap[source.SourceFolderId],
@@ -1170,7 +1205,8 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
                 source.Metadata,
                 titleBlock,
                 source.IncludeInPrintAll,
-                source.TitleBlockData);
+                source.TitleBlockData,
+                namingBinding);
         }
 
         var recovery = (mode == LayoutPackageImportMode.Merge ? before.Recovery : [])
@@ -1377,10 +1413,46 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
             });
         }
 
-        var metadata = mode == LayoutPackageImportMode.Replace
-            ? manifest.FoundryState.Metadata.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal)
-            : before.Metadata.Concat(manifest.FoundryState.Metadata.Where(pair => !before.Metadata.ContainsKey(pair.Key)))
-                .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
+        var appearanceStates = mode == LayoutPackageImportMode.Merge
+            ? before.AppearanceStates.ToList()
+            : [];
+        var appearanceStateMap = new Dictionary<Guid, Guid>();
+        foreach (var sourceState in manifest.FoundryState.AppearanceStates)
+        {
+            if (!folderMap.TryGetValue(sourceState.FolderId, out var folderId)) continue;
+            var id = Guid.NewGuid();
+            appearanceStateMap[sourceState.Id] = id;
+            var usedNames = appearanceStates.Where(item => item.FolderId == folderId)
+                .Select(item => item.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var name = UniqueImportedName(sourceState.Name, usedNames);
+            appearanceStates.Add(sourceState with
+            {
+                Id = id,
+                FolderId = folderId,
+                Name = name,
+                LayerRules = sourceState.LayerRules.Select(RemapLayerRule).ToArray(),
+                ObjectDisplayRules = sourceState.ObjectDisplayRules.Select(RemapObjectRule).ToArray(),
+            });
+        }
+
+        var appearanceAssignments = mode == LayoutPackageImportMode.Merge
+            ? before.StateAssignments.ToList()
+            : [];
+        foreach (var sourceAssignment in manifest.FoundryState.StateAssignments)
+        {
+            if (RemapScope(sourceAssignment.Target) is not { } target ||
+                !appearanceStateMap.TryGetValue(sourceAssignment.StateId, out var stateId))
+                continue;
+            appearanceAssignments.RemoveAll(item =>
+                item.Target == target && item.Kind == sourceAssignment.Kind);
+            appearanceAssignments.Add(sourceAssignment with
+            {
+                Id = Guid.NewGuid(),
+                Target = target,
+                StateId = stateId,
+            });
+        }
+
         var canvas = RemapCanvas(before.Canvas, manifest.FoundryState.Canvas, mode, folderMap, pagesBySource);
         return new DocumentState(
             DocumentState.CurrentSchemaVersion,
@@ -1400,7 +1472,43 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
                 importProjectInformation),
             appearanceRules,
             registrations,
-            capabilityLinks);
+            capabilityLinks,
+            appearanceStates,
+            appearanceAssignments);
+    }
+
+    private static bool BindingSourcesUnchanged(
+        SheetNamingBinding binding,
+        LayoutPackageSheet sheet,
+        IReadOnlyDictionary<string, string> sourceMetadata,
+        IReadOnlyDictionary<string, string> destinationMetadata,
+        string sourceFolderName,
+        string destinationFolderName,
+        IReadOnlyDictionary<Guid, string> remappedViews)
+    {
+        bool Uses(string token) => binding.Pattern.Contains($"{{{token}}}", StringComparison.OrdinalIgnoreCase);
+        string MetadataValue(IReadOnlyDictionary<string, string> documentValues, string key) =>
+            sheet.Metadata.GetValueOrDefault(key, documentValues.GetValueOrDefault(key, string.Empty));
+        if (Uses("folder") && !string.Equals(sourceFolderName, destinationFolderName, StringComparison.Ordinal))
+            return false;
+        foreach (var token in new[] { "project", "discipline" })
+            if (Uses(token) && !string.Equals(
+                    MetadataValue(sourceMetadata, token),
+                    MetadataValue(destinationMetadata, token),
+                    StringComparison.Ordinal))
+                return false;
+        return !Uses("view") || binding.NamedViews.Values.SequenceEqual(remappedViews.Values);
+    }
+
+    private static string UniqueImportedName(string source, IReadOnlySet<string> usedNames)
+    {
+        var baseName = string.IsNullOrWhiteSpace(source) ? "Imported state" : source.Trim();
+        if (!usedNames.Contains(baseName)) return baseName;
+        for (var suffix = 2; ; suffix++)
+        {
+            var candidate = $"{baseName} {suffix}";
+            if (!usedNames.Contains(candidate)) return candidate;
+        }
     }
 
     private static ObserverCanvasState RemapCanvas(

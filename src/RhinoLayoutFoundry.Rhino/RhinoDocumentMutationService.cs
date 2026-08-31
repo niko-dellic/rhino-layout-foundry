@@ -100,14 +100,25 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
                 ApplyViewportTemplateLink(document, plan, link),
             [SetTemplateCapabilitiesChange capabilities] =>
                 ApplyViewportTemplateCapabilities(document, plan, capabilities),
+            _ when plan.Changes.Count > 0 && plan.Changes.All(change => change is
+                SetAppearanceStateResourceChange or SetAppearanceStateAssignmentChange) =>
+                ApplyAppearanceStateChanges(document, plan),
             _ when plan.Changes.Count > 0 && plan.Changes.All(change => change is DeleteSheetTemplateChange) =>
                 ApplyDeleteTemplates(document, plan, plan.Changes.Cast<DeleteSheetTemplateChange>().ToArray()),
-            _ when plan.Changes.All(change => change is DeleteFolderChange or DeleteSheetChange) =>
+            _ when plan.Changes.All(change => change is DeleteFolderChange or DeleteSheetChange or
+                SetAppearanceStateResourceChange) =>
                 ApplyDeleteHierarchySelection(document, plan),
             _ when plan.Changes.All(change => change is DuplicateFolderChange or DuplicateSheetChange or PlacePastedHierarchyOnCanvasChange) =>
                 ApplyDuplicateHierarchySelection(document, plan),
             _ when plan.Changes.All(change => change is CreateSheetFromTemplateChange) =>
                 ApplyTemplateBatch(document, plan, plan.Changes.Cast<CreateSheetFromTemplateChange>().ToArray()),
+            _ when plan.Changes.Count(change => change is AssignNamedViewToDetailsChange) == 1 &&
+                   plan.Changes.All(change => change is AssignNamedViewToDetailsChange or UpdateLinkedSheetNamesChange) =>
+                ApplyNamedView(
+                    document,
+                    plan,
+                    plan.Changes.OfType<AssignNamedViewToDetailsChange>().Single(),
+                    plan.Changes.OfType<UpdateLinkedSheetNamesChange>().SingleOrDefault()),
             _ when plan.Changes.All(IsDocumentStateChange) => ApplyDocumentStateChanges(document, plan),
             _ => Failure("operation.unsupported_plan", "The operation plan is not supported by this build."),
         };
@@ -116,7 +127,8 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
     private OperationResult ApplyNamedView(
         RhinoDoc document,
         OperationPlan plan,
-        AssignNamedViewToDetailsChange change)
+        AssignNamedViewToDetailsChange change,
+        UpdateLinkedSheetNamesChange? linkedNames = null)
     {
         var namedViewIndex = document.NamedViews.FindByName(change.NamedViewName);
         if (namedViewIndex < 0)
@@ -127,9 +139,13 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
             .ToArray();
         if (details.Length != change.DetailViewportIds.Distinct().Count())
             return Failure("named_view.detail_missing", "A targeted detail viewport no longer exists.");
+        if (linkedNames is not null && ValidateLinkedSheetNames(document, linkedNames) is { } namingFailure)
+            return namingFailure;
         var before = details.ToDictionary(
             detail => detail.Viewport.Id,
             detail => new ViewportInfo(detail.Viewport));
+        var stateBefore = _stateStore.Get(document);
+        var pageNamesBefore = CapturePageNames(document, linkedNames?.NewNames.Keys);
         var undoRecord = document.BeginUndoRecord(plan.UndoDescription);
         if (undoRecord == 0)
             return Failure("operation.undo_unavailable", "Rhino could not start a dedicated undo record.");
@@ -143,6 +159,22 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
                 if (!detail.CommitViewportChanges())
                     throw new InvalidOperationException(
                         $"Rhino did not commit named view '{change.NamedViewName}' on detail '{detail.DescriptiveTitle}'.");
+            }
+
+            if (linkedNames is not null)
+            {
+                var sheets = stateBefore.Sheets.ToDictionary(pair => pair.Key, pair => pair.Value);
+                var bindingFailure = ApplyLinkedSheetBindings(sheets, linkedNames);
+                if (bindingFailure is not null)
+                    throw new InvalidOperationException(bindingFailure.Diagnostics.First().Message);
+                var afterState = stateBefore with { Sheets = sheets };
+                _stateStore.SetCurrentSchema(document, afterState);
+                ApplyLinkedPageNames(document, linkedNames.NewNames, afterState);
+                if (!document.AddCustomUndoEvent(
+                        plan.UndoDescription,
+                        OnUndoDocumentState,
+                        new DocumentStateUndoTag(plan.UndoDescription, stateBefore, pageNamesBefore)))
+                    throw new InvalidOperationException("Rhino could not register linked naming metadata with Undo.");
             }
 
             _revisionTracker.Bump(document);
@@ -159,6 +191,8 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
                     detail.CommitViewportChanges();
                 }
             }
+            RestorePageNames(document, pageNamesBefore, stateBefore);
+            _stateStore.Set(document, stateBefore);
 
             return Failure(
                 "named_view.apply_failed",
@@ -177,7 +211,7 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
             MoveSheetChange or MoveFolderChange or SetPrintInclusionChange or
             SetObserverCanvasStateChange or ReorderSheetsChange or
             ReorganizeHierarchyChange or SetTemplateCapabilitiesChange or
-            SetCapabilityTemplateLinkChange;
+            SetCapabilityTemplateLinkChange or UpdateLinkedSheetNamesChange;
     }
 
     private OperationResult ApplyRename(
@@ -217,6 +251,7 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
         }
 
         var beforeName = page.PageName;
+        var stateBefore = _stateStore.Get(document);
         try
         {
             page.PageName = rename.NewName;
@@ -224,6 +259,17 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
             {
                 throw new InvalidOperationException("Rhino did not retain the requested layout name.");
             }
+
+            var stateAfter = stateBefore;
+            if (rename.DetachNamingBinding && stateBefore.Sheets.TryGetValue(rename.PageViewId, out var record) &&
+                record.NamingBinding is not null)
+            {
+                var sheets = stateBefore.Sheets.ToDictionary(pair => pair.Key, pair => pair.Value);
+                sheets[rename.PageViewId] = record with { NamingBinding = null };
+                stateAfter = stateBefore with { Sheets = sheets };
+                _stateStore.SetCurrentSchema(document, stateAfter);
+            }
+            RefreshManagedTitleBlockAttributes(document, page, stateAfter);
 
             _revisionTracker.Bump(document);
             document.Views.Redraw();
@@ -235,6 +281,7 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
             {
                 page.PageName = beforeName;
             }
+            _stateStore.Set(document, stateBefore);
 
             return Failure(
                 "operation.apply_failed",
@@ -250,6 +297,9 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
         RhinoDoc document,
         OperationPlan plan)
     {
+        var linkedNames = plan.Changes.OfType<UpdateLinkedSheetNamesChange>().SingleOrDefault();
+        if (linkedNames is not null && ValidateLinkedSheetNames(document, linkedNames) is { } namingFailure)
+            return namingFailure;
         var storedBeforeState = _stateStore.Get(document);
         var beforeState = plan.Changes.Any(change => change is SetPrintInclusionChange or ReorderSheetsChange or ReorganizeHierarchyChange)
             ? WithCurrentPageRecords(document, storedBeforeState)
@@ -287,6 +337,7 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
                 SetTemplateCapabilitiesChange templates => ApplyTemplateCapabilities(
                     templateRegistrations, templateLinks, templates),
                 SetCapabilityTemplateLinkChange link => ApplyTemplateLink(templateLinks, link),
+                UpdateLinkedSheetNamesChange naming => ApplyLinkedSheetBindings(sheets, naming),
                 _ => Failure("operation.unsupported_plan", "The hierarchy operation is not supported."),
             };
             if (failure is not null)
@@ -314,26 +365,27 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
                 "Rhino could not start a dedicated undo record, so no hierarchy changes were made.");
         }
 
+        var pageNamesBefore = CapturePageNames(document, linkedNames?.NewNames.Keys);
         try
         {
+            _stateStore.Set(document, afterState);
+            if (linkedNames is not null)
+                ApplyLinkedPageNames(document, linkedNames.NewNames, afterState);
             var undoEvent = document.AddCustomUndoEvent(
                 plan.UndoDescription,
                 OnUndoDocumentState,
-                new DocumentStateUndoTag(plan.UndoDescription, storedBeforeState));
+                new DocumentStateUndoTag(plan.UndoDescription, storedBeforeState, pageNamesBefore));
             if (!undoEvent)
-            {
-                return Failure(
-                    "operation.undo_unavailable",
-                    "Rhino could not register hierarchy metadata with Undo, so no change was made.");
-            }
-
-            _stateStore.Set(document, afterState);
+                throw new InvalidOperationException(
+                    "Rhino could not register hierarchy metadata with Undo.");
             document.Modified = true;
             _revisionTracker.Bump(document);
+            if (linkedNames is not null) document.Views.Redraw();
             return new OperationResult(true, plan.Diagnostics);
         }
         catch (Exception exception)
         {
+            RestorePageNames(document, pageNamesBefore, storedBeforeState);
             _stateStore.Set(document, storedBeforeState);
             return Failure(
                 "operation.apply_failed",
@@ -345,12 +397,106 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
         }
     }
 
+    private static OperationResult? ValidateLinkedSheetNames(
+        RhinoDoc document,
+        UpdateLinkedSheetNamesChange change)
+    {
+        var pages = document.Views.GetPageViews().ToDictionary(page => page.MainViewport.Id);
+        foreach (var pair in change.ExpectedNames)
+        {
+            if (!pages.TryGetValue(pair.Key, out var page))
+                return Failure("linked_name.sheet_missing", "A linked layout no longer exists.");
+            if (!string.Equals(page.PageName, pair.Value, StringComparison.Ordinal))
+                return Failure("linked_name.before_value_changed",
+                    $"The linked layout '{pair.Value}' was renamed before the source change was applied.");
+        }
+
+        if (change.NewNames.Values.Any(string.IsNullOrWhiteSpace))
+            return Failure("linked_name.empty", "A linked naming rule produced an empty layout name.");
+        var duplicates = pages.Values
+            .Select(page => change.NewNames.GetValueOrDefault(page.MainViewport.Id, page.PageName))
+            .GroupBy(name => name, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault(group => group.Count() > 1);
+        return duplicates is null
+            ? null
+            : Failure("linked_name.duplicate",
+                $"The linked naming rules would duplicate layout name '{duplicates.Key}'.");
+    }
+
+    private static OperationResult? ApplyLinkedSheetBindings(
+        IDictionary<Guid, SheetRecord> sheets,
+        UpdateLinkedSheetNamesChange change)
+    {
+        foreach (var pair in change.NewBindings)
+        {
+            if (!sheets.TryGetValue(pair.Key, out var sheet))
+                return Failure("linked_name.sheet_missing", "A linked layout record no longer exists.");
+            sheets[pair.Key] = sheet with { NamingBinding = pair.Value };
+        }
+        return null;
+    }
+
+    private static IReadOnlyDictionary<Guid, string> CapturePageNames(
+        RhinoDoc document,
+        IEnumerable<Guid>? pageViewIds)
+    {
+        if (pageViewIds is null) return new Dictionary<Guid, string>();
+        var ids = pageViewIds.ToHashSet();
+        return document.Views.GetPageViews()
+            .Where(page => ids.Contains(page.MainViewport.Id))
+            .ToDictionary(page => page.MainViewport.Id, page => page.PageName);
+    }
+
+    private void ApplyLinkedPageNames(
+        RhinoDoc document,
+        IReadOnlyDictionary<Guid, string> names,
+        DocumentState state)
+    {
+        if (names.Count == 0) return;
+        var pages = document.Views.GetPageViews()
+            .Where(page => names.ContainsKey(page.MainViewport.Id))
+            .ToDictionary(page => page.MainViewport.Id);
+        foreach (var page in pages.Values)
+            page.PageName = $"__FoundryLinked_{page.MainViewport.Id:N}";
+        foreach (var pair in names)
+        {
+            var page = pages[pair.Key];
+            page.PageName = pair.Value;
+            if (!string.Equals(page.PageName, pair.Value, StringComparison.Ordinal))
+                throw new InvalidOperationException($"Rhino did not retain linked layout name '{pair.Value}'.");
+        }
+        foreach (var page in pages.Values) RefreshManagedTitleBlockAttributes(document, page, state);
+    }
+
+    private void RestorePageNames(
+        RhinoDoc document,
+        IReadOnlyDictionary<Guid, string> names,
+        DocumentState state)
+    {
+        if (names.Count == 0) return;
+        var pages = document.Views.GetPageViews()
+            .Where(page => names.ContainsKey(page.MainViewport.Id))
+            .ToDictionary(page => page.MainViewport.Id);
+        foreach (var page in pages.Values)
+            page.PageName = $"__FoundryRestore_{page.MainViewport.Id:N}";
+        foreach (var pair in names)
+            if (pages.TryGetValue(pair.Key, out var page)) page.PageName = pair.Value;
+        foreach (var page in pages.Values)
+        {
+            try { RefreshManagedTitleBlockAttributes(document, page, state); }
+            catch { /* Preserve rollback progress even if a managed block is damaged. */ }
+        }
+    }
+
     private OperationResult ApplyViewportAppearanceRules(
         RhinoDoc document,
         OperationPlan plan,
         SetHierarchyViewportRulesChange change,
         IReadOnlyList<CapabilityTemplateLink>? afterLinksOverride = null,
-        IReadOnlyList<CapabilityTemplateRegistration>? afterRegistrationsOverride = null)
+        IReadOnlyList<CapabilityTemplateRegistration>? afterRegistrationsOverride = null,
+        IReadOnlyList<AppearanceStateRecord>? afterStatesOverride = null,
+        IReadOnlyList<AppearanceStateAssignment>? afterAssignmentsOverride = null,
+        DocumentState? afterDocumentStateOverride = null)
     {
         var storedBeforeState = _stateStore.Get(document);
         var beforeState = WithCurrentPageRecords(document, storedBeforeState);
@@ -359,7 +505,8 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
             return Failure("appearance.before_value_changed",
                 "Viewport appearance rules changed before this edit was applied.");
 
-        var afterRules = beforeState.AppearanceRules
+        var baseAfterState = afterDocumentStateOverride ?? beforeState;
+        var afterRules = baseAfterState.AppearanceRules
             .Where(item => item.Scope != change.Scope)
             .Concat(change.NewRules is null ? [] : [change.NewRules])
             .ToArray();
@@ -387,17 +534,20 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
                 _ => link,
             };
         }).ToArray();
-        var afterState = beforeState with
+        var afterState = baseAfterState with
         {
             SchemaVersion = DocumentState.CurrentSchemaVersion,
             ViewportRuleSets = afterRules,
             CapabilityLinks = afterLinks,
-            CapabilityTemplates = afterRegistrationsOverride ?? beforeState.TemplateRegistrations,
+            CapabilityTemplates = afterRegistrationsOverride ?? baseAfterState.TemplateRegistrations,
+            AppearanceStateResources = afterStatesOverride ?? baseAfterState.AppearanceStates,
+            AppearanceStateAssignments = afterAssignmentsOverride ?? baseAfterState.StateAssignments,
         };
         var pages = document.Views.GetPageViews();
         var linkedSource = beforeState.TemplateRegistrations
             .FirstOrDefault(item => item.Source == change.Scope)?.Id;
-        var details = linkedSource is not null && beforeState.TemplateLinks.Any(link =>
+        var details = afterStatesOverride is not null || afterAssignmentsOverride is not null ||
+            linkedSource is not null && beforeState.TemplateLinks.Any(link =>
                 link.SourceRegistrationId == linkedSource &&
                 link.Capability is TemplateCapability.LayerStates or TemplateCapability.ObjectDisplayModes)
             ? pages.SelectMany(page => page.GetDetailViews()).ToArray()
@@ -434,6 +584,8 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
             .GroupBy(item => item.Scope).ToDictionary(group => group.Key, group => group.Last());
         var beforeRegistrations = beforeState.TemplateRegistrations.ToDictionary(item => item.Id);
         var afterRegistrations = afterState.TemplateRegistrations.ToDictionary(item => item.Id);
+        var beforeStates = beforeState.AppearanceStates.ToDictionary(item => item.Id);
+        var afterStates = afterState.AppearanceStates.ToDictionary(item => item.Id);
         var layerBefore = new Dictionary<Guid, Layer>();
         var objectBefore = new Dictionary<Guid, ObjectAttributes>();
         var undoRecord = document.BeginUndoRecord(plan.UndoDescription);
@@ -450,10 +602,12 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
                 var scopes = ScopeChain(detail.Viewport.Id, beforeState, pages);
                 var before = ViewportAppearanceResolver.Resolve(
                     scopes, beforeByScope, layerSnapshots, modelObjects,
-                    beforeState.TemplateLinks, beforeRegistrations);
+                    beforeState.TemplateLinks, beforeRegistrations,
+                    beforeStates, beforeState.StateAssignments);
                 var after = ViewportAppearanceResolver.Resolve(
                     scopes, afterByScope, layerSnapshots, modelObjects,
-                    afterState.TemplateLinks, afterRegistrations);
+                    afterState.TemplateLinks, afterRegistrations,
+                    afterStates, afterState.StateAssignments);
                 foreach (var layerId in before.Layers.Keys.Concat(after.Layers.Keys).Distinct())
                 {
                     var foundLayer = document.Layers.FindId(layerId);
@@ -584,6 +738,67 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
             new SetHierarchyViewportRulesChange(change.Source, current, current),
             links,
             registrations);
+    }
+
+    private OperationResult ApplyAppearanceStateChanges(
+        RhinoDoc document,
+        OperationPlan plan)
+    {
+        var storedBefore = _stateStore.Get(document);
+        var before = WithCurrentPageRecords(document, storedBefore);
+        var resources = before.AppearanceStates.ToList();
+        var assignments = before.StateAssignments.ToList();
+        foreach (var operation in plan.Changes)
+        {
+            if (operation is SetAppearanceStateResourceChange resourceChange)
+            {
+                var current = resources.LastOrDefault(item => item.Id == resourceChange.StateId);
+                if (current != resourceChange.ExpectedState)
+                    return Failure("appearance_state.before_value_changed",
+                        "The appearance state changed before this edit was applied.");
+                if (current is not null) resources.Remove(current);
+                if (resourceChange.NewState is not null) resources.Add(resourceChange.NewState);
+                if (resourceChange.NewState is null)
+                    assignments.RemoveAll(item => item.StateId == resourceChange.StateId);
+            }
+            else if (operation is SetAppearanceStateAssignmentChange assignmentChange)
+            {
+                var current = assignments.LastOrDefault(item =>
+                    item.Target == assignmentChange.Target && item.Kind == assignmentChange.Kind);
+                if (current != assignmentChange.ExpectedAssignment)
+                    return Failure("appearance_state.assignment_changed",
+                        "The appearance-state assignment changed before this edit was applied.");
+                if (current is not null) assignments.Remove(current);
+                if (assignmentChange.NewAssignment is not null)
+                    assignments.Add(assignmentChange.NewAssignment);
+            }
+        }
+
+        var isUnassignedResourceCreation = plan.Changes.Count > 0 && plan.Changes.All(change =>
+            change is SetAppearanceStateResourceChange
+            {
+                ExpectedState: null,
+                NewState: not null,
+            });
+        if (isUnassignedResourceCreation)
+        {
+            var after = before with
+            {
+                SchemaVersion = DocumentState.CurrentSchemaVersion,
+                AppearanceStateResources = resources,
+                AppearanceStateAssignments = assignments,
+            };
+            return ApplyStateOnlyChange(document, plan, storedBefore, after);
+        }
+
+        var rootScope = new HierarchyScope(HierarchyScopeKind.Folder, before.RootFolderId);
+        var rootRules = before.AppearanceRules.LastOrDefault(item => item.Scope == rootScope);
+        return ApplyViewportAppearanceRules(
+            document,
+            plan,
+            new SetHierarchyViewportRulesChange(rootScope, rootRules, rootRules),
+            afterStatesOverride: resources,
+            afterAssignmentsOverride: assignments);
     }
 
     private static OperationResult? ApplyTemplateCapabilities(
@@ -1136,6 +1351,9 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
         }
         var registrations = before.TemplateRegistrations.Where(item => !Deleted(item.Source)).ToArray();
         var registrationIds = registrations.Select(item => item.Id).ToHashSet();
+        var appearanceStates = before.AppearanceStates
+            .Where(item => !deletedFolderIds.Contains(item.FolderId)).ToArray();
+        var appearanceStateIds = appearanceStates.Select(item => item.Id).ToHashSet();
         return after with
         {
             SheetTemplates = before.Templates.Where(template =>
@@ -1144,6 +1362,9 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
             CapabilityTemplates = registrations,
             CapabilityLinks = before.TemplateLinks.Where(link =>
                 !Deleted(link.Target) && registrationIds.Contains(link.SourceRegistrationId)).ToArray(),
+            AppearanceStateResources = appearanceStates,
+            AppearanceStateAssignments = before.StateAssignments.Where(assignment =>
+                !Deleted(assignment.Target) && appearanceStateIds.Contains(assignment.StateId)).ToArray(),
         };
     }
 
@@ -1154,6 +1375,7 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
         var beforeState = WithCurrentPageRecords(document, _stateStore.Get(document));
         var folderChanges = plan.Changes.OfType<DeleteFolderChange>().ToArray();
         var sheetChanges = plan.Changes.OfType<DeleteSheetChange>().ToArray();
+        var stateChanges = plan.Changes.OfType<SetAppearanceStateResourceChange>().ToArray();
         var folderIds = new HashSet<Guid>();
         var sheetIds = new HashSet<Guid>();
 
@@ -1187,6 +1409,17 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
                 return Failure("selection.duplicate_target", "The same layout was included more than once.");
         }
 
+        var standaloneStateIds = new HashSet<Guid>();
+        foreach (var change in stateChanges)
+        {
+            if (change.NewState is not null || change.ExpectedState is null ||
+                !beforeState.AppearanceStates.Contains(change.ExpectedState) ||
+                folderIds.Contains(change.ExpectedState.FolderId))
+                return Failure("appearance_state.before_value_changed",
+                    "An appearance state changed before deletion.");
+            standaloneStateIds.Add(change.StateId);
+        }
+
         var pagesById = document.Views.GetPageViews().ToDictionary(page => page.MainViewport.Id);
         var pages = new List<RhinoPageView>();
         foreach (var pageViewId in sheetIds)
@@ -1207,8 +1440,30 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
             Sheets = beforeState.Sheets.Where(pair => !sheetIds.Contains(pair.Key))
                 .ToDictionary(pair => pair.Key, pair => pair.Value),
         }, folderIds, sheetIds, deletedDetailIds);
+        if (standaloneStateIds.Count > 0)
+        {
+            afterState = afterState with
+            {
+                AppearanceStateResources = afterState.AppearanceStates
+                    .Where(state => !standaloneStateIds.Contains(state.Id)).ToArray(),
+                AppearanceStateAssignments = afterState.StateAssignments
+                    .Where(assignment => !standaloneStateIds.Contains(assignment.StateId)).ToArray(),
+            };
+        }
         if (pages.Count == 0)
-            return ApplyStateOnlyChange(document, plan, beforeState, afterState);
+        {
+            var rootScope = new HierarchyScope(HierarchyScopeKind.Folder, beforeState.RootFolderId);
+            var rootRules = beforeState.AppearanceRules.LastOrDefault(item => item.Scope == rootScope);
+            return ApplyViewportAppearanceRules(
+                document,
+                plan,
+                new SetHierarchyViewportRulesChange(rootScope, rootRules, rootRules),
+                afterState.TemplateLinks,
+                afterState.TemplateRegistrations,
+                afterState.AppearanceStates,
+                afterState.StateAssignments,
+                afterState);
+        }
 
         foreach (var page in pages.AsEnumerable().Reverse())
         {
@@ -1217,11 +1472,17 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
                     "Rhino could not delete every selected layout. Review the document before trying again.");
         }
 
-        _stateStore.Set(document, afterState);
-        document.Modified = true;
-        _revisionTracker.Bump(document);
-        document.Views.Redraw();
-        return new OperationResult(true, plan.Diagnostics);
+        var remainingRootScope = new HierarchyScope(HierarchyScopeKind.Folder, beforeState.RootFolderId);
+        var remainingRootRules = beforeState.AppearanceRules.LastOrDefault(item => item.Scope == remainingRootScope);
+        return ApplyViewportAppearanceRules(
+            document,
+            plan,
+            new SetHierarchyViewportRulesChange(remainingRootScope, remainingRootRules, remainingRootRules),
+            afterState.TemplateLinks,
+            afterState.TemplateRegistrations,
+            afterState.AppearanceStates,
+            afterState.StateAssignments,
+            afterState);
     }
 
     private OperationResult ApplyDuplicateFolder(
@@ -1285,6 +1546,7 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
                     TitleBlock = duplicateTitleBlock is null || sourceSheet.TitleBlock is null
                         ? null
                         : sourceSheet.TitleBlock with { InstanceObjectId = duplicateTitleBlock.Id },
+                    NamingBinding = null,
                 };
             }
 
@@ -1526,6 +1788,7 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
             TitleBlock = duplicateTitleBlock is null || sourceSheet.TitleBlock is null
                 ? null
                 : sourceSheet.TitleBlock with { InstanceObjectId = duplicateTitleBlock.Id },
+            NamingBinding = null,
         };
     }
 
@@ -1563,6 +1826,8 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
                     ?? throw new InvalidOperationException("The selected display mode is unavailable.");
             using (displayMode)
             {
+                foreach (var page in pages.Where(page => update.NewNames.ContainsKey(page.MainViewport.Id)))
+                    page.PageName = $"__FoundryBatch_{page.MainViewport.Id:N}";
                 foreach (var page in pages)
                 {
                     if (update.NewNames.TryGetValue(page.MainViewport.Id, out var name)) page.PageName = name;
@@ -1590,6 +1855,18 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
             else if (changesPaper)
                 RebuildManagedTitleBlocks(document, pages, stateBefore, createdTitleBlockIds);
             var currentState = _stateStore.Get(document);
+            if (update.NamingBindings is { Count: > 0 })
+            {
+                var sheets = currentState.Sheets.ToDictionary(pair => pair.Key, pair => pair.Value);
+                foreach (var pair in update.NamingBindings)
+                {
+                    if (!sheets.TryGetValue(pair.Key, out var sheet))
+                        throw new InvalidOperationException("A renamed layout record is unavailable.");
+                    sheets[pair.Key] = sheet with { NamingBinding = pair.Value };
+                }
+                currentState = currentState with { Sheets = sheets };
+                _stateStore.SetCurrentSchema(document, currentState);
+            }
             if (update.ReplaceRevisionSchedule is not null || update.AppendRevision is not null)
             {
                 var sheets = currentState.Sheets.ToDictionary(pair => pair.Key, pair => pair.Value);
@@ -1636,7 +1913,8 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
             }
             if (update.ChangeTitleBlock || changesPaper)
                 RestoreTitleBlocks(document, stateBefore, titleBlocksBefore);
-            else if (update.ReplaceRevisionSchedule is not null || update.AppendRevision is not null)
+            else if (update.ReplaceRevisionSchedule is not null || update.AppendRevision is not null ||
+                     update.NamingBindings is { Count: > 0 })
                 _stateStore.Set(document, stateBefore);
             document.Views.Redraw();
             return Failure("batch.apply_failed",
@@ -2032,6 +2310,7 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
                 detailLayer = ResolveDedicatedDetailLayer(document, beforeState.DedicatedDetailLayerId);
 
             var sheets = beforeState.Sheets.ToDictionary(pair => pair.Key, pair => pair.Value);
+            var assignments = beforeState.StateAssignments.ToList();
             var projectInfo = creates[0].ProjectData ?? beforeState.ProjectInfo;
             foreach (var create in creates)
             {
@@ -2044,14 +2323,20 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
                     ?? throw new InvalidOperationException($"Rhino did not create '{create.Name}'.");
                 createdPages.Add(page);
 
+                var namingViews = new Dictionary<Guid, string>();
                 foreach (var slot in create.Template.DetailSlots)
-                    CreateDetail(document, page, slot, recipeUnit, pageScale,
-                        create.NamedViewAssignments.GetValueOrDefault(slot.Id),
+                {
+                    var assignedView = create.NamedViewAssignments.GetValueOrDefault(slot.Id);
+                    var detailId = CreateDetail(document, page, slot, recipeUnit, pageScale,
+                        assignedView,
                         create.UseDedicatedDetailLayer
                             ? detailLayer?.LayerIndex
                             : create.DetailLayerId is { } detailLayerId
                                 ? selectedLayerIndices[detailLayerId]
                                 : null);
+                    var effectiveView = assignedView ?? slot.DefaultNamedView;
+                    if (!string.IsNullOrWhiteSpace(effectiveView)) namingViews[detailId] = effectiveView;
+                }
 
                 var revisions = create.InitialRevisions?.ToArray() ?? [];
                 var titleBlockData = new SheetTitleBlockData(create.SheetNumber, revisions);
@@ -2084,20 +2369,57 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
                             block.AnchorName,
                             block.BuiltInKind)
                         : null,
-                    TitleBlockData: titleBlockData);
+                    TitleBlockData: titleBlockData,
+                    NamingBinding: string.IsNullOrWhiteSpace(create.NamingPattern)
+                        ? null
+                        : new SheetNamingBinding(
+                            create.NamingPattern,
+                            create.NamingIndex,
+                            create.Name,
+                            namingViews));
+                var sheetScope = new HierarchyScope(HierarchyScopeKind.Sheet, page.MainViewport.Id);
+                if (create.LayerStateId is { } layerStateId)
+                {
+                    if (!beforeState.AppearanceStates.Any(state =>
+                            state.Id == layerStateId && state.Kind == AppearanceStateKind.LayerState))
+                        throw new InvalidOperationException("The selected layer state is no longer available.");
+                    assignments.Add(new AppearanceStateAssignment(
+                        Guid.NewGuid(), sheetScope, AppearanceStateKind.LayerState, layerStateId));
+                }
+                if (create.ObjectDisplayStateId is { } objectStateId)
+                {
+                    if (!beforeState.AppearanceStates.Any(state =>
+                            state.Id == objectStateId && state.Kind == AppearanceStateKind.ObjectDisplayState))
+                        throw new InvalidOperationException("The selected object display state is no longer available.");
+                    assignments.Add(new AppearanceStateAssignment(
+                        Guid.NewGuid(), sheetScope, AppearanceStateKind.ObjectDisplayState, objectStateId));
+                }
             }
 
-            _stateStore.SetCurrentSchema(document, beforeState with
+            var afterState = beforeState with
             {
                 Sheets = sheets,
                 DedicatedDetailLayerId = detailLayer?.LayerId ?? beforeState.DedicatedDetailLayerId,
                 ProjectData = projectInfo,
-            });
-            document.Modified = true;
-            _revisionTracker.Bump(document);
-            document.Views.Redraw();
+                AppearanceStateAssignments = assignments,
+            };
+            var rootScope = new HierarchyScope(HierarchyScopeKind.Folder, beforeState.RootFolderId);
+            var rootRules = beforeState.AppearanceRules.LastOrDefault(item => item.Scope == rootScope);
+            var appearanceResult = ApplyViewportAppearanceRules(
+                document,
+                plan,
+                new SetHierarchyViewportRulesChange(rootScope, rootRules, rootRules),
+                afterState.TemplateLinks,
+                afterState.TemplateRegistrations,
+                afterState.AppearanceStates,
+                afterState.StateAssignments,
+                afterState);
+            if (!appearanceResult.Succeeded)
+                throw new InvalidOperationException(
+                    appearanceResult.Diagnostics.FirstOrDefault()?.Message ??
+                    "The appearance-state assignments could not be applied.");
             DeleteUnusedGeneratedTitleBlockDefinitions(document);
-            return new OperationResult(true, plan.Diagnostics);
+            return appearanceResult;
         }
         catch (Exception exception)
         {
@@ -2183,7 +2505,7 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
                 .ToArray());
     }
 
-    private static void CreateDetail(
+    private static Guid CreateDetail(
         RhinoDoc document,
         RhinoPageView page,
         DetailSlotRecipe slot,
@@ -2257,6 +2579,7 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
         if (viewportChanged && !detail.CommitViewportChanges())
             throw new InvalidOperationException($"Rhino did not commit viewport settings for detail '{slot.Name}'.");
         ApplyDetailAppearanceRecipe(document, detail.Viewport.Id, slot);
+        return detail.Viewport.Id;
     }
 
     private static void ApplyDetailAppearanceRecipe(
@@ -2804,11 +3127,18 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
 
         var document = eventArgs.Document;
         var currentState = _stateStore.Get(document);
+        var currentPageNames = CapturePageNames(document, tag.PageNames?.Keys);
         document.AddCustomUndoEvent(
             tag.Description,
             OnUndoDocumentState,
-            new DocumentStateUndoTag(tag.Description, currentState));
+            new DocumentStateUndoTag(tag.Description, currentState, currentPageNames));
         _stateStore.Set(document, tag.State);
+        if (tag.PageNames is { Count: > 0 })
+        {
+            RestorePageNames(document, tag.PageNames, tag.State);
+            document.Views.Redraw();
+        }
+        document.Modified = true;
         _revisionTracker.Bump(document);
         _overviewChanged(new OverviewInvalidation(
             document.RuntimeSerialNumber,
@@ -2824,7 +3154,10 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
             [new Diagnostic(code, DiagnosticSeverity.Error, message)]);
     }
 
-    private sealed record DocumentStateUndoTag(string Description, DocumentState State);
+    private sealed record DocumentStateUndoTag(
+        string Description,
+        DocumentState State,
+        IReadOnlyDictionary<Guid, string>? PageNames = null);
 
     private sealed record DetailLayerResolution(int LayerIndex, Guid LayerId, bool Created);
 

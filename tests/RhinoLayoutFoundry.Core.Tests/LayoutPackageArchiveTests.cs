@@ -137,7 +137,7 @@ public sealed class LayoutPackageArchiveTests
 
             var restored = LayoutPackageArchive.Read(path);
 
-            Assert.Equal(2, restored.Manifest.PackageVersion);
+            Assert.Equal(LayoutPackageManifest.CurrentPackageVersion, restored.Manifest.PackageVersion);
             Assert.Equal(DocumentState.CurrentSchemaVersion, restored.Manifest.FoundryState.SchemaVersion);
         }
         finally

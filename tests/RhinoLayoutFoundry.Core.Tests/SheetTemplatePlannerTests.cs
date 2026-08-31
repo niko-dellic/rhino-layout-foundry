@@ -54,6 +54,10 @@ public sealed class SheetTemplatePlannerTests
             plan.Changes.Cast<CreateSheetFromTemplateChange>().Select(item => item.Name));
         Assert.Equal(["A3", "A3", "A1"],
             plan.Changes.Cast<CreateSheetFromTemplateChange>().Select(item => item.Template.Name));
+        Assert.All(plan.Changes.Cast<CreateSheetFromTemplateChange>(),
+            item => Assert.Equal("S-{index:000}", item.NamingPattern));
+        Assert.Equal([3, 5, 7],
+            plan.Changes.Cast<CreateSheetFromTemplateChange>().Select(item => item.NamingIndex));
     }
 
     [Fact]
@@ -178,12 +182,10 @@ public sealed class SheetTemplatePlannerTests
     [Fact]
     public void BatchCreationAppliesIndependentAppearanceTemplateSources()
     {
-        var layerRegistrationId = Guid.NewGuid();
-        var objectRegistrationId = Guid.NewGuid();
+        var layerStateId = Guid.NewGuid();
+        var objectStateId = Guid.NewGuid();
         var layerId = Guid.NewGuid();
         var objectId = Guid.NewGuid();
-        var layerSource = new HierarchyScope(HierarchyScopeKind.Folder, Guid.NewGuid());
-        var objectSource = new HierarchyScope(HierarchyScopeKind.Detail, Guid.NewGuid());
         var layerRule = new LayerVisibilityRule(
             new LayerReference(layerId, "Architecture::Notes"),
             LayerVisibilityOverride.Hidden);
@@ -193,17 +195,12 @@ public sealed class SheetTemplatePlannerTests
             "Technical");
         var snapshot = WithTemplates(TestSnapshots.Create(), []) with
         {
-            ViewportRuleSets =
+            AppearanceStateResources =
             [
-                new HierarchyViewportRuleSet(layerSource, [layerRule], []),
-                new HierarchyViewportRuleSet(objectSource, [], [objectRule]),
-            ],
-            CapabilityTemplates =
-            [
-                new CapabilityTemplateRegistration(
-                    layerRegistrationId, layerSource, TemplateCapability.LayerStates),
-                new CapabilityTemplateRegistration(
-                    objectRegistrationId, objectSource, TemplateCapability.ObjectDisplayModes),
+                new AppearanceStateRecord(layerStateId, TestSnapshots.RootFolderId, 0,
+                    "Presentation layers", AppearanceStateKind.LayerState, [layerRule], []),
+                new AppearanceStateRecord(objectStateId, TestSnapshots.RootFolderId, 1,
+                    "Technical objects", AppearanceStateKind.ObjectDisplayState, [], [objectRule]),
             ],
         };
         var plan = new BatchCreateSheetsPlanner().Plan(new BatchCreateSheetsRequest(
@@ -220,15 +217,17 @@ public sealed class SheetTemplatePlannerTests
                     1,
                     new PaperRecipe(594, 420, "Millimeters"),
                     BuiltInLayoutKind.SingleDetail,
-                    LayerStateTemplateRegistrationId: layerRegistrationId,
-                    ObjectDisplayTemplateRegistrationId: objectRegistrationId),
+                    LayerStateId: layerStateId,
+                    ObjectDisplayStateId: objectStateId),
             ]), snapshot);
 
         Assert.True(plan.CanApply);
-        var detail = Assert.Single(Assert.IsType<CreateSheetFromTemplateChange>(
-            Assert.Single(plan.Changes)).Template.DetailSlots);
-        Assert.Equal(layerRule, Assert.Single(detail.Layers));
-        Assert.Equal(objectRule, Assert.Single(detail.Objects));
+        var change = Assert.IsType<CreateSheetFromTemplateChange>(Assert.Single(plan.Changes));
+        Assert.Equal(layerStateId, change.LayerStateId);
+        Assert.Equal(objectStateId, change.ObjectDisplayStateId);
+        var detail = Assert.Single(change.Template.DetailSlots);
+        Assert.Empty(detail.Layers);
+        Assert.Empty(detail.Objects);
     }
 
     [Fact]
@@ -673,7 +672,7 @@ public sealed class SheetTemplatePlannerTests
     }
 
     [Fact]
-    public void CapturedManagedTitleBlockConstraintsAreReplacedInsteadOfAppliedTwice()
+    public void DetailEnvelopeFitsReplacementTitleBlockContentWithoutDoubleMargins()
     {
         var paper = new PaperRecipe(594, 420, "Millimeters");
         var sourceLayout = AdaptiveTitleBlockLayoutSolver.Solve(
@@ -730,22 +729,45 @@ public sealed class SheetTemplatePlannerTests
         Assert.True(plan.CanApply);
         var detail = Assert.Single(Assert.IsType<CreateSheetFromTemplateChange>(
             Assert.Single(plan.Changes)).Template.DetailSlots);
-        Assert.Equal(
-            targetContent.Left + 8 / sourceContent.Width * targetContent.Width,
-            detail.Left,
-            3);
-        Assert.Equal(
-            targetContent.Bottom + 6 / sourceContent.Height * targetContent.Height,
-            detail.Bottom,
-            3);
-        Assert.Equal(
-            targetContent.Right - 10 / sourceContent.Width * targetContent.Width,
-            detail.Right,
-            3);
-        Assert.Equal(
-            targetContent.Top - 12 / sourceContent.Height * targetContent.Height,
-            detail.Top,
-            3);
+        Assert.Equal(targetContent.Left, detail.Left, 3);
+        Assert.Equal(targetContent.Bottom, detail.Bottom, 3);
+        Assert.Equal(targetContent.Right, detail.Right, 3);
+        Assert.Equal(targetContent.Top, detail.Top, 3);
+    }
+
+    [Fact]
+    public void BuiltInGridSharesTheTitleBlockPageMargins()
+    {
+        var paper = new PaperRecipe(594, 420, "Millimeters");
+        var snapshot = WithTemplates(TestSnapshots.Create(), []);
+        var plan = new BatchCreateSheetsPlanner().Plan(new BatchCreateSheetsRequest(
+            42,
+            1,
+            TestSnapshots.RootFolderId,
+            [],
+            "Page {index}",
+            1,
+            1,
+            CreationSpecs:
+            [
+                new LayoutCreationSpec(
+                    1,
+                    paper,
+                    BuiltInLayoutKind.FourDetailsGrid,
+                    UseTemplateTitleBlock: false,
+                    BuiltInTitleBlock: BuiltInTitleBlockKind.RightSidebar),
+            ]), snapshot);
+
+        Assert.True(plan.CanApply);
+        var details = Assert.IsType<CreateSheetFromTemplateChange>(Assert.Single(plan.Changes))
+            .Template.DetailSlots;
+        var content = AdaptiveTitleBlockLayoutSolver.Solve(
+            BuiltInTitleBlockKind.RightSidebar,
+            paper).Content;
+        Assert.Equal(content.Left, details.Min(detail => detail.Left), 3);
+        Assert.Equal(content.Bottom, details.Min(detail => detail.Bottom), 3);
+        Assert.Equal(content.Right, details.Max(detail => detail.Right), 3);
+        Assert.Equal(content.Top, details.Max(detail => detail.Top), 3);
     }
 
     private static SheetTemplateRecipe Template(string name, double width, double height) => new(

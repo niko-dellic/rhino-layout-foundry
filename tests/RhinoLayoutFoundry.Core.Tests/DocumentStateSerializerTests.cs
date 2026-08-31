@@ -306,6 +306,44 @@ public sealed class DocumentStateSerializerTests
     }
 
     [Fact]
+    public void VersionNineAppearanceTemplatesMigrateToStatesWithoutConsumingLocalOverrides()
+    {
+        var source = new HierarchyScope(HierarchyScopeKind.Folder, WellKnownIds.UnorganizedFolderId);
+        var target = new HierarchyScope(HierarchyScopeKind.Sheet, Guid.NewGuid());
+        var layerId = Guid.NewGuid();
+        var registration = new CapabilityTemplateRegistration(
+            Guid.NewGuid(), source, TemplateCapability.Layout | TemplateCapability.LayerStates);
+        var sourceRule = new HierarchyViewportRuleSet(source,
+            [new LayerVisibilityRule(new LayerReference(layerId, "Walls"), LayerVisibilityOverride.Hidden)], []);
+        var localRule = new HierarchyViewportRuleSet(target,
+            [new LayerVisibilityRule(new LayerReference(layerId, "Walls"), LayerVisibilityOverride.Visible)], []);
+        var link = new CapabilityTemplateLink(Guid.NewGuid(), target, registration.Id,
+            TemplateCapability.LayerStates, [], new TemplateCapabilityPayload());
+        var state = DocumentState.Empty() with
+        {
+            ViewportRuleSets = [sourceRule, localRule],
+            CapabilityTemplates = [registration],
+            CapabilityLinks = [link],
+        };
+        var payload = DocumentStateSerializer.Serialize(state)
+            .Replace($"\"SchemaVersion\":{DocumentState.CurrentSchemaVersion}", "\"SchemaVersion\":9",
+                StringComparison.Ordinal)
+            .Replace(",\"AppearanceStateResources\":null", string.Empty, StringComparison.Ordinal)
+            .Replace(",\"AppearanceStateAssignments\":null", string.Empty, StringComparison.Ordinal);
+
+        var restored = DocumentStateSerializer.Deserialize(payload);
+
+        var migrated = Assert.Single(restored.AppearanceStates);
+        Assert.Equal(AppearanceStateKind.LayerState, migrated.Kind);
+        Assert.Equal(sourceRule.LayerRules, migrated.LayerRules);
+        Assert.Equal(target, Assert.Single(restored.StateAssignments).Target);
+        var restoredLocal = Assert.Single(restored.AppearanceRules.Where(item => item.Scope == target));
+        Assert.Equal(localRule.LayerRules, restoredLocal.LayerRules);
+        Assert.Empty(restored.TemplateLinks);
+        Assert.Equal(TemplateCapability.Layout, Assert.Single(restored.TemplateRegistrations).Capabilities);
+    }
+
+    [Fact]
     public void ObserverPayloadNeverContainsCameraOrTransientInteractionState()
     {
         var payload = DocumentStateSerializer.Serialize(DocumentState.Empty() with

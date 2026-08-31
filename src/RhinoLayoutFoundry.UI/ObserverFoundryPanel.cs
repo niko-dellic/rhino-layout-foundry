@@ -19,6 +19,7 @@ public sealed class ObserverFoundryPanel : Panel
     private readonly SelectionInspectorPanel _inspector;
     private readonly FoundryToolbarIconButton _nestedPackingButton;
     private readonly FoundryToolbarIconButton _compactPackingButton;
+    private readonly FoundryToolbarIconButton _dependencyLinesButton;
     private readonly FoundryToolbarIconButton _gridAppearanceButton;
     private readonly FoundryToolbarIconButton _previewBackgroundButton;
     private readonly CanvasGridTray _gridAppearanceTray;
@@ -86,6 +87,9 @@ public sealed class ObserverFoundryPanel : Panel
         _compactPackingButton = ToolbarToggleButton(
             FoundryViewIcons.CompactPacking(),
             "Hide folder containers and tightly pack every layout");
+        _dependencyLinesButton = ToolbarToggleButton(
+            FoundryViewIcons.NamedViews(),
+            "Show or hide appearance-state dependency connections");
         var openButton = ToolbarButton(FoundryViewIcons.OpenSelection(), "Open the selected layout or detail in Rhino");
         fitButton.Click += (_, _) => _canvas.FitAll();
         focusButton.Click += (_, _) => _canvas.FocusSelection();
@@ -98,6 +102,8 @@ public sealed class ObserverFoundryPanel : Panel
         _namedViewsButton.Click += (_, _) => ApplySidebarVisibility();
         _nestedPackingButton.Click += (_, _) => SetPackingMode(ObserverPackingMode.NestedFolders);
         _compactPackingButton.Click += (_, _) => SetPackingMode(ObserverPackingMode.CompactSheets);
+        _dependencyLinesButton.Click += (_, _) =>
+            _canvas.SetDependencyConnectionsVisible(_dependencyLinesButton.Checked);
         openButton.Click += (_, _) => NavigateSelection();
 
         _canvasToolbar = new StackLayout
@@ -115,6 +121,7 @@ public sealed class ObserverFoundryPanel : Panel
                 ToolbarSeparator(),
                 _nestedPackingButton,
                 _compactPackingButton,
+                _dependencyLinesButton,
                 ToolbarSeparator(),
                 _gridAppearanceButton,
                 _previewBackgroundButton,
@@ -1020,17 +1027,19 @@ public sealed class ObserverFoundryPanel : Panel
         };
         open.Enabled = selection.Length == 1;
         properties.Enabled = selection.Length > 0;
-        duplicate.Enabled = selection.Length > 0 && selection.All(key => key.Kind != OverviewNodeKind.Detail);
-        delete.Enabled = duplicate.Enabled;
+        duplicate.Enabled = selection.Length > 0 && selection.All(key => key.Kind is
+            OverviewNodeKind.Folder or OverviewNodeKind.Sheet);
+        delete.Enabled = selection.Length > 0 && selection.All(key => key.Kind != OverviewNodeKind.Detail);
         copy.Enabled = selection.Length > 0 &&
                        selection.All(key => !(key.Kind == OverviewNodeKind.Folder && key.Id == _snapshot.RootFolderId));
         paste.Enabled = HierarchyClipboard.CanPasteCurrentDocument();
-        include.Enabled = selection.Length > 0;
-        exclude.Enabled = selection.Length > 0;
+        include.Enabled = selection.Length > 0 && selection.Any(key => key.Kind is
+            OverviewNodeKind.Folder or OverviewNodeKind.Sheet or OverviewNodeKind.Detail);
+        exclude.Enabled = include.Enabled;
         moveEarlier.Enabled = moveLater.Enabled = selection.Length == 1 &&
             selection[0].Kind == OverviewNodeKind.Sheet;
         open.Click += (_, _) => NavigateSelection();
-        properties.Click += (_, _) => OpenBatchProperties();
+        properties.Click += (_, _) => OpenSelectionProperties();
         duplicate.Click += async (_, _) => await DuplicateSelectionAsync();
         delete.Click += (_, _) => RequestDeleteSelection();
         copy.Click += (_, _) => CopySelection();
@@ -1068,7 +1077,8 @@ public sealed class ObserverFoundryPanel : Panel
     {
         var move = new ButtonMenuItem { Text = "Move to Folder" };
         move.Enabled = selection.Any(key =>
-            key.Kind is OverviewNodeKind.Folder or OverviewNodeKind.Sheet or OverviewNodeKind.Detail);
+            key.Kind is OverviewNodeKind.Folder or OverviewNodeKind.Sheet or OverviewNodeKind.Detail or
+                OverviewNodeKind.LayerState or OverviewNodeKind.ObjectDisplayState);
         foreach (var folder in _snapshot.Folders
                      .OrderBy(folder => FolderDepth(folder.Id))
                      .ThenBy(folder => folder.Order)
@@ -1103,12 +1113,51 @@ public sealed class ObserverFoundryPanel : Panel
             if (owner is not null) sheetIds.Add(owner.PageViewId);
         }
 
+        var stateIds = selection.Where(key => key.Kind is
+                OverviewNodeKind.LayerState or OverviewNodeKind.ObjectDisplayState)
+            .Select(key => key.Id).ToArray();
+
+        if (stateIds.Length > 0)
+        {
+            var stateResult = await LayoutFoundryUiHost.MoveAppearanceStatesAsync(
+                stateIds, destinationFolderId);
+            if (!stateResult.Succeeded)
+            {
+                _status.Text = ResultMessage(stateResult, string.Empty);
+                return;
+            }
+        }
+
+        if (folderIds.Length == 0 && sheetIds.Count == 0)
+        {
+            _status.Text = "Appearance state moved to folder.";
+            RefreshSnapshot(fit: false);
+            return;
+        }
+
         var result = await LayoutFoundryUiHost.MoveHierarchySelectionAsync(
             destinationFolderId,
             folderIds,
             sheetIds.ToArray());
         _status.Text = ResultMessage(result, "Selection moved to folder.");
         if (result.Succeeded) RefreshSnapshot(fit: false);
+    }
+
+    private void OpenSelectionProperties()
+    {
+        var selection = LayoutFoundryUiHost.Selection.Selected.ToArray();
+        if (selection.Length == 1 && selection[0].Kind is
+                OverviewNodeKind.LayerState or OverviewNodeKind.ObjectDisplayState)
+        {
+            var snapshot = LayoutFoundryUiHost.CaptureSnapshot();
+            var state = snapshot?.AppearanceStates.FirstOrDefault(item => item.Id == selection[0].Id);
+            if (snapshot is null || state is null) return;
+            var dialog = new AppearanceStateEditorDialog(snapshot, state);
+            dialog.ShowModal(this);
+            if (dialog.Changed) RefreshSnapshot(fit: false);
+            return;
+        }
+        OpenBatchProperties();
     }
 
     private async Task ReorderSelectionByStepAsync(int direction)
@@ -1306,6 +1355,16 @@ public sealed class ObserverFoundryPanel : Panel
                          .OrderBy(candidate => candidate.Order)
                          .ThenBy(candidate => candidate.Name, StringComparer.OrdinalIgnoreCase))
                 AddFolder(child, depth + 1);
+            foreach (var state in snapshot.AppearanceStates.Where(state => state.FolderId == folder.Id)
+                         .OrderBy(state => state.Order)
+                         .ThenBy(state => state.Name, StringComparer.OrdinalIgnoreCase))
+                rows.Add(new NavigatorRow(
+                    new OverviewNodeKey(
+                        state.Kind == AppearanceStateKind.LayerState
+                            ? OverviewNodeKind.LayerState
+                            : OverviewNodeKind.ObjectDisplayState,
+                        state.Id),
+                    $"{new string(' ', (depth + 1) * 3)}{(state.Kind == AppearanceStateKind.LayerState ? "≡" : "◫")}  {state.Name}"));
             foreach (var sheet in snapshot.Sheets.Where(sheet => sheet.FolderId == folder.Id)
                          .OrderBy(sheet => sheet.Order)
                          .ThenBy(sheet => sheet.Name, StringComparer.OrdinalIgnoreCase))

@@ -198,3 +198,178 @@ public sealed class DetachTemplateCapabilityPlanner : IOperationPlanner<DetachTe
             "Detach template capability", changes, diagnostics);
     }
 }
+
+public sealed record CreateAppearanceStateRequest(
+    uint DocumentRuntimeSerialNumber,
+    long SourceRevision,
+    Guid FolderId,
+    string Name,
+    AppearanceStateKind Kind);
+
+public sealed class CreateAppearanceStatePlanner : IOperationPlanner<CreateAppearanceStateRequest>
+{
+    public OperationPlan Plan(CreateAppearanceStateRequest request, DocumentSnapshot snapshot)
+    {
+        var diagnostics = SetHierarchyViewportRulesPlanner.Context(
+            request.DocumentRuntimeSerialNumber, request.SourceRevision, snapshot);
+        var name = request.Name.Trim();
+        if (!snapshot.Folders.ContainsKey(request.FolderId))
+            diagnostics.Add(SetHierarchyViewportRulesPlanner.Error(
+                "appearance_state.folder_missing", "The destination folder no longer exists."));
+        if (name.Length == 0)
+            diagnostics.Add(SetHierarchyViewportRulesPlanner.Error(
+                "appearance_state.name_empty", "Enter a state name."));
+        if (snapshot.AppearanceStates.Any(item => item.FolderId == request.FolderId &&
+                string.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase)))
+            diagnostics.Add(SetHierarchyViewportRulesPlanner.Error(
+                "appearance_state.name_duplicate", "A state with that name already exists in this folder."));
+        var id = Guid.NewGuid();
+        var order = snapshot.AppearanceStates.Where(item => item.FolderId == request.FolderId)
+            .Select(item => item.Order).DefaultIfEmpty(-1).Max() + 1;
+        var state = new AppearanceStateRecord(id, request.FolderId, order, name, request.Kind, [], []);
+        return new OperationPlan(snapshot.DocumentRuntimeSerialNumber, snapshot.Revision,
+            $"Create {name}",
+            diagnostics.Any(item => item.Severity == DiagnosticSeverity.Error)
+                ? []
+                : [new SetAppearanceStateResourceChange(id, null, state)],
+            diagnostics);
+    }
+}
+
+public sealed record UpdateAppearanceStateRequest(
+    uint DocumentRuntimeSerialNumber,
+    long SourceRevision,
+    Guid StateId,
+    string? Name = null,
+    Guid? FolderId = null,
+    IReadOnlyList<LayerVisibilityRule>? LayerRules = null,
+    IReadOnlyList<ObjectDisplayRule>? ObjectDisplayRules = null);
+
+public sealed class UpdateAppearanceStatePlanner : IOperationPlanner<UpdateAppearanceStateRequest>
+{
+    public OperationPlan Plan(UpdateAppearanceStateRequest request, DocumentSnapshot snapshot)
+    {
+        var diagnostics = SetHierarchyViewportRulesPlanner.Context(
+            request.DocumentRuntimeSerialNumber, request.SourceRevision, snapshot);
+        var current = snapshot.AppearanceStates.LastOrDefault(item => item.Id == request.StateId);
+        if (current is null)
+        {
+            diagnostics.Add(SetHierarchyViewportRulesPlanner.Error(
+                "appearance_state.missing", "The selected appearance state no longer exists."));
+            return new OperationPlan(snapshot.DocumentRuntimeSerialNumber, snapshot.Revision,
+                "Update appearance state", [], diagnostics);
+        }
+        var folderId = request.FolderId ?? current.FolderId;
+        var name = request.Name?.Trim() ?? current.Name;
+        if (!snapshot.Folders.ContainsKey(folderId))
+            diagnostics.Add(SetHierarchyViewportRulesPlanner.Error(
+                "appearance_state.folder_missing", "The destination folder no longer exists."));
+        if (name.Length == 0)
+            diagnostics.Add(SetHierarchyViewportRulesPlanner.Error(
+                "appearance_state.name_empty", "Enter a state name."));
+        if (snapshot.AppearanceStates.Any(item => item.Id != current.Id && item.FolderId == folderId &&
+                string.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase)))
+            diagnostics.Add(SetHierarchyViewportRulesPlanner.Error(
+                "appearance_state.name_duplicate", "A state with that name already exists in this folder."));
+
+        var layerRules = request.LayerRules?.ToArray() ?? current.LayerRules.ToArray();
+        var objectRules = request.ObjectDisplayRules?.ToArray() ?? current.ObjectDisplayRules.ToArray();
+        if (current.Kind == AppearanceStateKind.LayerState && objectRules.Length > 0 ||
+            current.Kind == AppearanceStateKind.ObjectDisplayState && layerRules.Length > 0)
+            diagnostics.Add(SetHierarchyViewportRulesPlanner.Error(
+                "appearance_state.rule_kind", "The rules do not match this appearance-state type."));
+        foreach (var rule in layerRules)
+            if (rule.Layer.LayerId == Guid.Empty || !snapshot.LayerSnapshots.ContainsKey(rule.Layer.LayerId))
+                diagnostics.Add(SetHierarchyViewportRulesPlanner.Error(
+                    "appearance_state.layer_missing", $"Layer '{rule.Layer.FullPath}' is unavailable."));
+        foreach (var rule in objectRules)
+        {
+            if (!snapshot.DisplayModeIds.Contains(rule.DisplayModeId))
+                diagnostics.Add(SetHierarchyViewportRulesPlanner.Error(
+                    "appearance_state.display_mode_missing",
+                    $"Display mode '{rule.DisplayModeName}' is unavailable."));
+            if (rule.Selector.Kind == ObjectDisplaySelectorKind.ExactObject &&
+                (rule.Selector.ObjectId is not { } objectId || !snapshot.ModelObjects.ContainsKey(objectId)))
+                diagnostics.Add(SetHierarchyViewportRulesPlanner.Error(
+                    "appearance_state.object_missing", "A selected model object is unavailable."));
+            if (rule.Selector.Kind == ObjectDisplaySelectorKind.Layer &&
+                (rule.Selector.LayerId is not { } layerId || !snapshot.LayerSnapshots.ContainsKey(layerId)))
+                diagnostics.Add(SetHierarchyViewportRulesPlanner.Error(
+                    "appearance_state.selector_layer_missing", "A selected object layer is unavailable."));
+        }
+        var next = current with
+        {
+            FolderId = folderId,
+            Name = name,
+            LayerRules = layerRules,
+            ObjectDisplayRules = objectRules,
+        };
+        return new OperationPlan(snapshot.DocumentRuntimeSerialNumber, snapshot.Revision,
+            $"Update {current.Name}",
+            diagnostics.Any(item => item.Severity == DiagnosticSeverity.Error)
+                ? []
+                : [new SetAppearanceStateResourceChange(current.Id, current, next)],
+            diagnostics);
+    }
+}
+
+public sealed record AssignAppearanceStateRequest(
+    uint DocumentRuntimeSerialNumber,
+    long SourceRevision,
+    HierarchyScope Target,
+    AppearanceStateKind Kind,
+    Guid? StateId);
+
+public sealed class AssignAppearanceStatePlanner : IOperationPlanner<AssignAppearanceStateRequest>
+{
+    public OperationPlan Plan(AssignAppearanceStateRequest request, DocumentSnapshot snapshot)
+    {
+        var diagnostics = SetHierarchyViewportRulesPlanner.Context(
+            request.DocumentRuntimeSerialNumber, request.SourceRevision, snapshot);
+        if (!SetHierarchyViewportRulesPlanner.ScopeExists(request.Target, snapshot))
+            diagnostics.Add(SetHierarchyViewportRulesPlanner.Error(
+                "appearance_state.target_missing", "The assignment target no longer exists."));
+        var resource = request.StateId is { } stateId
+            ? snapshot.AppearanceStates.LastOrDefault(item => item.Id == stateId)
+            : null;
+        if (request.StateId is not null && (resource is null || resource.Kind != request.Kind))
+            diagnostics.Add(SetHierarchyViewportRulesPlanner.Error(
+                "appearance_state.source_missing", "The selected appearance state is unavailable."));
+        var current = snapshot.StateAssignments.LastOrDefault(item =>
+            item.Target == request.Target && item.Kind == request.Kind);
+        var next = resource is null
+            ? null
+            : new AppearanceStateAssignment(current?.Id ?? Guid.NewGuid(), request.Target,
+                request.Kind, resource.Id);
+        return new OperationPlan(snapshot.DocumentRuntimeSerialNumber, snapshot.Revision,
+            next is null ? "Clear appearance-state assignment" : $"Assign {resource!.Name}",
+            diagnostics.Any(item => item.Severity == DiagnosticSeverity.Error)
+                ? []
+                : [new SetAppearanceStateAssignmentChange(request.Target, request.Kind, current, next)],
+            diagnostics);
+    }
+}
+
+public sealed record DeleteAppearanceStateRequest(
+    uint DocumentRuntimeSerialNumber,
+    long SourceRevision,
+    Guid StateId);
+
+public sealed class DeleteAppearanceStatePlanner : IOperationPlanner<DeleteAppearanceStateRequest>
+{
+    public OperationPlan Plan(DeleteAppearanceStateRequest request, DocumentSnapshot snapshot)
+    {
+        var diagnostics = SetHierarchyViewportRulesPlanner.Context(
+            request.DocumentRuntimeSerialNumber, request.SourceRevision, snapshot);
+        var current = snapshot.AppearanceStates.LastOrDefault(item => item.Id == request.StateId);
+        if (current is null)
+            diagnostics.Add(SetHierarchyViewportRulesPlanner.Error(
+                "appearance_state.missing", "The selected appearance state no longer exists."));
+        return new OperationPlan(snapshot.DocumentRuntimeSerialNumber, snapshot.Revision,
+            current is null ? "Delete appearance state" : $"Delete {current.Name}",
+            diagnostics.Any(item => item.Severity == DiagnosticSeverity.Error)
+                ? []
+                : [new SetAppearanceStateResourceChange(current!.Id, current, null)],
+            diagnostics);
+    }
+}

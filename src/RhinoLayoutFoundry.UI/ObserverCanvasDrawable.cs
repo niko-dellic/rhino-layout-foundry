@@ -62,6 +62,7 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
     private ObserverPoint _contextWorld;
     private bool _spaceHeld;
     private bool _navigatorVisible = true;
+    private bool _dependencyConnectionsVisible;
     private bool _namedViewsVisible;
     private bool _namedViewsThumbnailMode;
     private CanvasNavigatorRow[] _navigatorRows = [];
@@ -245,6 +246,13 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
     internal void SetNavigatorVisible(bool visible)
     {
         _navigatorVisible = visible;
+        Invalidate();
+    }
+
+    internal void SetDependencyConnectionsVisible(bool visible)
+    {
+        if (_dependencyConnectionsVisible == visible) return;
+        _dependencyConnectionsVisible = visible;
         Invalidate();
     }
 
@@ -469,6 +477,8 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
 
         foreach (var summary in _presentation.FolderSummaries)
             DrawFolderSummary(graphics, summary, viewport);
+
+        DrawDependencyConnections(graphics, viewport);
 
         if (_lassoWorld is { } lasso)
         {
@@ -943,6 +953,74 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
         graphics.DrawText(font, color, x, y, text);
     }
 
+    private void DrawDependencyConnections(Graphics graphics, ObserverSize viewport)
+    {
+        if (!_dependencyConnectionsVisible || !_navigatorVisible ||
+            _snapshot.StateAssignments.Count == 0)
+            return;
+
+        var rows = NavigatorRowsForDisplay();
+        var visibleCount = NavigatorVisibleRowCount(viewport);
+        using var halo = new Pen(FoundryTheme.WithAlpha(FoundryTheme.CanvasBackground, 205), 3);
+        using var line = new Pen(FoundryTheme.WithAlpha(FoundryTheme.MutedText, 150), 1);
+        foreach (var assignment in _snapshot.StateAssignments)
+        {
+            var rowIndex = Array.FindIndex(rows, row => row.Key.Id == assignment.StateId &&
+                row.Key.Kind is OverviewNodeKind.LayerState or OverviewNodeKind.ObjectDisplayState);
+            var visibleIndex = rowIndex - _navigatorScrollRow;
+            if (visibleIndex < 0 || visibleIndex >= visibleCount) continue;
+            var start = new PointF(
+                NavigatorWidth,
+                NavigatorTop + NavigatorHeaderHeight + visibleIndex * NavigatorRowHeight +
+                NavigatorRowHeight / 2f);
+            if (!TryAssignmentTargetPoint(assignment.Target, viewport, out var end)) continue;
+            var elbowX = Math.Max(NavigatorWidth + 14, (start.X + end.X) / 2f);
+            void Segment(Pen pen)
+            {
+                graphics.DrawLine(pen, start.X, start.Y, elbowX, start.Y);
+                graphics.DrawLine(pen, elbowX, start.Y, elbowX, end.Y);
+                graphics.DrawLine(pen, elbowX, end.Y, end.X, end.Y);
+            }
+            Segment(halo);
+            Segment(line);
+            graphics.FillEllipse(FoundryTheme.MutedText, end.X - 2, end.Y - 2, 4, 4);
+        }
+    }
+
+    private bool TryAssignmentTargetPoint(
+        HierarchyScope target,
+        ObserverSize viewport,
+        out PointF point)
+    {
+        point = default;
+        RectangleF bounds;
+        if (target.Kind == HierarchyScopeKind.Folder &&
+            _layout.Folders.TryGetValue(target.Id, out var folder))
+        {
+            bounds = ScreenRect(PreviewBounds(folder.Bounds, folder.Folder.Id), viewport);
+        }
+        else if (target.Kind == HierarchyScopeKind.Sheet &&
+                 _layout.Sheets.TryGetValue(target.Id, out var sheet))
+        {
+            bounds = ScreenRect(PreviewBounds(sheet.Bounds, sheet.Sheet.PageViewId), viewport);
+        }
+        else if (target.Kind == HierarchyScopeKind.Detail)
+        {
+            var owner = _layout.Sheets.Values.FirstOrDefault(card =>
+                card.Sheet.Details.Any(detail => detail.DetailViewportId == target.Id));
+            var detail = owner?.Sheet.Details.FirstOrDefault(item => item.DetailViewportId == target.Id);
+            if (owner is null || detail is null) return false;
+            bounds = ScreenRect(DetailWorldRect(
+                PreviewBounds(owner.Bounds, owner.Sheet.PageViewId), detail.NormalizedBounds), viewport);
+        }
+        else
+        {
+            return false;
+        }
+        point = new PointF(bounds.Left, bounds.Top + bounds.Height / 2f);
+        return true;
+    }
+
     private void DrawNavigator(Graphics graphics, ObserverSize viewport)
     {
         if (!_navigatorVisible || !_snapshot.HasDocument) return;
@@ -1081,6 +1159,10 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
                 FoundryHierarchyIcons.DrawLayout(graphics, iconColor, iconBounds);
                 break;
             case OverviewNodeKind.Detail:
+                FoundryHierarchyIcons.DrawDetail(graphics, iconColor, iconBounds);
+                break;
+            case OverviewNodeKind.LayerState:
+            case OverviewNodeKind.ObjectDisplayState:
                 FoundryHierarchyIcons.DrawDetail(graphics, iconColor, iconBounds);
                 break;
         }
@@ -1610,7 +1692,11 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
                 .OrderBy(sheet => sheet.Order)
                 .ThenBy(sheet => sheet.Name, StringComparer.OrdinalIgnoreCase)
                 .ToArray();
-            var canExpand = childFolders.Length > 0 || childSheets.Length > 0;
+            var childStates = snapshot.AppearanceStates.Where(state => state.FolderId == folder.Id)
+                .OrderBy(state => state.Order)
+                .ThenBy(state => state.Name, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            var canExpand = childFolders.Length > 0 || childStates.Length > 0 || childSheets.Length > 0;
             var expanded = !_collapsedNavigatorFolders.Contains(folder.Id);
             rows.Add(new CanvasNavigatorRow(
                 new OverviewNodeKey(OverviewNodeKind.Folder, folder.Id),
@@ -1625,7 +1711,7 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
                 HasNextSibling: hasNextSibling,
                 AncestorContinuations: ancestorContinuations));
             if (!expanded) return;
-            var childCount = childFolders.Length + childSheets.Length;
+            var childCount = childFolders.Length + childStates.Length + childSheets.Length;
             var childIndex = 0;
             var childContinuations = depth == 0
                 ? Array.Empty<bool>()
@@ -1637,6 +1723,21 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
                     depth + 1,
                     childIndex < childCount - 1,
                     childContinuations);
+                childIndex++;
+            }
+            foreach (var state in childStates)
+            {
+                rows.Add(new CanvasNavigatorRow(
+                    new OverviewNodeKey(
+                        state.Kind == AppearanceStateKind.LayerState
+                            ? OverviewNodeKind.LayerState
+                            : OverviewNodeKind.ObjectDisplayState,
+                        state.Id),
+                    state.Name,
+                    depth + 1,
+                    state.FolderId,
+                    HasNextSibling: childIndex < childCount - 1,
+                    AncestorContinuations: childContinuations));
                 childIndex++;
             }
             foreach (var sheet in childSheets)
@@ -2616,6 +2717,8 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
         OverviewNodeKind.Folder => _snapshot.Folders.Any(folder => folder.Id == key.Id),
         OverviewNodeKind.Sheet => _snapshot.Sheets.Any(sheet => sheet.PageViewId == key.Id),
         OverviewNodeKind.Detail => _snapshot.Sheets.Any(sheet => sheet.Details.Any(detail => detail.DetailViewportId == key.Id)),
+        OverviewNodeKind.LayerState or OverviewNodeKind.ObjectDisplayState =>
+            _snapshot.AppearanceStates.Any(state => state.Id == key.Id),
         _ => false,
     };
 

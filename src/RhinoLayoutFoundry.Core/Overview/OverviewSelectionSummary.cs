@@ -3,9 +3,12 @@ namespace RhinoLayoutFoundry.Core.Overview;
 public sealed record OverviewSelectionSummary(
     int FolderCount,
     int SheetCount,
-    int DetailCount)
+    int DetailCount,
+    int LayerStateCount,
+    int ObjectDisplayStateCount)
 {
-    public int TotalCount => FolderCount + SheetCount + DetailCount;
+    public int TotalCount => FolderCount + SheetCount + DetailCount +
+        LayerStateCount + ObjectDisplayStateCount;
 
     public string DisplayText
     {
@@ -20,6 +23,8 @@ public sealed record OverviewSelectionSummary(
             AddPart(parts, FolderCount, "folder");
             AddPart(parts, SheetCount, "sheet");
             AddPart(parts, DetailCount, "detail");
+            AddPart(parts, LayerStateCount, "layer state");
+            AddPart(parts, ObjectDisplayStateCount, "object state");
             return string.Join(" · ", parts) + " selected";
         }
     }
@@ -31,6 +36,8 @@ public sealed record OverviewSelectionSummary(
         var folders = 0;
         var sheets = 0;
         var details = 0;
+        var layerStates = 0;
+        var objectDisplayStates = 0;
         foreach (var key in keys.Distinct())
         {
             switch (key.Kind)
@@ -44,12 +51,23 @@ public sealed record OverviewSelectionSummary(
                 case OverviewNodeKind.Detail:
                     details++;
                     break;
+                case OverviewNodeKind.LayerState:
+                    layerStates++;
+                    break;
+                case OverviewNodeKind.ObjectDisplayState:
+                    objectDisplayStates++;
+                    break;
                 default:
                     throw new ArgumentOutOfRangeException(nameof(keys), key.Kind, null);
             }
         }
 
-        return new OverviewSelectionSummary(folders, sheets, details);
+        return new OverviewSelectionSummary(
+            folders,
+            sheets,
+            details,
+            layerStates,
+            objectDisplayStates);
     }
 
     private static void AddPart(ICollection<string> parts, int count, string singular)

@@ -142,10 +142,29 @@ internal sealed class RhinoDocumentOverviewNavigationService : IDocumentOverview
             return new OverviewNavigationResult(false, $"A layout named '{trimmedName}' already exists.");
         }
 
+        var beforeName = page.PageName;
+        var beforeState = _stateStore.Get(document);
         page.PageName = trimmedName;
         if (!string.Equals(page.PageName, trimmedName, StringComparison.Ordinal))
         {
             return new OverviewNavigationResult(false, "Rhino did not retain the requested layout name.");
+        }
+
+        try
+        {
+            if (beforeState.Sheets.TryGetValue(sheetPageViewId, out var record) && record.NamingBinding is not null)
+            {
+                var sheets = beforeState.Sheets.ToDictionary(pair => pair.Key, pair => pair.Value);
+                sheets[sheetPageViewId] = record with { NamingBinding = null };
+                _stateStore.SetCurrentSchema(document, beforeState with { Sheets = sheets });
+            }
+        }
+        catch (Exception exception)
+        {
+            page.PageName = beforeName;
+            _stateStore.Set(document, beforeState);
+            return new OverviewNavigationResult(false,
+                $"The layout rename was restored because its naming link could not be detached: {exception.Message}");
         }
 
         document.Modified = true;

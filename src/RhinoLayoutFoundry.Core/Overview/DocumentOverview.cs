@@ -8,7 +8,8 @@ public sealed record DocumentOverview(
     Guid? RootFolderId,
     IReadOnlyList<FolderOverview> Folders,
     IReadOnlyList<SheetOverview> Sheets,
-    IReadOnlyList<OverviewIssue>? Diagnostics = null)
+    IReadOnlyList<OverviewIssue>? Diagnostics = null,
+    IReadOnlyList<AppearanceStateOverview>? AppearanceStateResources = null)
 {
     public static DocumentOverview NoDocument { get; } = new(
         null,
@@ -19,6 +20,7 @@ public sealed record DocumentOverview(
         []);
 
     public IReadOnlyList<OverviewIssue> Issues => Diagnostics ?? [];
+    public IReadOnlyList<AppearanceStateOverview> AppearanceStates => AppearanceStateResources ?? [];
 }
 
 public sealed record FolderOverview(
@@ -27,7 +29,9 @@ public sealed record FolderOverview(
     string Name,
     int Order,
     TemplateCapability TemplateCapabilities = TemplateCapability.None,
-    ViewportAppearanceSummary? Appearance = null);
+    ViewportAppearanceSummary? Appearance = null,
+    AppearanceStateBindingOverview? LayerState = null,
+    AppearanceStateBindingOverview? ObjectDisplayState = null);
 
 public sealed record SheetOverview(
     Guid PageViewId,
@@ -43,7 +47,9 @@ public sealed record SheetOverview(
     bool IncludeInPrintAll = true,
     bool IsTemplate = false,
     TemplateCapability TemplateCapabilities = TemplateCapability.None,
-    ViewportAppearanceSummary? Appearance = null)
+    ViewportAppearanceSummary? Appearance = null,
+    AppearanceStateBindingOverview? LayerState = null,
+    AppearanceStateBindingOverview? ObjectDisplayState = null)
 {
     public int DetailCount => Details.Count;
 
@@ -59,7 +65,27 @@ public sealed record DetailOverview(
     Guid DisplayModeId = default,
     string DisplayModeName = "",
     TemplateCapability TemplateCapabilities = TemplateCapability.None,
-    ViewportAppearanceSummary? Appearance = null);
+    ViewportAppearanceSummary? Appearance = null,
+    AppearanceStateBindingOverview? LayerState = null,
+    AppearanceStateBindingOverview? ObjectDisplayState = null);
+
+public sealed record AppearanceStateBindingOverview(
+    Guid StateId,
+    string Name,
+    bool IsInherited,
+    HierarchyScope AssignedAt);
+
+public sealed record AppearanceStateOverview(
+    Guid Id,
+    Guid FolderId,
+    int Order,
+    string Name,
+    AppearanceStateKind Kind,
+    int RuleCount,
+    int DirectAssignmentCount,
+    int DependentFolderCount,
+    int DependentSheetCount,
+    int DependentDetailCount);
 
 public sealed record ViewportAppearanceSummary(
     int VisibleLayerCount,

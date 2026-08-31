@@ -88,8 +88,8 @@ public sealed record LayoutCreationSpec(
     IReadOnlyList<string?>? NamedViewsByDetail = null,
     IReadOnlyList<Guid?>? DetailDisplayModesByDetail = null,
     Guid? DetailLayerId = null,
-    Guid? LayerStateTemplateRegistrationId = null,
-    Guid? ObjectDisplayTemplateRegistrationId = null);
+    Guid? LayerStateId = null,
+    Guid? ObjectDisplayStateId = null);
 
 public sealed record BatchCreateSheetsRequest(
     uint DocumentRuntimeSerialNumber,
@@ -125,7 +125,7 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
         var templates = snapshot.Templates.ToDictionary(item => item.Id);
         var expanded = new List<(Guid DraftId, SheetTemplateRecipe Template,
             IReadOnlyDictionary<Guid, string> NamedViewAssignments, bool UseDedicatedDetailLayer,
-            Guid? DetailLayerId)>();
+            Guid? DetailLayerId, Guid? LayerStateId, Guid? ObjectDisplayStateId)>();
         if (hasCreationSpecs)
         {
             foreach (var spec in request.CreationSpecs!)
@@ -153,7 +153,9 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
                 for (var index = 0; index < spec.Quantity; index++)
                     expanded.Add((Guid.NewGuid(), resolved.Template, resolved.NamedViewAssignments,
                         spec.UseDedicatedDetailLayer,
-                        spec.UseDedicatedDetailLayer ? null : spec.DetailLayerId));
+                        spec.UseDedicatedDetailLayer ? null : spec.DetailLayerId,
+                        spec.LayerStateId,
+                        spec.ObjectDisplayStateId));
             }
         }
         else foreach (var item in request.TemplateQuantities)
@@ -171,7 +173,7 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
             ValidateTemplate(template, snapshot, request.NamedViewAssignments, diagnostics);
             for (var index = 0; index < item.Quantity; index++)
                 expanded.Add((Guid.NewGuid(), template,
-                    request.NamedViewAssignments ?? new Dictionary<Guid, string>(), true, null));
+                    request.NamedViewAssignments ?? new Dictionary<Guid, string>(), true, null, null, null));
         }
 
         var pattern = request.NamingPattern?.Trim() ?? string.Empty;
@@ -184,8 +186,11 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
             item.DraftId,
             item.Template.Name,
             Tokens(snapshot, destination?.Name, item.Template, item.NamedViewAssignments))).ToArray();
+        var resolvedPattern = pattern.Length == 0
+            ? expanded.FirstOrDefault().Template?.DefaultNamingPattern ?? string.Empty
+            : pattern;
         var naming = NamingEngine.Preview(new NamingRequest(
-            pattern.Length == 0 ? expanded.FirstOrDefault().Template?.DefaultNamingPattern ?? string.Empty : pattern,
+            resolvedPattern,
             namingItems,
             request.Start,
             request.Step));
@@ -214,7 +219,11 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
                     (request.Start + index * request.Step).ToString(CultureInfo.InvariantCulture),
                     request.ProjectData ?? snapshot.ProjectInfo,
                     request.InitialRevisions,
-                    expanded[index].DetailLayerId));
+                    expanded[index].DetailLayerId,
+                    expanded[index].LayerStateId,
+                    expanded[index].ObjectDisplayStateId,
+                    resolvedPattern,
+                    request.Start + index * request.Step));
             }
             diagnostics.Add(new Diagnostic("batch.undo_unavailable", DiagnosticSeverity.Warning,
                 "Rhino does not expose native Undo for layout creation. Foundry will roll back the entire batch if any sheet fails."));
@@ -338,18 +347,8 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
                 : spec.DetailDisplayModeId ?? slot.DisplayModeId,
         }).ToArray();
 
-        details = ApplyAppearanceCapability(
-            details,
-            spec.LayerStateTemplateRegistrationId,
-            TemplateCapability.LayerStates,
-            snapshot,
-            diagnostics);
-        details = ApplyAppearanceCapability(
-            details,
-            spec.ObjectDisplayTemplateRegistrationId,
-            TemplateCapability.ObjectDisplayModes,
-            snapshot,
-            diagnostics);
+        ValidateAppearanceState(spec.LayerStateId, AppearanceStateKind.LayerState, snapshot, diagnostics);
+        ValidateAppearanceState(spec.ObjectDisplayStateId, AppearanceStateKind.ObjectDisplayState, snapshot, diagnostics);
 
         var namedViewAssignments = new Dictionary<Guid, string>();
         if (spec.NamedViewsByDetail is not null)
@@ -389,45 +388,26 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
 
         if (adaptiveTitleBlock is not null)
         {
-            var sourceContent = new TitleBlockRectangle(
-                0,
-                0,
-                spec.Paper.Width,
-                spec.Paper.Height);
-            if (source.TitleBlock?.BuiltInKind is { } sourceTitleBlockKind)
-            {
-                try
-                {
-                    var capturedContent = AdaptiveTitleBlockLayoutSolver.Solve(
-                        sourceTitleBlockKind,
-                        source.Paper,
-                        projectInformation,
-                        source.DetailSlots.Count).Content;
-                    sourceContent = new TitleBlockRectangle(
-                        capturedContent.Left * horizontalScale,
-                        capturedContent.Bottom * verticalScale,
-                        capturedContent.Width * horizontalScale,
-                        capturedContent.Height * verticalScale);
-                }
-                catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
-                {
-                    diagnostics.Add(CaptureSheetTemplatePlanner.Error(
-                        "title_block.template_constraints_invalid", exception.Message));
-                }
-            }
-
             var targetContent = adaptiveTitleBlock.Content;
-            details = details.Select(slot => slot with
+            if (details.Length > 0)
             {
-                Left = MapCoordinate(slot.Left, sourceContent.Left, sourceContent.Width,
-                    targetContent.Left, targetContent.Width),
-                Right = MapCoordinate(slot.Right, sourceContent.Left, sourceContent.Width,
-                    targetContent.Left, targetContent.Width),
-                Bottom = MapCoordinate(slot.Bottom, sourceContent.Bottom, sourceContent.Height,
-                    targetContent.Bottom, targetContent.Height),
-                Top = MapCoordinate(slot.Top, sourceContent.Bottom, sourceContent.Height,
-                    targetContent.Bottom, targetContent.Height),
-            }).ToArray();
+                var sourceContent = new TitleBlockRectangle(
+                    details.Min(slot => slot.Left),
+                    details.Min(slot => slot.Bottom),
+                    details.Max(slot => slot.Right) - details.Min(slot => slot.Left),
+                    details.Max(slot => slot.Top) - details.Min(slot => slot.Bottom));
+                details = details.Select(slot => slot with
+                {
+                    Left = MapCoordinate(slot.Left, sourceContent.Left, sourceContent.Width,
+                        targetContent.Left, targetContent.Width),
+                    Right = MapCoordinate(slot.Right, sourceContent.Left, sourceContent.Width,
+                        targetContent.Left, targetContent.Width),
+                    Bottom = MapCoordinate(slot.Bottom, sourceContent.Bottom, sourceContent.Height,
+                        targetContent.Bottom, targetContent.Height),
+                    Top = MapCoordinate(slot.Top, sourceContent.Bottom, sourceContent.Height,
+                        targetContent.Bottom, targetContent.Height),
+                }).ToArray();
+            }
         }
 
         var template = source with
@@ -440,51 +420,20 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
         return new ResolvedCreationSpec(template, namedViewAssignments);
     }
 
-    private static DetailSlotRecipe[] ApplyAppearanceCapability(
-        DetailSlotRecipe[] details,
-        Guid? registrationId,
-        TemplateCapability capability,
+    private static void ValidateAppearanceState(
+        Guid? stateId,
+        AppearanceStateKind kind,
         DocumentSnapshot snapshot,
         ICollection<Diagnostic> diagnostics)
     {
-        if (registrationId is not { } id) return details;
-        var registration = snapshot.TemplateRegistrations.LastOrDefault(item => item.Id == id);
-        if (registration is null || !registration.Capabilities.HasFlag(capability))
+        if (stateId is not { } id) return;
+        var state = snapshot.AppearanceStates.LastOrDefault(item => item.Id == id);
+        if (state is null || state.Kind != kind)
         {
             diagnostics.Add(CaptureSheetTemplatePlanner.Error(
-                "template.capability_source_missing",
-                $"The selected {capability} template source is unavailable."));
-            return details;
+                "appearance_state.source_missing",
+                $"The selected {(kind == AppearanceStateKind.LayerState ? "layer" : "object display")} state is unavailable."));
         }
-
-        var sourceTemplate = registration.Source.Kind switch
-        {
-            HierarchyScopeKind.Sheet => snapshot.Templates.FirstOrDefault(template =>
-                template.SourcePageViewId == registration.Source.Id),
-            HierarchyScopeKind.Detail => snapshot.Templates.FirstOrDefault(template =>
-                template.Id == registration.Id),
-            _ => null,
-        };
-        var local = snapshot.AppearanceRules.LastOrDefault(item => item.Scope == registration.Source);
-        return details.Select((detail, index) =>
-        {
-            var sourceSlot = sourceTemplate?.DetailSlots.Count > 0
-                ? sourceTemplate.DetailSlots[Math.Min(index, sourceTemplate.DetailSlots.Count - 1)]
-                : null;
-            return capability switch
-            {
-                TemplateCapability.LayerStates => detail with
-                {
-                    LayerRules = sourceSlot?.Layers.ToArray() ?? local?.LayerRules.ToArray() ?? [],
-                },
-                TemplateCapability.ObjectDisplayModes => detail with
-                {
-                    ObjectDisplayRules = sourceSlot?.Objects.ToArray() ??
-                                         local?.ObjectDisplayRules.ToArray() ?? [],
-                },
-                _ => detail,
-            };
-        }).ToArray();
     }
 
     private static double MapCoordinate(

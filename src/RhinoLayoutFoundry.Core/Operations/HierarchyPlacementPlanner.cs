@@ -1,5 +1,6 @@
 using RhinoLayoutFoundry.Core.Diagnostics;
 using RhinoLayoutFoundry.Core.Domain;
+using RhinoLayoutFoundry.Core.Naming;
 using RhinoLayoutFoundry.Core.Overview;
 
 namespace RhinoLayoutFoundry.Core.Operations;
@@ -147,11 +148,29 @@ public sealed class HierarchyPlacementPlanner : IOperationPlanner<HierarchyPlace
         }
 
         var movedCount = folderIds.Count + sheetIds.Count;
+        var changes = new List<OperationChange>
+        {
+            new ReorganizeHierarchyChange(expectedFolders, expectedSheets, nextFolders, nextSheets),
+        };
+        var changedFolders = nextSheets
+            .Where(item => snapshot.Sheets[item.PageViewId].FolderId != item.FolderId)
+            .ToDictionary(item => item.PageViewId, item => item.FolderId);
+        if (changedFolders.Count > 0)
+        {
+            var linked = LinkedSheetNaming.Preview(
+                snapshot,
+                changedFolders,
+                affectedSheetIds: changedFolders.Keys.ToHashSet());
+            diagnostics.AddRange(linked.Diagnostics);
+            if (linked.Change is not null) changes.Add(linked.Change);
+        }
+        if (diagnostics.Any(item => item.Severity == DiagnosticSeverity.Error))
+            return Failed(snapshot, diagnostics);
         return new OperationPlan(
             snapshot.DocumentRuntimeSerialNumber,
             snapshot.Revision,
             $"Reorganize {movedCount} hierarchy item{(movedCount == 1 ? string.Empty : "s")}",
-            [new ReorganizeHierarchyChange(expectedFolders, expectedSheets, nextFolders, nextSheets)],
+            changes,
             diagnostics);
     }
 

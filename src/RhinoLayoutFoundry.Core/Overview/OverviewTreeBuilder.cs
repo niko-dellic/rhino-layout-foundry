@@ -1,3 +1,5 @@
+using RhinoLayoutFoundry.Core.Domain;
+
 namespace RhinoLayoutFoundry.Core.Overview;
 
 public enum OverviewNodeKind
@@ -5,6 +7,8 @@ public enum OverviewNodeKind
     Folder,
     Sheet,
     Detail,
+    LayerState,
+    ObjectDisplayState,
 }
 
 public enum OverviewFilterKind
@@ -39,6 +43,7 @@ public sealed record OverviewTreeNode(
     FolderOverview? Folder = null,
     SheetOverview? Sheet = null,
     DetailOverview? Detail = null,
+    AppearanceStateOverview? AppearanceState = null,
     OverviewNavigationTarget? NavigationTarget = null,
     IReadOnlyList<OverviewIssue>? Diagnostics = null,
     bool IsDocumentRoot = false)
@@ -91,11 +96,19 @@ public static class OverviewTreeBuilder
                     .OrderBy(sheet => sheet.Order)
                     .ThenBy(sheet => sheet.Name, StringComparer.OrdinalIgnoreCase)
                     .ToArray());
+        var statesByFolder = overview.AppearanceStates
+            .GroupBy(state => folders.ContainsKey(state.FolderId) ? state.FolderId : rootId)
+            .ToDictionary(
+                group => group.Key,
+                group => group.OrderBy(state => state.Order)
+                    .ThenBy(state => state.Name, StringComparer.OrdinalIgnoreCase)
+                    .ToArray());
 
         var rootChildren = BuildFolderChildren(
             rootId,
             childFolders,
             sheetsByFolder,
+            statesByFolder,
             filter,
             new HashSet<Guid> { rootId },
             includeAllTextMatches: false);
@@ -131,6 +144,7 @@ public static class OverviewTreeBuilder
         Guid folderId,
         IReadOnlyDictionary<Guid, FolderOverview[]> childFolders,
         IReadOnlyDictionary<Guid, SheetOverview[]> sheetsByFolder,
+        IReadOnlyDictionary<Guid, AppearanceStateOverview[]> statesByFolder,
         OverviewTreeFilter filter,
         HashSet<Guid> ancestors,
         bool includeAllTextMatches)
@@ -144,6 +158,7 @@ public static class OverviewTreeBuilder
                     childFolder,
                     childFolders,
                     sheetsByFolder,
+                    statesByFolder,
                     filter,
                     ancestors,
                     includeAllTextMatches);
@@ -151,6 +166,24 @@ public static class OverviewTreeBuilder
                 {
                     children.Add(child);
                 }
+            }
+        }
+
+        if (filter.Kind == OverviewFilterKind.All && statesByFolder.TryGetValue(folderId, out var states))
+        {
+            foreach (var state in states.Where(state =>
+                         includeAllTextMatches || Matches(state.Name, filter.Query)))
+            {
+                children.Add(new OverviewTreeNode(
+                    new OverviewNodeKey(
+                        state.Kind == AppearanceStateKind.LayerState
+                            ? OverviewNodeKind.LayerState
+                            : OverviewNodeKind.ObjectDisplayState,
+                        state.Id),
+                    state.Name,
+                    state.Kind == AppearanceStateKind.LayerState ? "Layer state" : "Object display state",
+                    [],
+                    AppearanceState: state));
             }
         }
 
@@ -173,6 +206,7 @@ public static class OverviewTreeBuilder
         FolderOverview folder,
         IReadOnlyDictionary<Guid, FolderOverview[]> childFolders,
         IReadOnlyDictionary<Guid, SheetOverview[]> sheetsByFolder,
+        IReadOnlyDictionary<Guid, AppearanceStateOverview[]> statesByFolder,
         OverviewTreeFilter filter,
         HashSet<Guid> ancestors,
         bool includeAllTextMatches)
@@ -187,6 +221,7 @@ public static class OverviewTreeBuilder
             folder.Id,
             childFolders,
             sheetsByFolder,
+            statesByFolder,
             filter,
             ancestors,
             folderMatchesText);

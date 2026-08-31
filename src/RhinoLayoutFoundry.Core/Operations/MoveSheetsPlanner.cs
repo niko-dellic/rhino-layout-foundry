@@ -1,5 +1,6 @@
 using RhinoLayoutFoundry.Core.Diagnostics;
 using RhinoLayoutFoundry.Core.Domain;
+using RhinoLayoutFoundry.Core.Naming;
 
 namespace RhinoLayoutFoundry.Core.Operations;
 
@@ -74,7 +75,18 @@ public sealed class MoveSheetsPlanner : IOperationPlanner<MoveSheetsRequest>
                 sheet.FolderId,
                 request.DestinationFolderId,
                 nextOrder + index)));
+            var folderOverrides = movable.ToDictionary(
+                sheet => sheet.PageViewId,
+                _ => request.DestinationFolderId);
+            var linked = LinkedSheetNaming.Preview(
+                snapshot,
+                folderOverrides,
+                affectedSheetIds: movable.Select(sheet => sheet.PageViewId).ToHashSet());
+            diagnostics.AddRange(linked.Diagnostics);
+            if (linked.Change is not null) changes.Add(linked.Change);
         }
+
+        if (diagnostics.Any(item => item.Severity == DiagnosticSeverity.Error)) changes.Clear();
 
         return new OperationPlan(
             snapshot.DocumentRuntimeSerialNumber,

@@ -14,8 +14,8 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
     private const string InheritPageDisplayMode = "Use page display mode";
     private const string MixedDisplayMode = "Mixed";
     private const string InheritNamedView = "Use detail/template camera";
-    private const string NoLayerStateTemplate = "No layer-state template";
-    private const string NoObjectDisplayTemplate = "No object-display template";
+    private const string NoLayerStateTemplate = "Inherit layer state from folder";
+    private const string NoObjectDisplayTemplate = "Inherit object display state from folder";
     private readonly DocumentSnapshot _snapshot;
     private readonly BatchTarget[] _editTargets;
     private readonly bool _isEditMode;
@@ -152,17 +152,17 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             "Search display modes");
         _displayModePicker.Width = 280;
         _displayModePicker.Text = InheritDisplayMode;
-        _layerStateTemplateByLabel = CapabilityTemplateChoices(
-            snapshot, TemplateCapability.LayerStates);
-        _objectDisplayTemplateByLabel = CapabilityTemplateChoices(
-            snapshot, TemplateCapability.ObjectDisplayModes);
+        _layerStateTemplateByLabel = AppearanceStateChoices(
+            snapshot, AppearanceStateKind.LayerState);
+        _objectDisplayTemplateByLabel = AppearanceStateChoices(
+            snapshot, AppearanceStateKind.ObjectDisplayState);
         _layerStateTemplatePicker = new FilteredPicker(
             new[] { NoLayerStateTemplate }.Concat(_layerStateTemplateByLabel.Keys),
-            "Search layer-state templates");
+            "Search layer states");
         _layerStateTemplatePicker.Text = NoLayerStateTemplate;
         _objectDisplayTemplatePicker = new FilteredPicker(
             new[] { NoObjectDisplayTemplate }.Concat(_objectDisplayTemplateByLabel.Keys),
-            "Search object-display templates");
+            "Search object display states");
         _objectDisplayTemplatePicker.Text = NoObjectDisplayTemplate;
         _renameChangeCheck = new FoundryCheckBox("Change layout names");
         _paperChangeCheck = new FoundryCheckBox("Change page size");
@@ -458,7 +458,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         {
             editor.Items.Add(SectionLabel("Detail layout"));
             editor.Items.Add(new Panel { Width = 280, Content = _layoutPickerTrigger });
-            editor.Items.Add(SectionLabel("Appearance templates"));
+            editor.Items.Add(SectionLabel("Appearance states"));
             editor.Items.Add(new StackLayout
             {
                 Spacing = FoundryTheme.Space2,
@@ -669,9 +669,9 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             DisplayModeSummary(change.Template),
             change.Template.TitleBlock?.InstanceDefinitionName ?? "None",
             CapabilityTemplateLabel(
-                _drafts[index].LayerStateTemplateRegistrationId, _layerStateTemplateByLabel),
+                _drafts[index].LayerStateId, _layerStateTemplateByLabel),
             CapabilityTemplateLabel(
-                _drafts[index].ObjectDisplayTemplateRegistrationId, _objectDisplayTemplateByLabel))).ToArray();
+                _drafts[index].ObjectDisplayStateId, _objectDisplayTemplateByLabel))).ToArray();
         EnsureActiveGroupExists();
         _visiblePreviewRows.Clear();
         _visiblePreviewRows.AddRange(allRows.Where(row =>
@@ -1387,8 +1387,8 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             _objectDisplayTemplatePicker, _objectDisplayTemplateByLabel);
         ApplyToTargets(draft => draft with
         {
-            LayerStateTemplateRegistrationId = layerSource,
-            ObjectDisplayTemplateRegistrationId = objectSource,
+            LayerStateId = layerSource,
+            ObjectDisplayStateId = objectSource,
         });
     }
 
@@ -1754,11 +1754,11 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             _displayModePicker.Text = draft.PageDisplayModeId is { } modeId
                 ? _snapshot.DisplayModes.GetValueOrDefault(modeId) ?? InheritDisplayMode
                 : InheritDisplayMode;
-            _layerStateTemplatePicker.Text = draft.LayerStateTemplateRegistrationId is { } layerTemplateId
+            _layerStateTemplatePicker.Text = draft.LayerStateId is { } layerTemplateId
                 ? _layerStateTemplateByLabel.FirstOrDefault(pair => pair.Value == layerTemplateId).Key ??
                   NoLayerStateTemplate
                 : NoLayerStateTemplate;
-            _objectDisplayTemplatePicker.Text = draft.ObjectDisplayTemplateRegistrationId is { } objectTemplateId
+            _objectDisplayTemplatePicker.Text = draft.ObjectDisplayStateId is { } objectTemplateId
                 ? _objectDisplayTemplateByLabel.FirstOrDefault(pair => pair.Value == objectTemplateId).Key ??
                   NoObjectDisplayTemplate
                 : NoObjectDisplayTemplate;
@@ -1862,34 +1862,18 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             : names.Length switch { 0 => "Rhino default", 1 => names[0]!, _ => "Mixed" };
     }
 
-    private static Dictionary<string, Guid> CapabilityTemplateChoices(
+    private static Dictionary<string, Guid> AppearanceStateChoices(
         DocumentSnapshot snapshot,
-        TemplateCapability capability)
+        AppearanceStateKind kind)
     {
         var result = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
-        foreach (var registration in snapshot.TemplateRegistrations.Where(item =>
-                     item.Capabilities.HasFlag(capability)))
+        foreach (var state in snapshot.AppearanceStates.Where(item => item.Kind == kind)
+                     .OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase))
         {
-            var kind = registration.Source.Kind switch
-            {
-                HierarchyScopeKind.Folder => "Folder",
-                HierarchyScopeKind.Sheet => "Layout",
-                HierarchyScopeKind.Detail => "Detail",
-                _ => "Source",
-            };
-            var name = registration.Source.Kind switch
-            {
-                HierarchyScopeKind.Folder => snapshot.Folders
-                    .GetValueOrDefault(registration.Source.Id)?.Name,
-                HierarchyScopeKind.Sheet => snapshot.Sheets
-                    .GetValueOrDefault(registration.Source.Id)?.Name,
-                HierarchyScopeKind.Detail => snapshot.Sheets.Values.SelectMany(sheet => sheet.Details)
-                    .FirstOrDefault(detail => detail.DetailViewportId == registration.Source.Id)?.Name,
-                _ => null,
-            };
-            var label = $"{kind}: {name ?? "Missing source"}";
-            if (result.ContainsKey(label)) label += $" · {registration.Id.ToString()[..8]}";
-            result[label] = registration.Id;
+            var folder = snapshot.Folders.GetValueOrDefault(state.FolderId)?.Name ?? "Missing folder";
+            var label = $"{state.Name} · {folder}";
+            if (result.ContainsKey(label)) label += $" · {state.Id.ToString()[..8]}";
+            result[label] = state.Id;
         }
         return result;
     }
@@ -2088,8 +2072,8 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         TitleBlockChoice TitleBlock,
         IReadOnlyList<string?> NamedViewsByDetail,
         IReadOnlyList<Guid?> DetailDisplayModesByDetail,
-        Guid? LayerStateTemplateRegistrationId,
-        Guid? ObjectDisplayTemplateRegistrationId)
+        Guid? LayerStateId,
+        Guid? ObjectDisplayStateId)
     {
         internal LayoutCreationSpec ToSpec() => new(
             Quantity: 1,
@@ -2104,8 +2088,8 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             NamedViewsByDetail: NamedViewsByDetail,
             DetailDisplayModesByDetail: DetailDisplayModesByDetail,
             DetailLayerId: DetailLayerId,
-            LayerStateTemplateRegistrationId: LayerStateTemplateRegistrationId,
-            ObjectDisplayTemplateRegistrationId: ObjectDisplayTemplateRegistrationId);
+            LayerStateId: LayerStateId,
+            ObjectDisplayStateId: ObjectDisplayStateId);
     }
 
     private enum DetailLayerTargetMode
@@ -3377,26 +3361,22 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         {
             var choice = _choices[_selectedIndex];
             var targetContent = DetailContentBounds(page);
-            if (_titleBlock?.BuiltInKind is null ||
-                choice.Template is not { TitleBlock.BuiltInKind: { } sourceKind } template)
+            if (_titleBlock?.BuiltInKind is null)
                 return LayoutPreviewTray.DetailBounds(choice, targetContent);
 
-            try
-            {
-                var sourceContent = AdaptiveTitleBlockLayoutSolver.Solve(
-                    sourceKind,
-                    template.Paper).Content;
-                return template.DetailSlots.Select(slot => LayoutPreviewTray.FromNormalized(
-                    targetContent,
-                    (slot.Left - sourceContent.Left) / sourceContent.Width,
-                    (slot.Bottom - sourceContent.Bottom) / sourceContent.Height,
-                    (slot.Right - sourceContent.Left) / sourceContent.Width,
-                    (slot.Top - sourceContent.Bottom) / sourceContent.Height)).ToArray();
-            }
-            catch (Exception)
-            {
-                return LayoutPreviewTray.DetailBounds(choice, targetContent);
-            }
+            var sourceDetails = LayoutPreviewTray.DetailBounds(choice, page);
+            if (sourceDetails.Count == 0) return sourceDetails;
+            var sourceLeft = sourceDetails.Min(detail => detail.Left);
+            var sourceTop = sourceDetails.Min(detail => detail.Top);
+            var sourceRight = sourceDetails.Max(detail => detail.Right);
+            var sourceBottom = sourceDetails.Max(detail => detail.Bottom);
+            var sourceWidth = Math.Max(0.001f, sourceRight - sourceLeft);
+            var sourceHeight = Math.Max(0.001f, sourceBottom - sourceTop);
+            return sourceDetails.Select(detail => new RectangleF(
+                targetContent.Left + (detail.Left - sourceLeft) / sourceWidth * targetContent.Width,
+                targetContent.Top + (detail.Top - sourceTop) / sourceHeight * targetContent.Height,
+                detail.Width / sourceWidth * targetContent.Width,
+                detail.Height / sourceHeight * targetContent.Height)).ToArray();
         }
 
         private static void DrawCentered(

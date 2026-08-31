@@ -60,6 +60,35 @@ public sealed record HierarchyViewportRuleSet(
     IReadOnlyList<LayerVisibilityRule> LayerRules,
     IReadOnlyList<ObjectDisplayRule> ObjectDisplayRules);
 
+public enum AppearanceStateKind
+{
+    LayerState,
+    ObjectDisplayState,
+}
+
+/// <summary>
+/// A reusable, document-owned appearance resource. Folder membership is only
+/// organizational; behavior is established through explicit assignments.
+/// </summary>
+public sealed record AppearanceStateRecord(
+    Guid Id,
+    Guid FolderId,
+    int Order,
+    string Name,
+    AppearanceStateKind Kind,
+    IReadOnlyList<LayerVisibilityRule> LayerRules,
+    IReadOnlyList<ObjectDisplayRule> ObjectDisplayRules);
+
+/// <summary>
+/// A target can own at most one assignment for each appearance-state kind.
+/// More-specific hierarchy assignments naturally replace the inherited basis.
+/// </summary>
+public sealed record AppearanceStateAssignment(
+    Guid Id,
+    HierarchyScope Target,
+    AppearanceStateKind Kind,
+    Guid StateId);
+
 public sealed record CapabilityTemplateRegistration(
     Guid Id,
     HierarchyScope Source,
@@ -124,19 +153,11 @@ public static class TemplateCapabilityPolicy
 {
     public static TemplateCapability AllowedFor(HierarchyScopeKind kind) => kind switch
     {
-        HierarchyScopeKind.Folder =>
-            TemplateCapability.Layout |
-            TemplateCapability.LayerStates |
-            TemplateCapability.ObjectDisplayModes,
+        HierarchyScopeKind.Folder => TemplateCapability.Layout,
         HierarchyScopeKind.Sheet =>
             TemplateCapability.Layout |
-            TemplateCapability.TitleBlock |
-            TemplateCapability.LayerStates |
-            TemplateCapability.ObjectDisplayModes,
-        HierarchyScopeKind.Detail =>
-            TemplateCapability.Layout |
-            TemplateCapability.LayerStates |
-            TemplateCapability.ObjectDisplayModes,
+            TemplateCapability.TitleBlock,
+        HierarchyScopeKind.Detail => TemplateCapability.Layout,
         _ => TemplateCapability.None,
     };
 
@@ -153,7 +174,9 @@ public static class ViewportAppearanceResolver
         IReadOnlyDictionary<Guid, LayerSnapshot> layers,
         IReadOnlyDictionary<Guid, ModelObjectSnapshot> objects,
         IReadOnlyList<CapabilityTemplateLink>? links = null,
-        IReadOnlyDictionary<Guid, CapabilityTemplateRegistration>? registrations = null)
+        IReadOnlyDictionary<Guid, CapabilityTemplateRegistration>? registrations = null,
+        IReadOnlyDictionary<Guid, AppearanceStateRecord>? appearanceStates = null,
+        IReadOnlyList<AppearanceStateAssignment>? stateAssignments = null)
     {
         ArgumentNullException.ThrowIfNull(leastToMostSpecificScopes);
         ArgumentNullException.ThrowIfNull(localRules);
@@ -210,8 +233,25 @@ public static class ViewportAppearanceResolver
                 ApplyRules([], link.LastResolved.Objects);
         }
 
+        void ApplyAssigned(HierarchyScope target, AppearanceStateKind kind)
+        {
+            if (appearanceStates is null || stateAssignments is null) return;
+            var assignment = stateAssignments.LastOrDefault(item =>
+                item.Target == target && item.Kind == kind);
+            if (assignment is null ||
+                !appearanceStates.TryGetValue(assignment.StateId, out var state) ||
+                state.Kind != kind)
+                return;
+            if (kind == AppearanceStateKind.LayerState)
+                ApplyRules(state.LayerRules, []);
+            else
+                ApplyRules([], state.ObjectDisplayRules);
+        }
+
         foreach (var scope in leastToMostSpecificScopes)
         {
+            ApplyAssigned(scope, AppearanceStateKind.LayerState);
+            ApplyAssigned(scope, AppearanceStateKind.ObjectDisplayState);
             ApplyLinked(scope, TemplateCapability.LayerStates, []);
             ApplyLinked(scope, TemplateCapability.ObjectDisplayModes, []);
             if (!localRules.TryGetValue(scope, out var rules)) continue;

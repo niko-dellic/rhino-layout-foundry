@@ -112,6 +112,8 @@ internal sealed class RhinoDocumentObserverSnapshotProvider : IDocumentObserverS
             document.NamedViews
                 .Select(view => view.Name)
                 .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
-                .ToArray());
+                .ToArray(),
+            state.AppearanceStates,
+            state.StateAssignments);
     }
 }

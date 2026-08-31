@@ -191,6 +191,71 @@ public sealed class ViewportAppearanceTests
             Assert.Single(Assert.Single(cleaned.AppearanceRules).LayerRules));
     }
 
+    [Fact]
+    public void AppearanceStatesProvideBasisAndLocalRulesWinAtEachSpecificity()
+    {
+        var layer = new LayerSnapshot(ChildLayerId, null, "Walls", true);
+        var folder = new HierarchyScope(HierarchyScopeKind.Folder, TestSnapshots.ChildFolderId);
+        var sheet = new HierarchyScope(HierarchyScopeKind.Sheet, TestSnapshots.SheetOneId);
+        var detail = new HierarchyScope(HierarchyScopeKind.Detail, TestSnapshots.DetailOneId);
+        var folderState = new AppearanceStateRecord(Guid.NewGuid(), TestSnapshots.ChildFolderId, 0,
+            "Folder basis", AppearanceStateKind.LayerState,
+            [new LayerVisibilityRule(new LayerReference(layer.Id, layer.FullPath), LayerVisibilityOverride.Hidden)], []);
+        var sheetState = new AppearanceStateRecord(Guid.NewGuid(), TestSnapshots.ChildFolderId, 1,
+            "Sheet basis", AppearanceStateKind.LayerState,
+            [new LayerVisibilityRule(new LayerReference(layer.Id, layer.FullPath), LayerVisibilityOverride.Visible)], []);
+        var rules = new Dictionary<HierarchyScope, HierarchyViewportRuleSet>
+        {
+            [detail] = new(detail,
+                [new LayerVisibilityRule(new LayerReference(layer.Id, layer.FullPath), LayerVisibilityOverride.Hidden)], []),
+        };
+        var assignments = new[]
+        {
+            new AppearanceStateAssignment(Guid.NewGuid(), folder, AppearanceStateKind.LayerState, folderState.Id),
+            new AppearanceStateAssignment(Guid.NewGuid(), sheet, AppearanceStateKind.LayerState, sheetState.Id),
+        };
+
+        var resolved = ViewportAppearanceResolver.Resolve(
+            [folder, sheet, detail],
+            rules,
+            new Dictionary<Guid, LayerSnapshot> { [layer.Id] = layer },
+            new Dictionary<Guid, ModelObjectSnapshot>(),
+            appearanceStates: new Dictionary<Guid, AppearanceStateRecord>
+            {
+                [folderState.Id] = folderState,
+                [sheetState.Id] = sheetState,
+            },
+            stateAssignments: assignments);
+
+        Assert.Equal(LayerVisibilityOverride.Hidden, resolved.Layers[layer.Id]);
+    }
+
+    [Fact]
+    public void ClearingAssignmentDoesNotChangeLocalOverrides()
+    {
+        var state = new AppearanceStateRecord(Guid.NewGuid(), TestSnapshots.ChildFolderId, 0,
+            "Walls", AppearanceStateKind.LayerState, [], []);
+        var target = new HierarchyScope(HierarchyScopeKind.Sheet, TestSnapshots.SheetOneId);
+        var assignment = new AppearanceStateAssignment(Guid.NewGuid(), target,
+            AppearanceStateKind.LayerState, state.Id);
+        var local = new HierarchyViewportRuleSet(target,
+            [new LayerVisibilityRule(new LayerReference(ChildLayerId, "Walls"), LayerVisibilityOverride.Visible)], []);
+        var snapshot = TestSnapshots.Create() with
+        {
+            AppearanceStateResources = [state],
+            AppearanceStateAssignments = [assignment],
+            ViewportRuleSets = [local],
+        };
+
+        var plan = new AssignAppearanceStatePlanner().Plan(new AssignAppearanceStateRequest(
+            snapshot.DocumentRuntimeSerialNumber, snapshot.Revision, target,
+            AppearanceStateKind.LayerState, null), snapshot);
+
+        var change = Assert.IsType<SetAppearanceStateAssignmentChange>(Assert.Single(plan.Changes));
+        Assert.Null(change.NewAssignment);
+        Assert.Equal(local, Assert.Single(snapshot.AppearanceRules));
+    }
+
     private static ObjectDisplayRule ModeForLayer(
         Guid layerId,
         string fullPath,

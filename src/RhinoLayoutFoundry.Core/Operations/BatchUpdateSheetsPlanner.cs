@@ -89,6 +89,7 @@ public sealed class BatchUpdateSheetsPlanner : IOperationPlanner<BatchUpdateShee
 
         var pattern = request.NamingPattern?.Trim();
         var newNames = new Dictionary<Guid, string>();
+        var namingBindings = new Dictionary<Guid, SheetNamingBinding>();
         if (!string.IsNullOrWhiteSpace(pattern))
         {
             if (request.Step == 0)
@@ -101,14 +102,24 @@ public sealed class BatchUpdateSheetsPlanner : IOperationPlanner<BatchUpdateShee
                 {
                     ["folder"] = sheet.FolderId == snapshot.RootFolderId ? string.Empty : folder,
                     ["view"] = sheet.Details.FirstOrDefault()?.Name ?? string.Empty,
-                    ["tag"] = string.Empty,
+                    ["tag"] = sheet.Tags.FirstOrDefault() ?? string.Empty,
                 };
                 foreach (var pair in sheet.Metadata) tokens[pair.Key] = pair.Value;
                 return new NamingItem(id, sheet.Name, tokens);
             }).ToArray();
             var preview = NamingEngine.Preview(new NamingRequest(pattern, items, request.Start, request.Step));
             diagnostics.AddRange(preview.Diagnostics);
-            foreach (var entry in preview.Entries) newNames[entry.SheetId] = entry.ProposedName;
+            foreach (var entry in preview.Entries)
+            {
+                newNames[entry.SheetId] = entry.ProposedName;
+                var sheetIndex = Array.FindIndex(items, item => item.SheetId == entry.SheetId);
+                var sheet = snapshot.Sheets[entry.SheetId];
+                namingBindings[entry.SheetId] = LinkedSheetNaming.Attach(
+                    pattern,
+                    request.Start + sheetIndex * request.Step,
+                    entry.ProposedName,
+                    sheet);
+            }
             var included = ids.ToHashSet();
             var existing = snapshot.Sheets.Values.Where(sheet => !included.Contains(sheet.PageViewId))
                 .Select(sheet => sheet.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -134,7 +145,8 @@ public sealed class BatchUpdateSheetsPlanner : IOperationPlanner<BatchUpdateShee
                 request.TitleBlockSourceInstanceObjectId,
                 request.ReplaceRevisionSchedule,
                 request.AppendRevision,
-                request.BuiltInTitleBlock)];
+                request.BuiltInTitleBlock,
+                namingBindings.Count == 0 ? null : namingBindings)];
         if (changes.Count > 0)
             diagnostics.Add(new Diagnostic("batch.undo_unavailable", DiagnosticSeverity.Warning,
                 "Rhino does not expose native Undo for these layout properties. Foundry restores every before-value if Apply fails."));

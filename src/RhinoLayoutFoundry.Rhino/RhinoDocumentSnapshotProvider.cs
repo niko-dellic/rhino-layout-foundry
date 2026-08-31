@@ -93,7 +93,9 @@ internal sealed class RhinoDocumentSnapshotProvider : IDocumentSnapshotProvider
                     titleBlockName,
                     record?.IncludeInPrintAll ?? true,
                     record?.TitleBlockData,
-                    titleBlock?.BuiltInKind);
+                    titleBlock?.BuiltInKind,
+                    record?.Tags,
+                    record?.NamingBinding);
             })
             .ToDictionary(sheet => sheet.PageViewId);
 
@@ -278,7 +280,9 @@ internal sealed class RhinoDocumentSnapshotProvider : IDocumentSnapshotProvider
             objectOverrides,
             state.AppearanceRules,
             state.TemplateRegistrations,
-            state.TemplateLinks);
+            state.TemplateLinks,
+            state.AppearanceStates,
+            state.StateAssignments);
     }
 
     private static SheetTemplateRecipe RefreshDocumentBackedTemplate(

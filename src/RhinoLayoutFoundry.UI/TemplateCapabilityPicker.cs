@@ -10,8 +10,6 @@ internal sealed class TemplateCapabilityPicker : Panel
     [
         (TemplateCapability.Layout, "Layout"),
         (TemplateCapability.TitleBlock, "Title block"),
-        (TemplateCapability.LayerStates, "Layer states"),
-        (TemplateCapability.ObjectDisplayModes, "Object display modes"),
     ];
 
     private readonly FoundryDialogButton _trigger;
@@ -19,9 +17,7 @@ internal sealed class TemplateCapabilityPicker : Panel
     private Form? _popup;
     private TemplateCapability _value;
     private TemplateCapability _allowed = TemplateCapability.Layout |
-        TemplateCapability.TitleBlock |
-        TemplateCapability.LayerStates |
-        TemplateCapability.ObjectDisplayModes;
+        TemplateCapability.TitleBlock;
     private bool _updating;
 
     internal TemplateCapabilityPicker()
@@ -164,7 +160,7 @@ internal sealed class TemplateCapabilityPicker : Panel
         var anchor = PointToScreen(new PointF(0, Height));
         var screen = Screen.Screens.FirstOrDefault(candidate => candidate.Bounds.Contains(anchor)) ??
                      Screen.PrimaryScreen;
-        const int height = 164;
+        var height = FoundryTheme.Space3 * 2 + Options.Length * 36;
         var width = Math.Max(260, Width);
         var work = screen.WorkingArea;
         var x = Math.Clamp((int)Math.Round(anchor.X), (int)work.Left + FoundryTheme.Space2,

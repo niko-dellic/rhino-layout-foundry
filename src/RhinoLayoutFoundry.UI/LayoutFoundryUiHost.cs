@@ -293,7 +293,7 @@ public static class LayoutFoundryUiHost
 
             return result;
         }
-        catch (InvalidOperationException exception)
+        catch (Exception exception)
         {
             return UnavailableResult(exception.Message);
         }
@@ -863,6 +863,121 @@ public static class LayoutFoundryUiHost
         return new OperationResult(true, diagnostics);
     }
 
+    public static async Task<OperationResult> CreateAppearanceStateAsync(
+        Guid folderId,
+        string name,
+        AppearanceStateKind kind,
+        CancellationToken cancellationToken = default)
+    {
+        if (_snapshotProvider is null || _mutationService is null)
+            return UnavailableResult("Foundry is not connected to an active Rhino plug-in.");
+        try
+        {
+            var snapshot = _snapshotProvider.Capture();
+            var plan = new CreateAppearanceStatePlanner().Plan(new CreateAppearanceStateRequest(
+                snapshot.DocumentRuntimeSerialNumber, snapshot.Revision, folderId, name, kind), snapshot);
+            var result = plan.CanApply
+                ? await _mutationService.ApplyAsync(plan, cancellationToken)
+                : new OperationResult(false, plan.Diagnostics);
+            if (result.Succeeded) NotifyOverviewChanged(OverviewInvalidation.All);
+            return result;
+        }
+        catch (Exception exception)
+        {
+            return UnavailableResult(exception.Message);
+        }
+    }
+
+    public static async Task<OperationResult> UpdateAppearanceStateAsync(
+        Guid stateId,
+        string? name = null,
+        IReadOnlyList<LayerVisibilityRule>? layerRules = null,
+        IReadOnlyList<ObjectDisplayRule>? objectRules = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (_snapshotProvider is null || _mutationService is null)
+            return UnavailableResult("Foundry is not connected to an active Rhino plug-in.");
+        try
+        {
+            var snapshot = _snapshotProvider.Capture();
+            var plan = new UpdateAppearanceStatePlanner().Plan(new UpdateAppearanceStateRequest(
+                snapshot.DocumentRuntimeSerialNumber, snapshot.Revision, stateId,
+                Name: name, LayerRules: layerRules, ObjectDisplayRules: objectRules), snapshot);
+            var result = plan.CanApply
+                ? await _mutationService.ApplyAsync(plan, cancellationToken)
+                : new OperationResult(false, plan.Diagnostics);
+            if (result.Succeeded) NotifyOverviewChanged(OverviewInvalidation.All);
+            return result;
+        }
+        catch (InvalidOperationException exception)
+        {
+            return UnavailableResult(exception.Message);
+        }
+    }
+
+    public static async Task<OperationResult> AssignAppearanceStateAsync(
+        IReadOnlyList<OverviewNodeKey> targets,
+        AppearanceStateKind kind,
+        Guid? stateId,
+        CancellationToken cancellationToken = default)
+    {
+        if (_snapshotProvider is null || _mutationService is null)
+            return UnavailableResult("Foundry is not connected to an active Rhino plug-in.");
+        var diagnostics = new List<Diagnostic>();
+        try
+        {
+            foreach (var target in targets.Distinct())
+            {
+                var snapshot = _snapshotProvider.Capture();
+                var plan = new AssignAppearanceStatePlanner().Plan(new AssignAppearanceStateRequest(
+                    snapshot.DocumentRuntimeSerialNumber, snapshot.Revision,
+                    ToHierarchyScope(target), kind, stateId), snapshot);
+                var result = plan.CanApply
+                    ? await _mutationService.ApplyAsync(plan, cancellationToken)
+                    : new OperationResult(false, plan.Diagnostics);
+                diagnostics.AddRange(result.Diagnostics);
+                if (!result.Succeeded) return new OperationResult(false, diagnostics);
+            }
+            NotifyOverviewChanged(OverviewInvalidation.All);
+            return new OperationResult(true, diagnostics);
+        }
+        catch (InvalidOperationException exception)
+        {
+            return UnavailableResult(exception.Message);
+        }
+    }
+
+    public static async Task<OperationResult> MoveAppearanceStatesAsync(
+        IReadOnlyList<Guid> stateIds,
+        Guid destinationFolderId,
+        CancellationToken cancellationToken = default)
+    {
+        if (_snapshotProvider is null || _mutationService is null)
+            return UnavailableResult("Foundry is not connected to an active Rhino plug-in.");
+        var diagnostics = new List<Diagnostic>();
+        try
+        {
+            foreach (var stateId in stateIds.Distinct())
+            {
+                var snapshot = _snapshotProvider.Capture();
+                var plan = new UpdateAppearanceStatePlanner().Plan(new UpdateAppearanceStateRequest(
+                    snapshot.DocumentRuntimeSerialNumber, snapshot.Revision, stateId,
+                    FolderId: destinationFolderId), snapshot);
+                var result = plan.CanApply
+                    ? await _mutationService.ApplyAsync(plan, cancellationToken)
+                    : new OperationResult(false, plan.Diagnostics);
+                diagnostics.AddRange(result.Diagnostics);
+                if (!result.Succeeded) return new OperationResult(false, diagnostics);
+            }
+            NotifyOverviewChanged(OverviewInvalidation.All);
+            return new OperationResult(true, diagnostics);
+        }
+        catch (InvalidOperationException exception)
+        {
+            return UnavailableResult(exception.Message);
+        }
+    }
+
     public static async Task<OperationResult> LinkTemplateCapabilityAsync(
         IReadOnlyList<OverviewNodeKey> targets,
         Guid sourceRegistrationId,
@@ -1263,12 +1378,16 @@ public static class LayoutFoundryUiHost
                 : new OperationResult(false, plan.Diagnostics);
             if (result.Succeeded)
             {
+                var affected = detailViewportIds
+                    .Concat(plan.Changes.OfType<UpdateLinkedSheetNamesChange>()
+                        .SelectMany(change => change.NewNames.Keys.Concat(change.NewBindings.Keys)))
+                    .ToHashSet();
                 NotifyOverviewChanged(new OverviewInvalidation(
                     snapshot.DocumentRuntimeSerialNumber,
                     OverviewInvalidationKind.Metadata |
                     OverviewInvalidationKind.Diagnostics |
                     OverviewInvalidationKind.Thumbnails,
-                    detailViewportIds.ToHashSet()));
+                    affected));
             }
 
             return result;
@@ -1350,12 +1469,16 @@ public static class LayoutFoundryUiHost
         var result = await _mutationService!.ApplyAsync(plan, cancellationToken);
         if (result.Succeeded)
         {
+            var affected = affectedEntityIds
+                .Concat(plan.Changes.OfType<UpdateLinkedSheetNamesChange>()
+                    .SelectMany(change => change.NewNames.Keys.Concat(change.NewBindings.Keys)))
+                .ToHashSet();
             NotifyOverviewChanged(new OverviewInvalidation(
                 documentRuntimeSerialNumber,
                 OverviewInvalidationKind.Hierarchy |
                 OverviewInvalidationKind.Metadata |
                 OverviewInvalidationKind.Diagnostics,
-                affectedEntityIds));
+                affected));
         }
 
         return result;

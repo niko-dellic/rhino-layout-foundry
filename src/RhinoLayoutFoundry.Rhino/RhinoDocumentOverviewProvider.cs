@@ -30,6 +30,12 @@ internal sealed class RhinoDocumentOverviewProvider : IDocumentOverviewProvider
         }
 
         var folderIds = state.Folders.Select(folder => folder.Id).ToHashSet();
+        var appearanceStates = state.AppearanceStates.ToDictionary(item => item.Id);
+        var assignments = state.StateAssignments
+            .Where(item => appearanceStates.TryGetValue(item.StateId, out var resource) &&
+                           resource.Kind == item.Kind)
+            .GroupBy(item => (item.Target, item.Kind))
+            .ToDictionary(group => group.Key, group => group.Last());
         var registrations = state.TemplateRegistrations
             .GroupBy(item => item.Source)
             .ToDictionary(group => group.Key, group => group.Last().Capabilities);
@@ -56,18 +62,30 @@ internal sealed class RhinoDocumentOverviewProvider : IDocumentOverviewProvider
                     ? record.FolderId
                     : state.RootFolderId;
                 var pageDetails = page.GetDetailViews();
+                var folderChain = ScopeChain(folderId, state.Folders).ToArray();
                 var details = pageDetails
-                    .Select((detail, index) => new DetailOverview(
-                        detail.Viewport.Id,
-                        string.IsNullOrWhiteSpace(detail.DescriptiveTitle)
-                            ? $"Detail {index + 1}"
-                            : detail.DescriptiveTitle,
-                        index,
-                        detail.Viewport.DisplayMode.Id,
-                        detail.Viewport.DisplayMode.LocalName,
-                        registrations.GetValueOrDefault(new HierarchyScope(
-                            HierarchyScopeKind.Detail, detail.Viewport.Id)),
-                        detailAppearances.GetValueOrDefault(detail.Viewport.Id)))
+                    .Select((detail, index) =>
+                    {
+                        var detailScope = new HierarchyScope(
+                            HierarchyScopeKind.Detail, detail.Viewport.Id);
+                        var chain = folderChain
+                            .Append(new HierarchyScope(HierarchyScopeKind.Sheet, pageId))
+                            .Append(detailScope).ToArray();
+                        return new DetailOverview(
+                            detail.Viewport.Id,
+                            string.IsNullOrWhiteSpace(detail.DescriptiveTitle)
+                                ? $"Detail {index + 1}"
+                                : detail.DescriptiveTitle,
+                            index,
+                            detail.Viewport.DisplayMode.Id,
+                            detail.Viewport.DisplayMode.LocalName,
+                            registrations.GetValueOrDefault(detailScope),
+                            detailAppearances.GetValueOrDefault(detail.Viewport.Id),
+                            Binding(chain, detailScope, AppearanceStateKind.LayerState,
+                                assignments, appearanceStates),
+                            Binding(chain, detailScope, AppearanceStateKind.ObjectDisplayState,
+                                assignments, appearanceStates));
+                    })
                     .ToArray();
                 var sheetCapabilities = registrations.GetValueOrDefault(
                     new HierarchyScope(HierarchyScopeKind.Sheet, pageId));
@@ -85,7 +103,15 @@ internal sealed class RhinoDocumentOverviewProvider : IDocumentOverviewProvider
                     IncludeInPrintAll: record?.IncludeInPrintAll ?? true,
                     IsTemplate: sheetCapabilities != TemplateCapability.None,
                     TemplateCapabilities: sheetCapabilities,
-                    Appearance: AggregateAppearance(details.Select(detail => detail.Appearance)));
+                    Appearance: AggregateAppearance(details.Select(detail => detail.Appearance)),
+                    LayerState: Binding(
+                        folderChain.Append(new HierarchyScope(HierarchyScopeKind.Sheet, pageId)),
+                        new HierarchyScope(HierarchyScopeKind.Sheet, pageId),
+                        AppearanceStateKind.LayerState, assignments, appearanceStates),
+                    ObjectDisplayState: Binding(
+                        folderChain.Append(new HierarchyScope(HierarchyScopeKind.Sheet, pageId)),
+                        new HierarchyScope(HierarchyScopeKind.Sheet, pageId),
+                        AppearanceStateKind.ObjectDisplayState, assignments, appearanceStates));
                 return sheet with
                 {
                     Diagnostics = OverviewDiagnostics.ForSheet(
@@ -112,9 +138,43 @@ internal sealed class RhinoDocumentOverviewProvider : IDocumentOverviewProvider
                     folder.Order,
                     registrations.GetValueOrDefault(new HierarchyScope(
                         HierarchyScopeKind.Folder, folder.Id)),
-                    appearance);
+                    appearance,
+                    Binding(ScopeChain(folder.Id, state.Folders),
+                        new HierarchyScope(HierarchyScopeKind.Folder, folder.Id),
+                        AppearanceStateKind.LayerState, assignments, appearanceStates),
+                    Binding(ScopeChain(folder.Id, state.Folders),
+                        new HierarchyScope(HierarchyScopeKind.Folder, folder.Id),
+                        AppearanceStateKind.ObjectDisplayState, assignments, appearanceStates));
             })
             .ToArray();
+
+        var detailOwners = sheets.SelectMany(sheet => sheet.Details.Select(detail =>
+                (detail.DetailViewportId, sheet.PageViewId, sheet.FolderId,
+                    LayerStateId: detail.LayerState?.StateId,
+                    ObjectStateId: detail.ObjectDisplayState?.StateId)))
+            .ToArray();
+        var stateOverviews = state.AppearanceStates.Select(resource =>
+        {
+            var direct = state.StateAssignments.Where(item => item.StateId == resource.Id).ToArray();
+            var dependentDetails = detailOwners.Where(item =>
+                    resource.Kind == AppearanceStateKind.LayerState
+                        ? item.LayerStateId == resource.Id
+                        : item.ObjectStateId == resource.Id)
+                .ToArray();
+            return new AppearanceStateOverview(
+                resource.Id,
+                folderIds.Contains(resource.FolderId) ? resource.FolderId : state.RootFolderId,
+                resource.Order,
+                resource.Name,
+                resource.Kind,
+                resource.Kind == AppearanceStateKind.LayerState
+                    ? resource.LayerRules.Count
+                    : resource.ObjectDisplayRules.Count,
+                direct.Length,
+                direct.Count(item => item.Target.Kind == HierarchyScopeKind.Folder),
+                dependentDetails.Select(item => item.PageViewId).Distinct().Count(),
+                dependentDetails.Select(item => item.DetailViewportId).Distinct().Count());
+        }).ToArray();
 
         var documentName = DisplayName(document);
 
@@ -128,7 +188,43 @@ internal sealed class RhinoDocumentOverviewProvider : IDocumentOverviewProvider
                 $"import.{item.Kind}",
                 OverviewIssueSeverity.Warning,
                 item.Message,
-                item.EntityId)).ToArray());
+                item.EntityId)).ToArray(),
+            stateOverviews);
+    }
+
+    private static AppearanceStateBindingOverview? Binding(
+        IEnumerable<HierarchyScope> chain,
+        HierarchyScope target,
+        AppearanceStateKind kind,
+        IReadOnlyDictionary<(HierarchyScope Target, AppearanceStateKind Kind), AppearanceStateAssignment> assignments,
+        IReadOnlyDictionary<Guid, AppearanceStateRecord> states)
+    {
+        AppearanceStateAssignment? selected = null;
+        foreach (var scope in chain)
+            if (assignments.TryGetValue((scope, kind), out var assignment)) selected = assignment;
+        if (selected is null || !states.TryGetValue(selected.StateId, out var state)) return null;
+        return new AppearanceStateBindingOverview(
+            state.Id,
+            state.Name,
+            selected.Target != target,
+            selected.Target);
+    }
+
+    private static IEnumerable<HierarchyScope> ScopeChain(
+        Guid folderId,
+        IReadOnlyList<FolderRecord> folders)
+    {
+        var byId = folders.ToDictionary(item => item.Id);
+        var chain = new List<HierarchyScope>();
+        var visited = new HashSet<Guid>();
+        while (visited.Add(folderId) && byId.TryGetValue(folderId, out var folder))
+        {
+            chain.Add(new HierarchyScope(HierarchyScopeKind.Folder, folder.Id));
+            if (folder.ParentId is not { } parentId) break;
+            folderId = parentId;
+        }
+        chain.Reverse();
+        return chain;
     }
 
     public DocumentOverviewIdentity CaptureIdentity()

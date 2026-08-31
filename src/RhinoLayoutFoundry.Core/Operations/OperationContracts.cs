@@ -35,7 +35,13 @@ public abstract record OperationChange;
 public sealed record RenameSheetChange(
     Guid PageViewId,
     string ExpectedName,
-    string NewName) : OperationChange;
+    string NewName,
+    bool DetachNamingBinding = true) : OperationChange;
+
+public sealed record UpdateLinkedSheetNamesChange(
+    IReadOnlyDictionary<Guid, string> ExpectedNames,
+    IReadOnlyDictionary<Guid, string> NewNames,
+    IReadOnlyDictionary<Guid, SheetNamingBinding?> NewBindings) : OperationChange;
 
 public sealed record AddFolderChange(
     Guid FolderId,
@@ -132,7 +138,11 @@ public sealed record CreateSheetFromTemplateChange(
     string SheetNumber = "",
     ProjectInformation? ProjectData = null,
     IReadOnlyList<SheetRevisionRecord>? InitialRevisions = null,
-    Guid? DetailLayerId = null) : OperationChange;
+    Guid? DetailLayerId = null,
+    Guid? LayerStateId = null,
+    Guid? ObjectDisplayStateId = null,
+    string NamingPattern = "",
+    int NamingIndex = 0) : OperationChange;
 
 public sealed record UpdateProjectInformationChange(
     ProjectInformation ExpectedInformation,
@@ -149,7 +159,8 @@ public sealed record BatchUpdateSheetsChange(
     Guid? TitleBlockSourceInstanceObjectId = null,
     IReadOnlyList<SheetRevisionRecord>? ReplaceRevisionSchedule = null,
     SheetRevisionRecord? AppendRevision = null,
-    BuiltInTitleBlockKind? BuiltInTitleBlock = null) : OperationChange;
+    BuiltInTitleBlockKind? BuiltInTitleBlock = null,
+    IReadOnlyDictionary<Guid, SheetNamingBinding>? NamingBindings = null) : OperationChange;
 
 public sealed record UpdateDetailDisplayModesChange(
     IReadOnlyList<Guid> DetailViewportIds,
@@ -178,6 +189,17 @@ public sealed record SetCapabilityTemplateLinkChange(
     TemplateCapability Capability,
     CapabilityTemplateLink? ExpectedLink,
     CapabilityTemplateLink? NewLink) : OperationChange;
+
+public sealed record SetAppearanceStateResourceChange(
+    Guid StateId,
+    AppearanceStateRecord? ExpectedState,
+    AppearanceStateRecord? NewState) : OperationChange;
+
+public sealed record SetAppearanceStateAssignmentChange(
+    HierarchyScope Target,
+    AppearanceStateKind Kind,
+    AppearanceStateAssignment? ExpectedAssignment,
+    AppearanceStateAssignment? NewAssignment) : OperationChange;
 
 public sealed record AssignNamedViewToDetailsChange(
     IReadOnlyList<Guid> DetailViewportIds,

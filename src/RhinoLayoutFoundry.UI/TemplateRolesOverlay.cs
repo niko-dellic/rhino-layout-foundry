@@ -11,8 +11,6 @@ internal sealed class TemplateRolesOverlay : PixelLayout
     [
         (TemplateCapability.Layout, "Layout"),
         (TemplateCapability.TitleBlock, "Title block"),
-        (TemplateCapability.LayerStates, "Layer states"),
-        (TemplateCapability.ObjectDisplayModes, "Object display modes"),
     ];
 
     private readonly TemplateRoleMenu _card;
