@@ -12,6 +12,8 @@ internal sealed class AppearanceStateEditorDialog : Dialog
 {
     private readonly DocumentSnapshot _snapshot;
     private readonly AppearanceStateRecord _state;
+    private readonly bool _isNew;
+    private readonly TextBox _name = new();
     private readonly TextBox _search = new() { PlaceholderText = "Search layers" };
     private readonly GridView _grid;
     private readonly Label _status = FoundryTheme.MutedLabel();
@@ -28,9 +30,38 @@ internal sealed class AppearanceStateEditorDialog : Dialog
     private readonly FoundryCheckBox _children = new("Include child layers");
 
     internal AppearanceStateEditorDialog(DocumentSnapshot snapshot, AppearanceStateRecord state)
+        : this(snapshot, state, isNew: false)
+    {
+    }
+
+    internal AppearanceStateEditorDialog(
+        DocumentSnapshot snapshot,
+        Guid folderId,
+        AppearanceStateKind kind,
+        string suggestedName)
+        : this(
+            snapshot,
+            new AppearanceStateRecord(
+                Guid.Empty,
+                folderId,
+                0,
+                suggestedName,
+                kind,
+                [],
+                []),
+            isNew: true)
+    {
+    }
+
+    private AppearanceStateEditorDialog(
+        DocumentSnapshot snapshot,
+        AppearanceStateRecord state,
+        bool isNew)
     {
         _snapshot = snapshot ?? throw new ArgumentNullException(nameof(snapshot));
         _state = state ?? throw new ArgumentNullException(nameof(state));
+        _isNew = isNew;
+        _name.Text = state.Name;
         _layerValues = state.LayerRules
             .GroupBy(rule => rule.Layer.LayerId)
             .ToDictionary(group => group.Key, group => group.Last().Visibility);
@@ -51,8 +82,10 @@ internal sealed class AppearanceStateEditorDialog : Dialog
         _modePicker = new FilteredPicker(_modeIds.Keys, "Search display modes");
         _modePicker.Text = _modeIds.Keys.FirstOrDefault() ?? string.Empty;
 
-        Title = state.Kind == AppearanceStateKind.LayerState
-            ? $"Layout Foundry — {state.Name}"
+        Title = isNew
+            ? state.Kind == AppearanceStateKind.LayerState
+                ? "Layout Foundry — New Layer State"
+                : "Layout Foundry — New Object State"
             : $"Layout Foundry — {state.Name}";
         MinimumSize = new Size(720, 500);
         Size = new Size(820, 640);
@@ -110,6 +143,7 @@ internal sealed class AppearanceStateEditorDialog : Dialog
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Items =
             {
+                Field("Name", new FoundryFormField(_name)),
                 state.Kind == AppearanceStateKind.LayerState
                     ? CreateLayerEditor()
                     : CreateObjectEditor(),
@@ -126,6 +160,16 @@ internal sealed class AppearanceStateEditorDialog : Dialog
     }
 
     internal bool Changed { get; private set; }
+
+    internal string StateName => _name.Text.Trim();
+
+    protected override void OnShown(EventArgs eventArgs)
+    {
+        base.OnShown(eventArgs);
+        if (!_isNew) return;
+        _name.SelectAll();
+        _name.Focus();
+    }
 
     private Control CreateLayerEditor()
     {
@@ -159,7 +203,7 @@ internal sealed class AppearanceStateEditorDialog : Dialog
     private Control CreateObjectEditor()
     {
         var addObject = new FoundryDialogButton("Add object", FoundryDialogButtonStyle.Secondary, 104);
-        var addLayer = new FoundryDialogButton("Add layer", FoundryDialogButtonStyle.Secondary, 96);
+        var addLayer = new FoundryDialogButton("Add layer", FoundryDialogButtonStyle.Secondary, 104);
         var remove = new FoundryDialogButton("Remove selected", FoundryDialogButtonStyle.Secondary, 126);
         addObject.Click += (_, _) => AddObjectRule();
         addLayer.Click += (_, _) => AddLayerRule();
@@ -177,6 +221,7 @@ internal sealed class AppearanceStateEditorDialog : Dialog
                 {
                     Orientation = Orientation.Horizontal,
                     Spacing = FoundryTheme.Space1,
+                    VerticalContentAlignment = VerticalAlignment.Bottom,
                     Items =
                     {
                         new StackLayoutItem(Field("Exact object", _objectPicker), true),
@@ -187,6 +232,7 @@ internal sealed class AppearanceStateEditorDialog : Dialog
                 {
                     Orientation = Orientation.Horizontal,
                     Spacing = FoundryTheme.Space1,
+                    VerticalContentAlignment = VerticalAlignment.Bottom,
                     Items =
                     {
                         new StackLayoutItem(Field("Objects on layer", _layerPicker), true),
@@ -299,19 +345,39 @@ internal sealed class AppearanceStateEditorDialog : Dialog
 
     private async Task SaveAsync()
     {
+        var name = StateName;
+        if (name.Length == 0)
+        {
+            _status.Text = "Enter a name.";
+            _name.Focus();
+            return;
+        }
+
         _save.Enabled = false;
-        var result = _state.Kind == AppearanceStateKind.LayerState
-            ? await LayoutFoundryUiHost.UpdateAppearanceStateAsync(
-                _state.Id,
-                layerRules: _layerValues.Select(pair =>
-                    new LayerVisibilityRule(
-                        new LayerReference(pair.Key,
-                            _snapshot.LayerSnapshots.GetValueOrDefault(pair.Key)?.FullPath ?? string.Empty),
-                        pair.Value))
-                    .ToArray())
-            : await LayoutFoundryUiHost.UpdateAppearanceStateAsync(
-                _state.Id,
-                objectRules: _objectRules.ToArray());
+        var layerRules = _layerValues.Select(pair =>
+                new LayerVisibilityRule(
+                    new LayerReference(
+                        pair.Key,
+                        _snapshot.LayerSnapshots.GetValueOrDefault(pair.Key)?.FullPath ?? string.Empty),
+                    pair.Value))
+            .ToArray();
+        var objectRules = _objectRules.ToArray();
+        var result = _isNew
+            ? await LayoutFoundryUiHost.CreateAppearanceStateAsync(
+                _state.FolderId,
+                name,
+                _state.Kind,
+                _state.Kind == AppearanceStateKind.LayerState ? layerRules : null,
+                _state.Kind == AppearanceStateKind.ObjectDisplayState ? objectRules : null)
+            : _state.Kind == AppearanceStateKind.LayerState
+                ? await LayoutFoundryUiHost.UpdateAppearanceStateAsync(
+                    _state.Id,
+                    name: name,
+                    layerRules: layerRules)
+                : await LayoutFoundryUiHost.UpdateAppearanceStateAsync(
+                    _state.Id,
+                    name: name,
+                    objectRules: objectRules);
         if (!result.Succeeded)
         {
             _save.Enabled = true;

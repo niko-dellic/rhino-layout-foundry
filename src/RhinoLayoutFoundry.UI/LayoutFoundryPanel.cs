@@ -25,12 +25,6 @@ public sealed partial class LayoutFoundryPanel : Panel
     private readonly TextBox _renameTextBox;
     private readonly FoundryFormField _renameField;
     private readonly FoundryDialogButton _renameButton;
-    private readonly Label _folderDraftDestinationLabel;
-    private readonly TextBox _folderDraftTextBox;
-    private readonly FoundryFormField _folderDraftField;
-    private readonly FoundryDialogButton _folderDraftCreateButton;
-    private readonly FoundryDialogButton _folderDraftCancelButton;
-    private readonly Panel _folderDraftStrip;
     private readonly FoundryToolbarIconButton _manageButton;
     private readonly FoundryToolbarIconButton _createButton;
     private readonly FoundryToolbarIconButton _deleteButton;
@@ -92,6 +86,7 @@ public sealed partial class LayoutFoundryPanel : Panel
     private readonly OverviewThumbnailRequestQueue _thumbnailQueue = new();
     private readonly Dictionary<OverviewThumbnailKey, Bitmap> _thumbnailBitmaps = [];
     private readonly Dictionary<Guid, HierarchyTreeItem> _sheetItems = [];
+    private readonly HashSet<Control> _fullscreenEscapeControls = [];
     private readonly HierarchyExpansionState _hierarchyExpansion = new();
     private IReadOnlyList<HierarchyTreeItem> _renderedTreeItems = [];
     private readonly object _invalidationSyncRoot = new();
@@ -122,10 +117,9 @@ public sealed partial class LayoutFoundryPanel : Panel
     private CellInteractionGuard? _cellInteractionGuard;
     private CellInteractionGuard? _selectionPreservingCircleInteraction;
     private InlineDraft? _inlineDraft;
+    private bool _inlineDraftCommitRequested;
     private Guid? _contextDestinationFolderId;
     private Guid? _contextPrintFolderId;
-    private Guid? _folderDraftId;
-    private Guid? _folderDraftParentId;
     private Form? _fullscreenWindow;
     private PendingDeleteSelection? _pendingDeleteSelection;
     private bool _deleteInProgress;
@@ -193,19 +187,6 @@ public sealed partial class LayoutFoundryPanel : Panel
         _renameButton = new FoundryDialogButton(
             "Rename",
             FoundryDialogButtonStyle.Secondary);
-        _folderDraftDestinationLabel = FoundryTheme.MutedLabel();
-        _folderDraftTextBox = new TextBox { PlaceholderText = "Folder name" };
-        _folderDraftField = new FoundryFormField(_folderDraftTextBox);
-        _folderDraftCreateButton = new FoundryDialogButton(
-            "Create",
-            FoundryDialogButtonStyle.Secondary);
-        _folderDraftCancelButton = new FoundryDialogButton(
-            "Cancel",
-            FoundryDialogButtonStyle.Secondary);
-        _folderDraftStrip = FoundryTheme.Surface(
-            CreateFolderDraftContent(),
-            new Padding(FoundryTheme.Space2));
-        _folderDraftStrip.Visible = false;
         _createButton = new FoundryToolbarIconButton(
             FoundryViewIcons.Add(),
             "Create folder, layout, or appearance state")
@@ -311,7 +292,6 @@ public sealed partial class LayoutFoundryPanel : Panel
                         _toolbarSurface,
                     },
                 },
-                _folderDraftStrip,
                 new StackLayoutItem(_viewHost, expand: true),
                 CreateBottomBar(),
             },
@@ -391,21 +371,6 @@ public sealed partial class LayoutFoundryPanel : Panel
         _canvasViewButton.Click += (_, _) => ShowCanvasView();
         _fullscreenButton.Click += (_, _) => ToggleFullscreen();
         _renameButton.Click += async (_, _) => await RenameSelectedSheetAsync();
-        _folderDraftCreateButton.Click += async (_, _) => await CommitFolderCreationAsync();
-        _folderDraftCancelButton.Click += (_, _) => CancelFolderCreation();
-        _folderDraftTextBox.KeyDown += async (_, eventArgs) =>
-        {
-            if (eventArgs.Key == Keys.Enter)
-            {
-                eventArgs.Handled = true;
-                await CommitFolderCreationAsync();
-            }
-            else if (eventArgs.Key == Keys.Escape)
-            {
-                eventArgs.Handled = true;
-                CancelFolderCreation();
-            }
-        };
 
         _layoutPollTimer = new UITimer { Interval = 0.5 };
         _layoutPollTimer.Elapsed += OnLayoutPoll;
@@ -844,7 +809,7 @@ public sealed partial class LayoutFoundryPanel : Panel
         switch (kind)
         {
             case CreateResourceKind.Folder:
-                BeginFolderCreation(destination);
+                BeginInlineCreation(InlineDraftKind.Folder, destination);
                 break;
             case CreateResourceKind.Layout:
                 OpenCreateLayouts(destination);
@@ -884,47 +849,32 @@ public sealed partial class LayoutFoundryPanel : Panel
             _statusLabel.Text = "The layout root is unavailable.";
             return;
         }
-        var folderName = FolderDestinationName(folderId);
-        var siblingNames = _overview.AppearanceStates
-            .Where(state => state.FolderId == folderId)
-            .Select(state => state.Name);
-        var dialog = new AppearanceStateNameDialog(kind, folderName, siblingNames);
-        dialog.ShowModal(this);
-        if (!dialog.Accepted) return;
-
-        var name = dialog.StateName;
-        Application.Instance.AsyncInvoke(async () =>
+        var snapshot = LayoutFoundryUiHost.CaptureSnapshot();
+        if (snapshot is null)
         {
-            try
-            {
-                await CommitAppearanceStateCreationAsync(folderId, name, kind);
-            }
-            catch (Exception exception)
-            {
-                _statusLabel.Text = $"Could not create the appearance state: {exception.Message}";
-            }
-        });
-    }
-
-    private async Task CommitAppearanceStateCreationAsync(
-        Guid folderId,
-        string name,
-        AppearanceStateKind kind)
-    {
-        _statusLabel.Text = kind == AppearanceStateKind.LayerState
-            ? "Creating layer state…"
-            : "Creating object display state…";
-        var result = await LayoutFoundryUiHost.CreateAppearanceStateAsync(folderId, name, kind);
-        if (!result.Succeeded)
-        {
-            _statusLabel.Text = DiagnosticMessage(result);
+            _statusLabel.Text = "The active Rhino document is unavailable.";
             return;
         }
+
+        var baseName = kind == AppearanceStateKind.LayerState
+            ? "New Layer State"
+            : "New Object Display State";
+        var siblingNames = snapshot.AppearanceStates
+            .Where(state => state.FolderId == folderId)
+            .Select(state => state.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var suggestedName = baseName;
+        for (var suffix = 2; siblingNames.Contains(suggestedName); suffix++)
+            suggestedName = $"{baseName} {suffix}";
+
+        var dialog = new AppearanceStateEditorDialog(snapshot, folderId, kind, suggestedName);
+        dialog.ShowModal(this);
+        if (!dialog.Changed) return;
 
         _overview = LayoutFoundryUiHost.CaptureOverview();
         var created = _overview.AppearanceStates.LastOrDefault(state =>
             state.FolderId == folderId && state.Kind == kind &&
-            string.Equals(state.Name, name, StringComparison.OrdinalIgnoreCase));
+            string.Equals(state.Name, dialog.StateName, StringComparison.OrdinalIgnoreCase));
         if (created is not null)
         {
             var key = new OverviewNodeKey(
@@ -941,8 +891,8 @@ public sealed partial class LayoutFoundryPanel : Panel
         }
 
         _statusLabel.Text = kind == AppearanceStateKind.LayerState
-            ? $"Created layer state '{name}'."
-            : $"Created object display state '{name}'.";
+            ? $"Created layer state '{dialog.StateName}'."
+            : $"Created object display state '{dialog.StateName}'.";
         PopulateTree();
     }
 
@@ -967,20 +917,7 @@ public sealed partial class LayoutFoundryPanel : Panel
         _fullscreenButton.Image = FoundryViewIcons.ExitFullscreen();
         _observerView.SetFullscreenState(true);
         UpdateViewModeButtons(_viewMode);
-        window.KeyDown += (_, eventArgs) =>
-        {
-            if (eventArgs.Key != Keys.Escape)
-                return;
-
-            eventArgs.Handled = true;
-            if (_pendingDeleteSelection is not null)
-            {
-                CancelDeleteConfirmation();
-                return;
-            }
-
-            window.Close();
-        };
+        AttachFullscreenEscapeHandlers(window);
         window.Closing += (_, _) => RestoreFromFullscreen(window);
         window.Show();
     }
@@ -995,12 +932,59 @@ public sealed partial class LayoutFoundryPanel : Panel
         if (!ReferenceEquals(_fullscreenWindow, window))
             return;
 
+        DetachFullscreenEscapeHandlers();
         window.Content = null;
         _fullscreenWindow = null;
         _fullscreenButton.Image = FoundryViewIcons.Fullscreen();
         _observerView.SetFullscreenState(false);
         Content = _panelOverlayHost;
         UpdateViewModeButtons(_viewMode);
+    }
+
+    private void AttachFullscreenEscapeHandlers(Form window)
+    {
+        DetachFullscreenEscapeHandlers();
+        AttachFullscreenEscapeHandler(window);
+        AttachFullscreenEscapeHandler(_panelOverlayHost);
+        AttachFullscreenEscapeHandler(_managementView);
+        AttachFullscreenEscapeHandler(_thumbnailView);
+        AttachFullscreenEscapeHandler(_observerView);
+    }
+
+    private void AttachFullscreenEscapeHandler(Control root)
+    {
+        if (_fullscreenEscapeControls.Add(root))
+            root.KeyDown += OnFullscreenKeyDown;
+
+        if (root is not Container container)
+            return;
+
+        foreach (var child in container.Children)
+        {
+            if (_fullscreenEscapeControls.Add(child))
+                child.KeyDown += OnFullscreenKeyDown;
+        }
+    }
+
+    private void DetachFullscreenEscapeHandlers()
+    {
+        foreach (var control in _fullscreenEscapeControls)
+            control.KeyDown -= OnFullscreenKeyDown;
+        _fullscreenEscapeControls.Clear();
+    }
+
+    private void OnFullscreenKeyDown(object? sender, KeyEventArgs eventArgs)
+    {
+        if (eventArgs.Key != Keys.Escape || _fullscreenWindow is not { } window)
+            return;
+
+        eventArgs.Handled = true;
+        if (_pendingDeleteSelection is not null)
+        {
+            CancelDeleteConfirmation();
+            return;
+        }
+        window.Close();
     }
 
     private void LayoutPanelOverlay()
@@ -1189,47 +1173,6 @@ public sealed partial class LayoutFoundryPanel : Panel
         };
     }
 
-    private Control CreateFolderDraftContent()
-    {
-        if (_responsiveLayout.StackToolbar)
-        {
-            return new StackLayout
-            {
-                Spacing = FoundryTheme.Space1,
-                Items =
-                {
-                    _folderDraftDestinationLabel,
-                    _folderDraftField,
-                    new StackLayout
-                    {
-                        Orientation = Orientation.Horizontal,
-                        Spacing = FoundryTheme.Space1,
-                        Items =
-                        {
-                            new StackLayoutItem(null, expand: true),
-                            _folderDraftCancelButton,
-                            _folderDraftCreateButton,
-                        },
-                    },
-                },
-            };
-        }
-
-        return new StackLayout
-        {
-            Orientation = Orientation.Horizontal,
-            Spacing = FoundryTheme.Space2,
-            VerticalContentAlignment = VerticalAlignment.Center,
-            Items =
-            {
-                _folderDraftDestinationLabel,
-                new StackLayoutItem(_folderDraftField, expand: true),
-                _folderDraftCancelButton,
-                _folderDraftCreateButton,
-            },
-        };
-    }
-
     private OverviewTreeFilter CurrentFilter => new(
         _filterTextBox.Text,
         _filterKindDropDown.SelectedIndex switch
@@ -1312,6 +1255,7 @@ public sealed partial class LayoutFoundryPanel : Panel
         {
             if (_inlineDraft is not null)
             {
+                _inlineDraftCommitRequested = true;
                 _treeGrid.CommitEdit();
                 eventArgs.Handled = true;
                 return;
@@ -1325,6 +1269,7 @@ public sealed partial class LayoutFoundryPanel : Panel
             if (_inlineDraft is { } draft)
             {
                 _inlineDraft = null;
+                _inlineDraftCommitRequested = false;
                 SetInlineEditing(false);
                 _treeGrid.CancelEdit();
                 if (IsRenameDraft(draft.Kind))
@@ -1688,6 +1633,7 @@ public sealed partial class LayoutFoundryPanel : Panel
             item.Node.Key.Id,
             parentFolderId,
             item.Node.Label);
+        _inlineDraftCommitRequested = false;
         item.BeginInlineEdit();
         SetInlineEditing(true);
         _statusLabel.Text = kind switch
@@ -2146,103 +2092,6 @@ public sealed partial class LayoutFoundryPanel : Panel
         }
     }
 
-    private void BeginFolderCreation(Guid? explicitParentFolderId = null)
-    {
-        if (_overview.RootFolderId is not { } rootFolderId)
-        {
-            _statusLabel.Text = "Open a Rhino document before creating folders.";
-            return;
-        }
-
-        var destination = explicitParentFolderId ?? ResolveCreationDestinationFolderId() ?? rootFolderId;
-        if (_overview.Folders.All(folder => folder.Id != destination))
-            destination = rootFolderId;
-
-        _folderDraftId = Guid.NewGuid();
-        _folderDraftParentId = destination;
-        _folderDraftDestinationLabel.Text = $"New folder in {FolderDestinationName(destination)}";
-        _folderDraftTextBox.Text = "New Folder";
-        _folderDraftStrip.Visible = true;
-        _statusLabel.Text = "Name the new folder, then press Return.";
-        Application.Instance.AsyncInvoke(() =>
-        {
-            _folderDraftTextBox.Focus();
-            _folderDraftTextBox.SelectAll();
-        });
-    }
-
-    private async Task CommitFolderCreationAsync()
-    {
-        if (_folderDraftId is not { } folderId ||
-            _folderDraftParentId is not { } parentFolderId)
-            return;
-
-        var name = _folderDraftTextBox.Text.Trim();
-        if (name.Length == 0)
-        {
-            _statusLabel.Text = "A folder name is required.";
-            _folderDraftTextBox.Focus();
-            return;
-        }
-
-        _overview = LayoutFoundryUiHost.CaptureOverview();
-        if (_overview.Folders.All(folder => folder.Id != parentFolderId))
-        {
-            _statusLabel.Text = "The destination folder no longer exists. Cancel and try again.";
-            return;
-        }
-
-        if (_overview.Folders.Any(folder =>
-                folder.ParentId == parentFolderId &&
-                string.Equals(folder.Name, name, StringComparison.OrdinalIgnoreCase)))
-        {
-            _statusLabel.Text = $"A folder named '{name}' already exists there.";
-            _folderDraftTextBox.Focus();
-            _folderDraftTextBox.SelectAll();
-            return;
-        }
-
-        _folderDraftCreateButton.Enabled = false;
-        _folderDraftCancelButton.Enabled = false;
-        _statusLabel.Text = "Creating folder…";
-        var result = await LayoutFoundryUiHost.CreateFolderAsync(folderId, parentFolderId, name);
-        _folderDraftCreateButton.Enabled = true;
-        _folderDraftCancelButton.Enabled = true;
-        if (!result.Succeeded)
-        {
-            _statusLabel.Text = DiagnosticMessage(result);
-            _folderDraftTextBox.Focus();
-            return;
-        }
-
-        CloseFolderDraft();
-        _overview = LayoutFoundryUiHost.CaptureOverview();
-        var key = new OverviewNodeKey(OverviewNodeKind.Folder, folderId);
-        _selection.Replace([key], key);
-        LayoutFoundryUiHost.Selection.Replace(
-            _overview.DocumentRuntimeSerialNumber,
-            [key],
-            key,
-            this);
-        _statusLabel.Text = $"Created folder '{name}'.";
-        PopulateTree();
-    }
-
-    private void CancelFolderCreation()
-    {
-        if (_folderDraftId is null) return;
-        CloseFolderDraft();
-        _statusLabel.Text = string.Empty;
-    }
-
-    private void CloseFolderDraft()
-    {
-        _folderDraftId = null;
-        _folderDraftParentId = null;
-        _folderDraftTextBox.Text = string.Empty;
-        _folderDraftStrip.Visible = false;
-    }
-
     private string FolderDestinationName(Guid folderId)
     {
         if (_overview.RootFolderId == folderId)
@@ -2265,6 +2114,7 @@ public sealed partial class LayoutFoundryPanel : Panel
         if (_treeGrid.IsEditing)
         {
             _inlineDraft = null;
+            _inlineDraftCommitRequested = false;
             SetInlineEditing(false);
             _treeGrid.CancelEdit();
         }
@@ -2292,6 +2142,7 @@ public sealed partial class LayoutFoundryPanel : Panel
                 InlineDraftKind.ObjectDisplayState => "New Object Display State",
                 _ => string.Empty,
             });
+        _inlineDraftCommitRequested = false;
         SetInlineEditing(true);
         _statusLabel.Text = kind switch
         {
@@ -2597,10 +2448,22 @@ public sealed partial class LayoutFoundryPanel : Panel
 
     private async Task OnTreeCellEditedAsync(GridViewCellEventArgs eventArgs)
     {
-        if (_inlineDraft is not null)
+        if (_inlineDraft is not { } draft)
         {
-            await CommitInlineDraftAsync(eventArgs);
+            return;
         }
+
+        if (!IsRenameDraft(draft.Kind) && !_inlineDraftCommitRequested)
+        {
+            _inlineDraft = null;
+            SetInlineEditing(false);
+            PopulateTree();
+            _statusLabel.Text = "Creation cancelled.";
+            return;
+        }
+
+        _inlineDraftCommitRequested = false;
+        await CommitInlineDraftAsync(eventArgs);
     }
 
     private async Task CommitInlineDraftAsync(GridViewCellEventArgs eventArgs)
@@ -3428,7 +3291,6 @@ public sealed partial class LayoutFoundryPanel : Panel
                 _detailsColumn.Visible = next.ShowSecondaryColumn;
             }
             _toolbarSurface.Content = CreateToolbarContent();
-            _folderDraftStrip.Content = CreateFolderDraftContent();
             if (dimensionsChanged && _overview.DocumentRuntimeSerialNumber is { } serial)
             {
                 InvalidateThumbnails(serial, null);
@@ -3723,8 +3585,8 @@ public sealed partial class LayoutFoundryPanel : Panel
                     OverviewNodeKind.Folder => FoundryHierarchyIcons.Folder,
                     OverviewNodeKind.Sheet => FoundryHierarchyIcons.Layout,
                     OverviewNodeKind.Detail => FoundryHierarchyIcons.Detail,
-                    OverviewNodeKind.LayerState => FoundryHierarchyIcons.Detail,
-                    OverviewNodeKind.ObjectDisplayState => FoundryHierarchyIcons.Detail,
+                    OverviewNodeKind.LayerState => FoundryHierarchyIcons.LayerState,
+                    OverviewNodeKind.ObjectDisplayState => FoundryHierarchyIcons.ObjectDisplayState,
                     _ => null,
                 };
             _displayText = IsInlineDraft

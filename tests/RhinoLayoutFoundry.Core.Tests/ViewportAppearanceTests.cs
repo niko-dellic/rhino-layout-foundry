@@ -129,6 +129,75 @@ public sealed class ViewportAppearanceTests
     }
 
     [Fact]
+    public void NewLayerStateStagesItsNameAndRulesInOneChange()
+    {
+        var layer = new LayerSnapshot(ChildLayerId, null, "Walls", true);
+        var rule = new LayerVisibilityRule(
+            new LayerReference(layer.Id, layer.FullPath),
+            LayerVisibilityOverride.Hidden);
+        var snapshot = TestSnapshots.Create() with
+        {
+            LayerSettings = new Dictionary<Guid, LayerSnapshot> { [layer.Id] = layer },
+        };
+
+        var plan = new CreateAppearanceStatePlanner().Plan(
+            new CreateAppearanceStateRequest(
+                snapshot.DocumentRuntimeSerialNumber,
+                snapshot.Revision,
+                TestSnapshots.RootFolderId,
+                "Presentation layers",
+                AppearanceStateKind.LayerState,
+                LayerRules: [rule]),
+            snapshot);
+
+        Assert.True(plan.CanApply);
+        var change = Assert.IsType<SetAppearanceStateResourceChange>(Assert.Single(plan.Changes));
+        Assert.Equal("Presentation layers", change.NewState!.Name);
+        Assert.Equal(rule, Assert.Single(change.NewState.LayerRules));
+        Assert.Empty(change.NewState.ObjectDisplayRules);
+    }
+
+    [Fact]
+    public void NewObjectStateStagesItsNameAndRulesInOneChange()
+    {
+        var objectSnapshot = new ModelObjectSnapshot(
+            TestSnapshots.ObjectId,
+            "Wall",
+            ChildLayerId,
+            "Walls",
+            false);
+        var rule = new ObjectDisplayRule(
+            new ObjectDisplaySelector(
+                ObjectDisplaySelectorKind.ExactObject,
+                ObjectId: objectSnapshot.Id),
+            TestSnapshots.DisplayModeOneId,
+            "Wireframe");
+        var snapshot = TestSnapshots.Create() with
+        {
+            ModelObjectSettings = new Dictionary<Guid, ModelObjectSnapshot>
+            {
+                [objectSnapshot.Id] = objectSnapshot,
+            },
+        };
+
+        var plan = new CreateAppearanceStatePlanner().Plan(
+            new CreateAppearanceStateRequest(
+                snapshot.DocumentRuntimeSerialNumber,
+                snapshot.Revision,
+                TestSnapshots.RootFolderId,
+                "Hero objects",
+                AppearanceStateKind.ObjectDisplayState,
+                ObjectDisplayRules: [rule]),
+            snapshot);
+
+        Assert.True(plan.CanApply);
+        var change = Assert.IsType<SetAppearanceStateResourceChange>(Assert.Single(plan.Changes));
+        Assert.Equal("Hero objects", change.NewState!.Name);
+        Assert.Equal(rule, Assert.Single(change.NewState.ObjectDisplayRules));
+        Assert.Empty(change.NewState.LayerRules);
+    }
+
+    [Fact]
     public void LiveCapabilityLinkFeedsTargetBeforeItsLocalOverrides()
     {
         var source = new HierarchyScope(HierarchyScopeKind.Sheet, TestSnapshots.SheetOneId);

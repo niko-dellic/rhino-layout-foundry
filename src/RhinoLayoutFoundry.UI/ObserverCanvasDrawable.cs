@@ -49,7 +49,6 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
     private ObserverCamera _camera = ObserverCamera.Default;
     private Color _gridColor = FoundryTheme.CanvasGridColor;
     private double _gridOpacity = FoundryTheme.DefaultCanvasGridOpacity;
-    private Color _previewBackgroundColor = FoundryTheme.CanvasPreviewBackground;
     private HashSet<OverviewNodeKey> _selection = [];
     private OverviewNodeKey? _selectionAnchor;
     private DragMode _dragMode;
@@ -172,19 +171,12 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
     internal ObserverCanvasPresentation Presentation => _presentation;
     internal Color GridColor => _gridColor;
     internal double GridOpacity => _gridOpacity;
-    internal Color PreviewBackgroundColor => _previewBackgroundColor;
     internal bool ExitWorkspaceOnEscape { get; set; }
 
     internal void SetGridAppearance(Color color, double opacity)
     {
         _gridColor = Color.FromArgb(color.Rb, color.Gb, color.Bb, 255);
         _gridOpacity = Math.Clamp(opacity, 0, 1);
-        Invalidate();
-    }
-
-    internal void SetPreviewBackground(Color color)
-    {
-        _previewBackgroundColor = Color.FromArgb(color.Rb, color.Gb, color.Bb, 255);
         Invalidate();
     }
 
@@ -590,7 +582,7 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
 
         graphics.FillRectangle(Color.FromArgb(0, 0, 0, emphasized ? 45 : 12),
             bounds.X + 4, bounds.Y + 5, bounds.Width, bounds.Height);
-        graphics.FillRectangle(_previewBackgroundColor, bounds);
+        graphics.FillRectangle(FoundryTheme.CanvasPreviewBackground, bounds);
         if (_previews.TryGetValue(card.Sheet.PageViewId, out var preview) &&
             preview.Key.ContentVersion == card.Sheet.PreviewContentVersion)
         {
@@ -682,8 +674,8 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
             bounds.Height);
         graphics.FillRectangle(
             emphasized
-                ? _previewBackgroundColor
-                : FoundryTheme.WithAlpha(_previewBackgroundColor, 225),
+                ? FoundryTheme.CanvasPreviewBackground
+                : FoundryTheme.WithAlpha(FoundryTheme.CanvasPreviewBackground, 225),
             bounds);
         var border = selected || hasSelectedDetail
             ? FoundryTheme.SelectionAccent
@@ -1162,8 +1154,10 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
                 FoundryHierarchyIcons.DrawDetail(graphics, iconColor, iconBounds);
                 break;
             case OverviewNodeKind.LayerState:
+                FoundryHierarchyIcons.DrawLayerState(graphics, iconColor, iconBounds);
+                break;
             case OverviewNodeKind.ObjectDisplayState:
-                FoundryHierarchyIcons.DrawDetail(graphics, iconColor, iconBounds);
+                FoundryHierarchyIcons.DrawObjectDisplayState(graphics, iconColor, iconBounds);
                 break;
         }
     }

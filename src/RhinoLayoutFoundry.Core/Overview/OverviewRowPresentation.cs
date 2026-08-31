@@ -48,8 +48,8 @@ public sealed record OverviewRowPresentation(
             OverviewNodeKind.Folder => "📁",
             OverviewNodeKind.Sheet => "▣",
             OverviewNodeKind.Detail => "⌗",
-            OverviewNodeKind.LayerState => "≡",
-            OverviewNodeKind.ObjectDisplayState => "◫",
+            OverviewNodeKind.LayerState => "≋",
+            OverviewNodeKind.ObjectDisplayState => "△",
             _ => throw new ArgumentOutOfRangeException(
                 nameof(node),
                 node.Key.Kind,

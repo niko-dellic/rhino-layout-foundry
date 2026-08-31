@@ -10,6 +10,8 @@ internal static class FoundryHierarchyIcons
     private static readonly Icon FolderIcon = NewIcon(DrawFolder);
     private static readonly Icon LayoutIcon = NewIcon(DrawLayout);
     private static readonly Icon DetailIcon = NewIcon(DrawDetail);
+    private static readonly Icon LayerStateIcon = NewIcon(DrawLayerState);
+    private static readonly Icon ObjectDisplayStateIcon = NewIcon(DrawObjectDisplayState);
 
     internal static Image Rhino => RhinoIcon;
 
@@ -18,6 +20,10 @@ internal static class FoundryHierarchyIcons
     internal static Image Layout => LayoutIcon;
 
     internal static Image Detail => DetailIcon;
+
+    internal static Image LayerState => LayerStateIcon;
+
+    internal static Image ObjectDisplayState => ObjectDisplayStateIcon;
 
     internal static void DrawRhino(Graphics graphics, Color color, RectangleF bounds)
     {
@@ -76,6 +82,28 @@ internal static class FoundryHierarchyIcons
         DrawLine(graphics, pen, bounds, 10.75f, 8, 14.25f, 8);
     }
 
+    internal static void DrawLayerState(Graphics graphics, Color color, RectangleF bounds)
+    {
+        using var pen = IconPen(color, bounds);
+        DrawLine(graphics, pen, bounds, 2, 4, 8, 1.75f);
+        DrawLine(graphics, pen, bounds, 8, 1.75f, 14, 4);
+        DrawLine(graphics, pen, bounds, 14, 4, 8, 6.25f);
+        DrawLine(graphics, pen, bounds, 8, 6.25f, 2, 4);
+        DrawLine(graphics, pen, bounds, 2, 7.75f, 8, 10);
+        DrawLine(graphics, pen, bounds, 8, 10, 14, 7.75f);
+        DrawLine(graphics, pen, bounds, 2, 11.5f, 8, 13.75f);
+        DrawLine(graphics, pen, bounds, 8, 13.75f, 14, 11.5f);
+    }
+
+    internal static void DrawObjectDisplayState(Graphics graphics, Color color, RectangleF bounds)
+    {
+        using var pen = IconPen(color, bounds);
+        DrawEllipse(graphics, pen, bounds, 5, 1.75f, 6, 2.75f);
+        DrawLine(graphics, pen, bounds, 5, 3.1f, 2.5f, 12.75f);
+        DrawLine(graphics, pen, bounds, 11, 3.1f, 13.5f, 12.75f);
+        DrawEllipse(graphics, pen, bounds, 2.5f, 11.25f, 11, 3);
+    }
+
     private static Icon NewIcon(Action<Graphics, Color, RectangleF> draw)
     {
         var frames = new IconFrame[IconScales.Length];
@@ -123,6 +151,20 @@ internal static class FoundryHierarchyIcons
         float y,
         float width,
         float height) => graphics.DrawRectangle(
+            pen,
+            ScaleX(bounds, x),
+            ScaleY(bounds, y),
+            bounds.Width * width / IconSize,
+            bounds.Height * height / IconSize);
+
+    private static void DrawEllipse(
+        Graphics graphics,
+        Pen pen,
+        RectangleF bounds,
+        float x,
+        float y,
+        float width,
+        float height) => graphics.DrawEllipse(
             pen,
             ScaleX(bounds, x),
             ScaleY(bounds, y),

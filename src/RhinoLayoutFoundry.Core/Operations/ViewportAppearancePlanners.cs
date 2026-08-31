@@ -204,7 +204,9 @@ public sealed record CreateAppearanceStateRequest(
     long SourceRevision,
     Guid FolderId,
     string Name,
-    AppearanceStateKind Kind);
+    AppearanceStateKind Kind,
+    IReadOnlyList<LayerVisibilityRule>? LayerRules = null,
+    IReadOnlyList<ObjectDisplayRule>? ObjectDisplayRules = null);
 
 public sealed class CreateAppearanceStatePlanner : IOperationPlanner<CreateAppearanceStateRequest>
 {
@@ -223,10 +225,42 @@ public sealed class CreateAppearanceStatePlanner : IOperationPlanner<CreateAppea
                 string.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase)))
             diagnostics.Add(SetHierarchyViewportRulesPlanner.Error(
                 "appearance_state.name_duplicate", "A state with that name already exists in this folder."));
+        var layerRules = request.LayerRules?.ToArray() ?? [];
+        var objectRules = request.ObjectDisplayRules?.ToArray() ?? [];
+        if (request.Kind == AppearanceStateKind.LayerState && objectRules.Length > 0 ||
+            request.Kind == AppearanceStateKind.ObjectDisplayState && layerRules.Length > 0)
+            diagnostics.Add(SetHierarchyViewportRulesPlanner.Error(
+                "appearance_state.rule_kind", "The rules do not match this appearance-state type."));
+        foreach (var rule in layerRules)
+            if (rule.Layer.LayerId == Guid.Empty || !snapshot.LayerSnapshots.ContainsKey(rule.Layer.LayerId))
+                diagnostics.Add(SetHierarchyViewportRulesPlanner.Error(
+                    "appearance_state.layer_missing", $"Layer '{rule.Layer.FullPath}' is unavailable."));
+        foreach (var rule in objectRules)
+        {
+            if (!snapshot.DisplayModeIds.Contains(rule.DisplayModeId))
+                diagnostics.Add(SetHierarchyViewportRulesPlanner.Error(
+                    "appearance_state.display_mode_missing",
+                    $"Display mode '{rule.DisplayModeName}' is unavailable."));
+            if (rule.Selector.Kind == ObjectDisplaySelectorKind.ExactObject &&
+                (rule.Selector.ObjectId is not { } objectId || !snapshot.ModelObjects.ContainsKey(objectId)))
+                diagnostics.Add(SetHierarchyViewportRulesPlanner.Error(
+                    "appearance_state.object_missing", "A selected model object is unavailable."));
+            if (rule.Selector.Kind == ObjectDisplaySelectorKind.Layer &&
+                (rule.Selector.LayerId is not { } layerId || !snapshot.LayerSnapshots.ContainsKey(layerId)))
+                diagnostics.Add(SetHierarchyViewportRulesPlanner.Error(
+                    "appearance_state.selector_layer_missing", "A selected object layer is unavailable."));
+        }
         var id = Guid.NewGuid();
         var order = snapshot.AppearanceStates.Where(item => item.FolderId == request.FolderId)
             .Select(item => item.Order).DefaultIfEmpty(-1).Max() + 1;
-        var state = new AppearanceStateRecord(id, request.FolderId, order, name, request.Kind, [], []);
+        var state = new AppearanceStateRecord(
+            id,
+            request.FolderId,
+            order,
+            name,
+            request.Kind,
+            layerRules,
+            objectRules);
         return new OperationPlan(snapshot.DocumentRuntimeSerialNumber, snapshot.Revision,
             $"Create {name}",
             diagnostics.Any(item => item.Severity == DiagnosticSeverity.Error)

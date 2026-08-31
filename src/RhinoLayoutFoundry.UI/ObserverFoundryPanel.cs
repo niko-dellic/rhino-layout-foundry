@@ -21,9 +21,7 @@ public sealed class ObserverFoundryPanel : Panel
     private readonly FoundryToolbarIconButton _compactPackingButton;
     private readonly FoundryToolbarIconButton _dependencyLinesButton;
     private readonly FoundryToolbarIconButton _gridAppearanceButton;
-    private readonly FoundryToolbarIconButton _previewBackgroundButton;
     private readonly CanvasGridTray _gridAppearanceTray;
-    private readonly CanvasPreviewBackgroundTray _previewBackgroundTray;
     private readonly PixelLayout _canvasOverlay;
     private readonly Control _canvasToolbar;
     private readonly UITimer _overlayLayoutTimer;
@@ -72,9 +70,6 @@ public sealed class ObserverFoundryPanel : Panel
         _gridAppearanceButton = ToolbarToggleButton(
             FoundryViewIcons.GridAppearance(),
             "Adjust the canvas grid color and opacity");
-        _previewBackgroundButton = ToolbarToggleButton(
-            FoundryViewIcons.PreviewBackground(),
-            "Choose the canvas sheet preview background");
         var zoomOutButton = ToolbarButton(FoundryViewIcons.ZoomOut(), "Zoom out");
         var zoomInButton = ToolbarButton(FoundryViewIcons.ZoomIn(), "Zoom in");
         _navigatorButton = ToolbarToggleButton(FoundryViewIcons.Navigator(), "Show or hide the Navigator");
@@ -95,7 +90,6 @@ public sealed class ObserverFoundryPanel : Panel
         focusButton.Click += (_, _) => _canvas.FocusSelection();
         tidyButton.Click += async (_, _) => await TidyAsync();
         _gridAppearanceButton.Click += (_, _) => ApplyGridAppearanceTrayVisibility();
-        _previewBackgroundButton.Click += (_, _) => ApplyPreviewBackgroundTrayVisibility();
         zoomOutButton.Click += (_, _) => _canvas.Zoom(1 / 1.2);
         zoomInButton.Click += (_, _) => _canvas.Zoom(1.2);
         _navigatorButton.Click += (_, _) => ApplySidebarVisibility();
@@ -124,7 +118,6 @@ public sealed class ObserverFoundryPanel : Panel
                 _dependencyLinesButton,
                 ToolbarSeparator(),
                 _gridAppearanceButton,
-                _previewBackgroundButton,
                 ToolbarSeparator(),
                 zoomOutButton,
                 zoomInButton,
@@ -145,12 +138,6 @@ public sealed class ObserverFoundryPanel : Panel
         {
             Visible = false,
         };
-        _previewBackgroundTray = new CanvasPreviewBackgroundTray(
-            _canvas.PreviewBackgroundColor,
-            ApplyPreviewBackground)
-        {
-            Visible = false,
-        };
         _canvas.MouseDown += (_, _) => DismissAppearanceTrays();
         _overlayLayoutTimer = new UITimer { Interval = 0.04 };
         _overlayLayoutTimer.Elapsed += (_, _) =>
@@ -161,7 +148,6 @@ public sealed class ObserverFoundryPanel : Panel
         _canvasOverlay.Add(_canvas, 0, 0);
         _canvasOverlay.Add(_canvasToolbar, 0, 0);
         _canvasOverlay.Add(_gridAppearanceTray, 0, 36);
-        _canvasOverlay.Add(_previewBackgroundTray, 0, 36);
         _inspector = new SelectionInspectorPanel { Visible = false };
         _canvasOverlay.Add(_inspector, 0, 38);
         _inspector.OperationCompleted += (_, eventArgs) =>
@@ -339,42 +325,15 @@ public sealed class ObserverFoundryPanel : Panel
 
     private void ApplyGridAppearanceTrayVisibility()
     {
-        if (_gridAppearanceButton.Checked)
-        {
-            _previewBackgroundButton.Checked = false;
-            _previewBackgroundTray.Visible = false;
-        }
         _gridAppearanceTray.Visible = _gridAppearanceButton.Checked;
         UpdateCanvasOverlayLayout();
     }
 
-    private void ApplyPreviewBackgroundTrayVisibility()
-    {
-        if (_previewBackgroundButton.Checked)
-        {
-            _gridAppearanceButton.Checked = false;
-            _gridAppearanceTray.Visible = false;
-        }
-        _previewBackgroundTray.Visible = _previewBackgroundButton.Checked;
-        UpdateCanvasOverlayLayout();
-    }
-
-    private void ApplyPreviewBackground(Color color)
-    {
-        _canvas.SetPreviewBackground(color);
-        var backgroundArgb = PreviewBackgroundArgb(color);
-        _thumbnailQueue.RetainPending(key => key.BackgroundArgb == backgroundArgb);
-        _canvas.InvalidatePreviews();
-        QueueVisiblePreviews();
-    }
-
     private void DismissAppearanceTrays()
     {
-        if (!_gridAppearanceTray.Visible && !_previewBackgroundTray.Visible) return;
+        if (!_gridAppearanceTray.Visible) return;
         _gridAppearanceButton.Checked = false;
-        _previewBackgroundButton.Checked = false;
         _gridAppearanceTray.Visible = false;
-        _previewBackgroundTray.Visible = false;
         UpdateCanvasOverlayLayout();
     }
 
@@ -399,11 +358,6 @@ public sealed class ObserverFoundryPanel : Panel
             0,
             Math.Max(0, clientSize.Width - _gridAppearanceTray.Width));
         _canvasOverlay.Move(_gridAppearanceTray, trayX, 36);
-        var backgroundTrayX = Math.Clamp(
-            _previewBackgroundButton.Location.X,
-            0,
-            Math.Max(0, clientSize.Width - _previewBackgroundTray.Width));
-        _canvasOverlay.Move(_previewBackgroundTray, backgroundTrayX, 36);
         TryApplyPendingInitialFit(clientSize);
         QueueNamedViewPreviews();
     }
@@ -693,7 +647,7 @@ public sealed class ObserverFoundryPanel : Panel
         var contentVersions = _snapshot.Sheets.ToDictionary(
             sheet => sheet.PageViewId,
             sheet => sheet.PreviewContentVersion);
-        var backgroundArgb = PreviewBackgroundArgb(_canvas.PreviewBackgroundColor);
+        var backgroundArgb = PreviewBackgroundArgb(FoundryTheme.CanvasPreviewBackground);
         _thumbnailQueue.RetainPending(key =>
             key.DocumentRuntimeSerialNumber == _snapshot.DocumentRuntimeSerialNumber &&
             retained.Contains(key.SheetPageViewId) &&
@@ -791,7 +745,7 @@ public sealed class ObserverFoundryPanel : Panel
                     sheet is not null &&
                     sheet.PreviewContentVersion == request.Key.ContentVersion &&
                     _snapshot.DocumentRuntimeSerialNumber == request.Key.DocumentRuntimeSerialNumber &&
-                    result.Key.BackgroundArgb == PreviewBackgroundArgb(_canvas.PreviewBackgroundColor))
+                    result.Key.BackgroundArgb == PreviewBackgroundArgb(FoundryTheme.CanvasPreviewBackground))
                 {
                     _thumbnailCache.Store(result.Key, result.PngBytes!);
                     var retainDecoded = _canvas.VisibleSheets(includeOverscan: true)
@@ -1364,7 +1318,7 @@ public sealed class ObserverFoundryPanel : Panel
                             ? OverviewNodeKind.LayerState
                             : OverviewNodeKind.ObjectDisplayState,
                         state.Id),
-                    $"{new string(' ', (depth + 1) * 3)}{(state.Kind == AppearanceStateKind.LayerState ? "≡" : "◫")}  {state.Name}"));
+                    $"{new string(' ', (depth + 1) * 3)}{(state.Kind == AppearanceStateKind.LayerState ? "≋" : "△")}  {state.Name}"));
             foreach (var sheet in snapshot.Sheets.Where(sheet => sheet.FolderId == folder.Id)
                          .OrderBy(sheet => sheet.Order)
                          .ThenBy(sheet => sheet.Name, StringComparer.OrdinalIgnoreCase))

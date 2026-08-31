@@ -867,6 +867,8 @@ public static class LayoutFoundryUiHost
         Guid folderId,
         string name,
         AppearanceStateKind kind,
+        IReadOnlyList<LayerVisibilityRule>? layerRules = null,
+        IReadOnlyList<ObjectDisplayRule>? objectRules = null,
         CancellationToken cancellationToken = default)
     {
         if (_snapshotProvider is null || _mutationService is null)
@@ -875,7 +877,13 @@ public static class LayoutFoundryUiHost
         {
             var snapshot = _snapshotProvider.Capture();
             var plan = new CreateAppearanceStatePlanner().Plan(new CreateAppearanceStateRequest(
-                snapshot.DocumentRuntimeSerialNumber, snapshot.Revision, folderId, name, kind), snapshot);
+                snapshot.DocumentRuntimeSerialNumber,
+                snapshot.Revision,
+                folderId,
+                name,
+                kind,
+                layerRules,
+                objectRules), snapshot);
             var result = plan.CanApply
                 ? await _mutationService.ApplyAsync(plan, cancellationToken)
                 : new OperationResult(false, plan.Diagnostics);
