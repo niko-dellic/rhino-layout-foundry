@@ -49,6 +49,7 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
     private ObserverCamera _camera = ObserverCamera.Default;
     private Color _gridColor = FoundryTheme.CanvasGridColor;
     private double _gridOpacity = FoundryTheme.DefaultCanvasGridOpacity;
+    private Color _previewBackgroundColor = FoundryTheme.CanvasPreviewBackground;
     private HashSet<OverviewNodeKey> _selection = [];
     private OverviewNodeKey? _selectionAnchor;
     private DragMode _dragMode;
@@ -170,12 +171,19 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
     internal ObserverCanvasPresentation Presentation => _presentation;
     internal Color GridColor => _gridColor;
     internal double GridOpacity => _gridOpacity;
+    internal Color PreviewBackgroundColor => _previewBackgroundColor;
     internal bool ExitWorkspaceOnEscape { get; set; }
 
     internal void SetGridAppearance(Color color, double opacity)
     {
         _gridColor = Color.FromArgb(color.Rb, color.Gb, color.Bb, 255);
         _gridOpacity = Math.Clamp(opacity, 0, 1);
+        Invalidate();
+    }
+
+    internal void SetPreviewBackground(Color color)
+    {
+        _previewBackgroundColor = Color.FromArgb(color.Rb, color.Gb, color.Bb, 255);
         Invalidate();
     }
 
@@ -572,7 +580,7 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
 
         graphics.FillRectangle(Color.FromArgb(0, 0, 0, emphasized ? 45 : 12),
             bounds.X + 4, bounds.Y + 5, bounds.Width, bounds.Height);
-        graphics.FillRectangle(Colors.White, bounds);
+        graphics.FillRectangle(_previewBackgroundColor, bounds);
         if (_previews.TryGetValue(card.Sheet.PageViewId, out var preview) &&
             preview.Key.ContentVersion == card.Sheet.PreviewContentVersion)
         {
@@ -597,13 +605,27 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
         if (bounds.Width >= 70 && bounds.Height >= 50)
             DrawDetailOverlays(graphics, card, bounds, selected);
 
-        var useInternalLabel = ObserverPlacementPlanner.SheetGap * _camera.Zoom < 26;
-        DrawSheetNameBadge(
-            graphics,
-            bounds,
-            card.Sheet.Name,
-            emphasized,
-            internalLabel: useInternalLabel);
+        var useInternalLabel = ObserverPlacementPlanner.SheetGap * _camera.Zoom < 18;
+        if (useInternalLabel)
+        {
+            DrawSheetNameScrim(graphics, bounds, card.Sheet.Name, emphasized);
+        }
+        else
+        {
+            var labelColor = emphasized
+                ? FoundryTheme.PrimaryText
+                : FoundryTheme.WithAlpha(FoundryTheme.PrimaryText, 64);
+            FoundryHierarchyIcons.DrawLayout(
+                graphics,
+                labelColor,
+                new RectangleF(bounds.Left, bounds.Bottom + 4, 14, 14));
+            graphics.DrawText(
+                _sheetFont,
+                labelColor,
+                bounds.Left + 20,
+                bounds.Bottom + 5,
+                FitText(graphics, _sheetFont, card.Sheet.Name, Math.Max(8, bounds.Width - 20)));
+        }
         if (selected && _dragMode == DragMode.Sheets && _dragWorldDelta != new ObserverPoint())
         {
             graphics.DrawRectangle(
@@ -649,7 +671,9 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
             bounds.Width,
             bounds.Height);
         graphics.FillRectangle(
-            emphasized ? Color.FromArgb(245, 245, 245, 255) : Color.FromArgb(226, 226, 226, 255),
+            emphasized
+                ? _previewBackgroundColor
+                : FoundryTheme.WithAlpha(_previewBackgroundColor, 225),
             bounds);
         var border = selected || hasSelectedDetail
             ? FoundryTheme.SelectionAccent
@@ -657,7 +681,7 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
                 ? FoundryTheme.CanvasBorder
                 : FoundryTheme.WithAlpha(FoundryTheme.CanvasBorder, 90);
         graphics.DrawRectangle(new Pen(border, selected ? 3 : hasSelectedDetail ? 2 : 1), bounds);
-        DrawSheetNameBadge(graphics, bounds, card.Sheet.Name, emphasized, internalLabel: true);
+        DrawSheetNameScrim(graphics, bounds, card.Sheet.Name, emphasized);
 
         var selectedDetailCount = card.Sheet.Details.Count(detail =>
             _selection.Contains(new OverviewNodeKey(OverviewNodeKind.Detail, detail.DetailViewportId)));
@@ -665,44 +689,33 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
             DrawSelectionBadge(graphics, bounds.Right - 8, bounds.Top + 8, selectedDetailCount);
     }
 
-    private void DrawSheetNameBadge(
+    private void DrawSheetNameScrim(
         Graphics graphics,
         RectangleF bounds,
         string name,
-        bool emphasized,
-        bool internalLabel)
+        bool emphasized)
     {
         if (bounds.Width < 16 || bounds.Height < 12) return;
-        var horizontalInset = internalLabel ? 5f : 0f;
-        var maximumWidth = Math.Max(8, bounds.Width - horizontalInset * 2);
-        var fitted = FitText(
-            graphics,
+        var maximumWidth = Math.Max(8, bounds.Width - 10);
+        var fitted = FitText(graphics, _sheetFont, name, maximumWidth - 10);
+        var measured = graphics.MeasureString(_sheetFont, fitted);
+        var scrimWidth = Math.Min(maximumWidth, Math.Max(30, measured.Width + 10));
+        var scrimHeight = Math.Min(22, bounds.Height);
+        var scrim = new RectangleF(
+            bounds.Left + 5,
+            bounds.Bottom - scrimHeight - 5,
+            scrimWidth,
+            scrimHeight);
+        if (scrim.Top < bounds.Top) scrim.Y = bounds.Top;
+        graphics.FillRectangle(
+            FoundryTheme.WithAlpha(FoundryTheme.CanvasOverlayBackground, emphasized ? 235 : 205),
+            scrim);
+        graphics.DrawText(
             _sheetFont,
-            name,
-            maximumWidth - FoundryBadgeRenderer.HorizontalPadding * 2);
-        var badgeHeight = internalLabel
-            ? Math.Min(FoundryBadgeRenderer.StandardHeight, Math.Max(12, bounds.Height - 10))
-            : FoundryBadgeRenderer.StandardHeight;
-        var badgeWidth = FoundryBadgeRenderer.MeasureWidth(
-            graphics,
-            _sheetFont,
-            fitted,
-            minimumWidth: 30,
-            maximumWidth: maximumWidth);
-        var badge = new RectangleF(
-            bounds.Left + horizontalInset,
-            internalLabel ? bounds.Bottom - badgeHeight - 5 : bounds.Bottom + 3,
-            badgeWidth,
-            badgeHeight);
-        if (internalLabel && badge.Top < bounds.Top) badge.Y = bounds.Top;
-        FoundryBadgeRenderer.Draw(
-            graphics,
-            badge,
-            fitted,
-            _sheetFont,
-            FoundryTheme.WithAlpha(FoundryTheme.CanvasOverlayBackground, emphasized ? 245 : 215),
-            FoundryTheme.WithAlpha(FoundryTheme.SecondaryText, emphasized ? 150 : 70),
-            emphasized ? FoundryTheme.PrimaryText : FoundryTheme.SecondaryText);
+            emphasized ? FoundryTheme.PrimaryText : FoundryTheme.SecondaryText,
+            scrim.Left + 5,
+            scrim.Top + Math.Max(1, (scrim.Height - measured.Height) / 2),
+            fitted);
     }
 
     private void DrawFolderSummary(

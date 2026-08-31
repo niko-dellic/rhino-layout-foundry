@@ -111,6 +111,14 @@ internal sealed class RhinoDocumentSnapshotProvider : IDocumentSnapshotProvider
             .Where(layer => !layer.IsDeleted && !layer.IsReference)
             .OrderBy(layer => layer.FullPath, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(layer => layer.Id, layer => layer.FullPath);
+        var pagesById = pageViews.ToDictionary(page => page.MainViewport.Id);
+        var templates = state.Templates
+            .Select(template => RefreshDocumentBackedTemplate(
+                document,
+                template,
+                pagesById,
+                state.Sheets))
+            .ToArray();
 
         return new DocumentSnapshot(
             document.RuntimeSerialNumber,
@@ -120,7 +128,7 @@ internal sealed class RhinoDocumentSnapshotProvider : IDocumentSnapshotProvider
             sheets,
             objectIds,
             displayModeIds,
-            state.Templates,
+            templates,
             state.Metadata,
             document.NamedViews.Select(view => view.Name).ToHashSet(StringComparer.OrdinalIgnoreCase),
             document.InstanceDefinitions.Select(definition => definition.Id).ToHashSet(),
@@ -129,6 +137,73 @@ internal sealed class RhinoDocumentSnapshotProvider : IDocumentSnapshotProvider
             state.Canvas,
             state.ProjectInfo,
             layerNames);
+    }
+
+    private static SheetTemplateRecipe RefreshDocumentBackedTemplate(
+        RhinoDoc document,
+        SheetTemplateRecipe template,
+        IReadOnlyDictionary<Guid, RhinoPageView> pagesById,
+        IReadOnlyDictionary<Guid, SheetRecord> sheetRecords)
+    {
+        if (template.SourcePageViewId is not { } sourcePageViewId ||
+            !pagesById.TryGetValue(sourcePageViewId, out var page))
+            return template;
+
+        var existingSlots = template.DetailSlots;
+        var details = page.GetDetailViews()
+            .Select((detail, index) => CaptureDetail(
+                detail,
+                index < existingSlots.Count ? existingSlots[index] : null))
+            .ToArray();
+        var titleBlock = CaptureTitleBlock(
+            document,
+            sheetRecords.GetValueOrDefault(sourcePageViewId)?.TitleBlock,
+            template.TitleBlock);
+        return template with
+        {
+            Paper = new PaperRecipe(page.PageWidth, page.PageHeight, document.PageUnitSystem.ToString()),
+            DetailSlots = details,
+            TitleBlock = titleBlock,
+        };
+    }
+
+    private static DetailSlotRecipe CaptureDetail(
+        DetailViewObject detail,
+        DetailSlotRecipe? existing)
+    {
+        var bounds = detail.DetailGeometry.GetBoundingBox(true);
+        var viewport = detail.Viewport;
+        return new DetailSlotRecipe(
+            existing?.Id ?? Guid.NewGuid(),
+            string.IsNullOrWhiteSpace(detail.Attributes.Name) ? viewport.Name : detail.Attributes.Name,
+            bounds.Min.X,
+            bounds.Min.Y,
+            bounds.Max.X,
+            bounds.Max.Y,
+            viewport.IsPerspectiveProjection ? "Perspective" : "Top",
+            detail.DetailGeometry.IsParallelProjection ? detail.DetailGeometry.PageToModelRatio : null,
+            detail.DetailGeometry.IsProjectionLocked,
+            viewport.DisplayMode.Id,
+            existing?.DefaultNamedView,
+            [viewport.CameraLocation.X, viewport.CameraLocation.Y, viewport.CameraLocation.Z],
+            [viewport.CameraTarget.X, viewport.CameraTarget.Y, viewport.CameraTarget.Z],
+            [viewport.CameraUp.X, viewport.CameraUp.Y, viewport.CameraUp.Z]);
+    }
+
+    private static TitleBlockTemplateRecipe? CaptureTitleBlock(
+        RhinoDoc document,
+        TitleBlockRole? role,
+        TitleBlockTemplateRecipe? existing)
+    {
+        if (role is null) return existing;
+        if (document.Objects.FindId(role.InstanceObjectId) is not InstanceObject instance) return null;
+        return new TitleBlockTemplateRecipe(
+            instance.InstanceDefinition.Id,
+            instance.InstanceDefinition.Name,
+            TransformValues(instance.InstanceXform),
+            role.AnchorName,
+            existing?.FieldMappings ?? new Dictionary<string, string>(StringComparer.Ordinal),
+            role.BuiltInKind);
     }
 
     private static IReadOnlyList<double> TransformValues(global::Rhino.Geometry.Transform transform) =>

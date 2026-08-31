@@ -136,6 +136,13 @@ public sealed class SheetTemplatePlannerTests
         Assert.Equal(["Page 1", "Page 2", "Page 3"], changes.Select(change => change.Name));
         Assert.All(changes, change => Assert.Equal(4, change.Template.DetailSlots.Count));
         Assert.All(changes, change => Assert.True(change.UseDedicatedDetailLayer));
+        Assert.All(changes, change =>
+        {
+            Assert.Equal(10.5, change.Template.DetailSlots.Min(detail => detail.Left), 3);
+            Assert.Equal(583.5, change.Template.DetailSlots.Max(detail => detail.Right), 3);
+            Assert.Equal(10.5, change.Template.DetailSlots.Min(detail => detail.Bottom), 3);
+            Assert.Equal(409.5, change.Template.DetailSlots.Max(detail => detail.Top), 3);
+        });
         Assert.All(changes.SelectMany(change => change.Template.DetailSlots), detail =>
             Assert.Equal(TestSnapshots.DisplayModeOneId, detail.DisplayModeId));
     }
@@ -607,6 +614,82 @@ public sealed class SheetTemplatePlannerTests
         Assert.True(detail.Bottom >= geometry.Content.Bottom);
         Assert.True(detail.Top <= geometry.Content.Top);
         Assert.True(detail.Right <= geometry.Content.Right);
+    }
+
+    [Fact]
+    public void CapturedManagedTitleBlockConstraintsAreReplacedInsteadOfAppliedTwice()
+    {
+        var paper = new PaperRecipe(594, 420, "Millimeters");
+        var sourceLayout = AdaptiveTitleBlockLayoutSolver.Solve(
+            BuiltInTitleBlockKind.RightSidebar,
+            paper);
+        var sourceContent = sourceLayout.Content;
+        var sourceDetail = new DetailSlotRecipe(
+            Guid.NewGuid(),
+            "Plan",
+            sourceContent.Left + 8,
+            sourceContent.Bottom + 6,
+            sourceContent.Right - 10,
+            sourceContent.Top - 12,
+            "Top",
+            null,
+            false,
+            null,
+            null);
+        var template = Template("Managed source", paper.Width, paper.Height) with
+        {
+            DetailSlots = [sourceDetail],
+            TitleBlock = new TitleBlockTemplateRecipe(
+                Guid.Empty,
+                "Foundry — Right",
+                [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                "Right",
+                new Dictionary<string, string>(),
+                BuiltInTitleBlockKind.RightSidebar),
+        };
+        var snapshot = WithTemplates(TestSnapshots.Create(), [template]);
+        var targetLayout = AdaptiveTitleBlockLayoutSolver.Solve(
+            BuiltInTitleBlockKind.FullWidthBottom,
+            paper);
+        var targetContent = targetLayout.Content;
+
+        var plan = new BatchCreateSheetsPlanner().Plan(new BatchCreateSheetsRequest(
+            42,
+            1,
+            TestSnapshots.RootFolderId,
+            [],
+            "Page {index}",
+            1,
+            1,
+            CreationSpecs:
+            [
+                new LayoutCreationSpec(
+                    1,
+                    paper,
+                    TemplateId: template.Id,
+                    UseTemplateTitleBlock: false,
+                    BuiltInTitleBlock: BuiltInTitleBlockKind.FullWidthBottom),
+            ]), snapshot);
+
+        Assert.True(plan.CanApply);
+        var detail = Assert.Single(Assert.IsType<CreateSheetFromTemplateChange>(
+            Assert.Single(plan.Changes)).Template.DetailSlots);
+        Assert.Equal(
+            targetContent.Left + 8 / sourceContent.Width * targetContent.Width,
+            detail.Left,
+            3);
+        Assert.Equal(
+            targetContent.Bottom + 6 / sourceContent.Height * targetContent.Height,
+            detail.Bottom,
+            3);
+        Assert.Equal(
+            targetContent.Right - 10 / sourceContent.Width * targetContent.Width,
+            detail.Right,
+            3);
+        Assert.Equal(
+            targetContent.Top - 12 / sourceContent.Height * targetContent.Height,
+            detail.Top,
+            3);
     }
 
     private static SheetTemplateRecipe Template(string name, double width, double height) => new(

@@ -9,7 +9,7 @@ using RhinoLayoutFoundry.Core.Persistence;
 namespace RhinoLayoutFoundry.UI;
 
 [Guid("c43e26dd-b64b-454b-8b50-a10560e5045f")]
-public sealed class LayoutFoundryPanel : Panel
+public sealed partial class LayoutFoundryPanel : Panel
 {
     private const string InternalHierarchyDragType = "application/x-layout-foundry-hierarchy";
     private readonly Label _emptyTitleLabel;
@@ -51,9 +51,7 @@ public sealed class LayoutFoundryPanel : Panel
     private readonly GridColumn _detailsColumn;
     private readonly GridColumn _displayModeColumn;
     private readonly TextBoxCell _paperCell;
-    private readonly TextBoxCell _displayModeCell;
-    private readonly FilteredPicker _hierarchyDisplayModePicker;
-    private readonly Panel _hierarchyDisplayModePopup;
+    private readonly CustomCell _displayModeCell;
     private readonly Panel _contentHost;
     private readonly Panel _toolbarSurface;
     private readonly Panel _renameActions;
@@ -112,7 +110,10 @@ public sealed class LayoutFoundryPanel : Panel
     private IReadOnlyList<OverviewNodeKey> _propertyInteractionTargets = [];
     private IReadOnlyList<OverviewNodeKey> _hierarchyDisplayModeTargets = [];
     private Dictionary<string, Guid> _hierarchyDisplayModes = new(StringComparer.OrdinalIgnoreCase);
+    private OverviewNodeKey? _hierarchyDisplayModeEditingKey;
+    private FilteredPicker? _activeHierarchyDisplayModePicker;
     private CellInteractionGuard? _cellInteractionGuard;
+    private CellInteractionGuard? _selectionPreservingCircleInteraction;
     private InlineDraft? _inlineDraft;
     private Guid? _contextDestinationFolderId;
     private Guid? _contextPrintFolderId;
@@ -263,18 +264,7 @@ public sealed class LayoutFoundryPanel : Panel
         {
             Binding = Binding.Property<HierarchyTreeItem, string>(item => item.PaperCellText),
         };
-        _displayModeCell = new TextBoxCell
-        {
-            Binding = Binding.Property<HierarchyTreeItem, string>(item => item.DisplayModeCellText),
-        };
-        _hierarchyDisplayModePicker = new FilteredPicker([], "Search display modes");
-        _hierarchyDisplayModePopup = new Panel
-        {
-            BackgroundColor = FoundryTheme.CanvasBorder,
-            Padding = new Padding(1),
-            Visible = false,
-            Content = _hierarchyDisplayModePicker,
-        };
+        _displayModeCell = CreateDisplayModeCell();
         (_treeGrid, _layoutsColumn, _printColumn, _templateColumn, _paperColumn, _detailsColumn,
             _displayModeColumn) = CreateTreeGrid();
         CreateHierarchyContextMenu();
@@ -334,7 +324,6 @@ public sealed class LayoutFoundryPanel : Panel
             BackgroundColor = FoundryTheme.PanelBackground,
         };
         _panelOverlayHost.Add(_panelShell, 0, 0);
-        _panelOverlayHost.Add(_hierarchyDisplayModePopup, 0, 0);
         _panelOverlayHost.Add(_deleteConfirmationOverlay, 0, 0);
         _panelOverlayHost.SizeChanged += (_, _) => LayoutPanelOverlay();
         Content = _panelOverlayHost;
@@ -342,7 +331,17 @@ public sealed class LayoutFoundryPanel : Panel
 
         _treeGrid.SelectedItemChanged += OnSelectionChanged;
         _treeGrid.CellFormatting += OnHierarchyCellFormatting;
-        _treeGrid.CellDoubleClick += (_, _) => NavigateSelected();
+        _treeGrid.CellDoubleClick += (_, eventArgs) =>
+        {
+            if (eventArgs.Item is HierarchyTreeItem item &&
+                ReferenceEquals(eventArgs.GridColumn, _layoutsColumn) &&
+                IsInlineRenameTarget(item))
+            {
+                return;
+            }
+
+            NavigateSelected();
+        };
         _treeGrid.KeyDown += OnTreeKeyDown;
         _treeGrid.MouseDown += OnTreeMouseDown;
         _treeGrid.MouseMove += OnTreeMouseMove;
@@ -351,10 +350,6 @@ public sealed class LayoutFoundryPanel : Panel
         _treeGrid.DragEnd += (_, _) => ResetPendingDrag();
         _treeGrid.CellClick += async (_, eventArgs) => await OnTreeCellClickAsync(eventArgs);
         _treeGrid.CellEdited += async (_, eventArgs) => await OnTreeCellEditedAsync(eventArgs);
-        _hierarchyDisplayModePicker.SelectionCommitted += async (_, _) =>
-            await CommitHierarchyDisplayModeAsync();
-        _hierarchyDisplayModePicker.DismissRequested += (_, _) =>
-            CloseHierarchyDisplayModePicker();
         _treeGrid.ColumnHeaderClick += (_, eventArgs) => OnColumnHeaderClick(eventArgs);
         _treeGrid.Collapsed += (_, eventArgs) =>
         {
@@ -431,6 +426,7 @@ public sealed class LayoutFoundryPanel : Panel
             AllowColumnReordering = false,
             AllowDrop = true,
             ShowHeader = true,
+            RowHeight = 24,
         };
         var layoutsColumn = new GridColumn
         {
@@ -539,10 +535,78 @@ public sealed class LayoutFoundryPanel : Panel
             ? new TextBoxCell
             {
                 Binding = Binding.Property<HierarchyTreeItem, string>(item => item.DisplayText),
+                VerticalAlignment = VerticalAlignment.Center,
             }
             : new ImageTextCell(
                 nameof(HierarchyTreeItem.RowIcon),
                 nameof(HierarchyTreeItem.DisplayText));
+    }
+
+    private CustomCell CreateDisplayModeCell()
+    {
+        var cell = new CustomCell
+        {
+            GetIdentifier = eventArgs => eventArgs.Item is HierarchyTreeItem item &&
+                                         _hierarchyDisplayModeEditingKey == item.Node.Key
+                ? "foundry-display-mode-editor"
+                : "foundry-display-mode-label",
+            CreateCell = eventArgs =>
+            {
+                if (eventArgs.Item is HierarchyTreeItem item &&
+                    _hierarchyDisplayModeEditingKey == item.Node.Key)
+                {
+                    FilteredPicker? picker = null;
+                    picker = new FilteredPicker(
+                        [],
+                        "Search display modes",
+                        controlHeight: 24);
+                    picker.SelectionCommitted += async (_, _) =>
+                    {
+                        if (ReferenceEquals(_activeHierarchyDisplayModePicker, picker))
+                            await CommitHierarchyDisplayModeAsync();
+                    };
+                    picker.DismissRequested += (_, _) =>
+                    {
+                        if (ReferenceEquals(_activeHierarchyDisplayModePicker, picker))
+                            CloseHierarchyDisplayModePicker();
+                    };
+                    return picker;
+                }
+
+                return new Label
+                {
+                    VerticalAlignment = VerticalAlignment.Center,
+                    TextAlignment = TextAlignment.Left,
+                };
+            },
+            ConfigureCell = (eventArgs, control) =>
+            {
+                if (eventArgs.Item is not HierarchyTreeItem item)
+                    return;
+
+                if (control is Label label)
+                {
+                    label.Text = item.DisplayModeCellText;
+                    label.TextColor = eventArgs.CellTextColor;
+                    return;
+                }
+
+                if (control is not FilteredPicker picker ||
+                    _hierarchyDisplayModeEditingKey != item.Node.Key)
+                {
+                    return;
+                }
+
+                picker.SetChoices(_hierarchyDisplayModes.Keys);
+                picker.Text = _hierarchyDisplayModes.ContainsKey(item.DisplayModeText)
+                    ? item.DisplayModeText
+                    : string.Empty;
+                picker.Enabled = item.HasDetailTargets;
+                _activeHierarchyDisplayModePicker = picker;
+            },
+        };
+
+        return cell;
     }
 
     private void SetInlineEditing(bool enabled)
@@ -1384,20 +1448,40 @@ public sealed class LayoutFoundryPanel : Panel
 
     private void BeginInlineSheetRename()
     {
-        var selected = SelectedSheets().Take(2).ToArray();
-        if (selected.Length != 1 || SelectedItemCount() != 1)
+        var selected = SelectedItems().Take(2).ToArray();
+        if (selected.Length != 1 || selected[0].Node.Key.Kind != OverviewNodeKind.Sheet)
         {
             return;
         }
 
-        var sheet = selected[0];
+        BeginInlineNameRename(selected[0]);
+    }
+
+    private void BeginInlineNameRename(HierarchyTreeItem item)
+    {
+        if (!IsInlineRenameTarget(item) ||
+            SelectedItemCount() != 1 ||
+            !_selection.Selected.Contains(item.Node.Key))
+        {
+            return;
+        }
+
+        CloseHierarchyDisplayModePicker();
+        var kind = item.Node.Key.Kind == OverviewNodeKind.Folder
+            ? InlineDraftKind.RenameFolder
+            : InlineDraftKind.RenameSheet;
+        var parentFolderId = item.Node.Sheet?.FolderId ??
+                             _overview.Folders.FirstOrDefault(folder => folder.Id == item.Node.Key.Id)?.ParentId ??
+                             _overview.RootFolderId ?? Guid.Empty;
         _inlineDraft = new InlineDraft(
-            InlineDraftKind.RenameSheet,
-            sheet.PageViewId,
-            sheet.FolderId,
-            sheet.Name);
+            kind,
+            item.Node.Key.Id,
+            parentFolderId,
+            item.Node.Label);
         SetInlineEditing(true);
-        _statusLabel.Text = "Rename the layout, then press Return. Rhino does not support Undo for this change.";
+        _statusLabel.Text = kind == InlineDraftKind.RenameFolder
+            ? "Rename the folder, then press Return."
+            : "Rename the layout, then press Return. Rhino does not support Undo for this change.";
         PopulateTree();
 
         Application.Instance.AsyncInvoke(() =>
@@ -1407,7 +1491,7 @@ public sealed class LayoutFoundryPanel : Panel
                     candidate => candidate.Children.OfType<HierarchyTreeItem>(),
                     candidate => candidate.Expanded)
                 .ToArray();
-            var row = Array.FindIndex(rows, candidate => candidate.Node.Key.Id == sheet.PageViewId);
+            var row = Array.FindIndex(rows, candidate => candidate.Node.Key == item.Node.Key);
             if (row < 0)
             {
                 return;
@@ -1629,6 +1713,12 @@ public sealed class LayoutFoundryPanel : Panel
             {
                 _treeGrid.SelectedItem = item;
             }
+
+            RestoreVisibleTreeSelection(VisibleTreeRows.Flatten(
+                    items,
+                    candidate => candidate.Children.OfType<HierarchyTreeItem>(),
+                    candidate => candidate.Expanded)
+                .ToArray());
         }
         finally
         {
@@ -1696,7 +1786,7 @@ public sealed class LayoutFoundryPanel : Panel
                     [],
                     [])).ToArray(),
             },
-            InlineDraftKind.RenameSheet => _overview,
+            InlineDraftKind.RenameFolder or InlineDraftKind.RenameSheet => _overview,
             _ => _overview,
         };
     }
@@ -2008,11 +2098,25 @@ public sealed class LayoutFoundryPanel : Panel
             return;
         }
 
-        if (IsInteractivePropertyColumn(eventArgs.GridColumn) &&
+        if (_selectionPreservingCircleInteraction is { } preserved &&
+            preserved.Key == item.Node.Key &&
+            ReferenceEquals(preserved.Column, eventArgs.GridColumn))
+        {
+            return;
+        }
+
+        if ((IsInteractivePropertyColumn(eventArgs.GridColumn) ||
+             IsInlineRenameTarget(item, eventArgs.GridColumn)) &&
             ConsumeCellInteractionGuard(item, eventArgs.GridColumn))
         {
             _propertyInteractionTargets = [];
             _statusLabel.Text = "Row selected. Click the property again to change it.";
+            return;
+        }
+
+        if (IsInlineRenameTarget(item, eventArgs.GridColumn))
+        {
+            BeginInlineNameRename(item);
             return;
         }
 
@@ -2039,40 +2143,51 @@ public sealed class LayoutFoundryPanel : Panel
                 return;
             }
 
-            ShowDisplayModePicker(
+            BeginDisplayModeEdit(
                 PropertyInteractionTargets(item.Node.Key),
-                item.DisplayModeText,
-                eventArgs.Location);
+                item);
             return;
         }
 
         if (ReferenceEquals(eventArgs.GridColumn, _templateColumn))
         {
-            if (item.Node.Sheet is not { } sheet) return;
-            var register = !sheet.IsTemplate;
-            _statusLabel.Text = register
-                ? "Registering layout as a template…"
-                : "Unregistering layout template…";
-            var registrationResult = await LayoutFoundryUiHost.SetSheetTemplateRegistrationAsync(
-                sheet.PageViewId,
-                register);
-            _statusLabel.Text = registrationResult.Succeeded
-                ? register
-                    ? $"'{sheet.Name}' is available as a layout template."
-                    : $"'{sheet.Name}' is no longer a layout template."
-                : DiagnosticMessage(registrationResult);
-            RefreshOverview();
+            await ToggleTemplateRegistrationAsync(item);
             return;
         }
 
         if (!ReferenceEquals(eventArgs.GridColumn, _printColumn) || !item.HasSheetTargets)
             return;
 
+        await TogglePrintInclusionAsync(item);
+    }
+
+    private async Task ToggleTemplateRegistrationAsync(HierarchyTreeItem item)
+    {
+        if (item.Node.Sheet is not { } sheet) return;
+        var targets = PropertyInteractionTargets(item.Node.Key);
+        var register = !sheet.IsTemplate;
+        _statusLabel.Text = register
+            ? "Registering layout as a template…"
+            : "Unregistering layout template…";
+        var registrationResult = await LayoutFoundryUiHost.SetSheetTemplateRegistrationAsync(
+            targets,
+            register);
+        _statusLabel.Text = registrationResult.Succeeded
+            ? register
+                ? "Selected layouts are available as layout templates."
+                : "Selected layouts are no longer layout templates."
+            : DiagnosticMessage(registrationResult);
+        RefreshOverview();
+    }
+
+    private async Task TogglePrintInclusionAsync(HierarchyTreeItem item)
+    {
+        var printTargets = PropertyInteractionTargets(item.Node.Key);
         var include = !item.AllPrintIncluded;
         _statusLabel.Text = include
             ? "Enabling layouts for printing…"
             : "Disabling layouts for printing…";
-        var result = await LayoutFoundryUiHost.SetPrintInclusionAsync([item.Node.Key], include);
+        var result = await LayoutFoundryUiHost.SetPrintInclusionAsync(printTargets, include);
         _statusLabel.Text = result.Succeeded
             ? include
                 ? "Enabled for printing."
@@ -2106,10 +2221,9 @@ public sealed class LayoutFoundryPanel : Panel
         new ContextMenu(menuItems).Show(_treeGrid, location);
     }
 
-    private void ShowDisplayModePicker(
+    private void BeginDisplayModeEdit(
         IReadOnlyList<OverviewNodeKey> targets,
-        string currentDisplayMode,
-        PointF location)
+        HierarchyTreeItem item)
     {
         var snapshot = LayoutFoundryUiHost.CaptureSnapshot();
         var modes = snapshot?.DisplayModes
@@ -2126,40 +2240,23 @@ public sealed class LayoutFoundryPanel : Panel
             .GroupBy(mode => mode.Value, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.First().Key, StringComparer.OrdinalIgnoreCase);
         _hierarchyDisplayModeTargets = targets.Distinct().ToArray();
-        _hierarchyDisplayModePicker.SetChoices(_hierarchyDisplayModes.Keys);
-        _hierarchyDisplayModePicker.Text = _hierarchyDisplayModes.ContainsKey(currentDisplayMode)
-            ? currentDisplayMode
-            : string.Empty;
-
-        var hostSize = _panelOverlayHost.ClientSize;
-        var popupWidth = Math.Min(340, Math.Max(240, hostSize.Width - FoundryTheme.Space4 * 2));
-        var popupSize = new Size(popupWidth, 34);
-        _hierarchyDisplayModePopup.Size = popupSize;
-        _hierarchyDisplayModePicker.Width = popupWidth - 2;
-
-        var screenAnchor = _treeGrid.PointToScreen(new PointF(location.X, location.Y + 18));
-        var anchor = _panelOverlayHost.PointFromScreen(screenAnchor);
-        var x = Math.Clamp(
-            (int)Math.Round(anchor.X),
-            FoundryTheme.Space2,
-            Math.Max(FoundryTheme.Space2, hostSize.Width - popupWidth - FoundryTheme.Space2));
-        var y = Math.Clamp(
-            (int)Math.Round(anchor.Y),
-            FoundryTheme.Space2,
-            Math.Max(FoundryTheme.Space2, hostSize.Height - popupSize.Height - FoundryTheme.Space2));
-        _panelOverlayHost.Move(_hierarchyDisplayModePopup, x, y);
-        _hierarchyDisplayModePopup.Visible = true;
+        _hierarchyDisplayModeEditingKey = item.Node.Key;
+        _activeHierarchyDisplayModePicker = null;
+        _treeGrid.ReloadItem(item, reloadChildren: false);
 
         Application.Instance.AsyncInvoke(() =>
         {
-            if (_hierarchyDisplayModePopup.Visible)
-                _hierarchyDisplayModePicker.OpenResults();
+            if (_hierarchyDisplayModeEditingKey == item.Node.Key &&
+                _activeHierarchyDisplayModePicker is { } picker)
+            {
+                picker.OpenResults();
+            }
         });
     }
 
     private async Task CommitHierarchyDisplayModeAsync()
     {
-        var modeName = _hierarchyDisplayModePicker.Text.Trim();
+        var modeName = _activeHierarchyDisplayModePicker?.Text.Trim() ?? string.Empty;
         if (!_hierarchyDisplayModes.TryGetValue(modeName, out var modeId) ||
             _hierarchyDisplayModeTargets.Count == 0)
         {
@@ -2173,10 +2270,21 @@ public sealed class LayoutFoundryPanel : Panel
 
     private void CloseHierarchyDisplayModePicker()
     {
-        _hierarchyDisplayModePicker.CloseResults();
-        _hierarchyDisplayModePopup.Visible = false;
+        var editingKey = _hierarchyDisplayModeEditingKey;
+        var picker = _activeHierarchyDisplayModePicker;
+        _hierarchyDisplayModeEditingKey = null;
+        _activeHierarchyDisplayModePicker = null;
+        picker?.CloseResults();
         _hierarchyDisplayModeTargets = [];
         _hierarchyDisplayModes.Clear();
+
+        if (editingKey is { } key)
+        {
+            var item = Flatten(_renderedTreeItems)
+                .FirstOrDefault(candidate => candidate.Node.Key == key);
+            if (item is not null)
+                _treeGrid.ReloadItem(item, reloadChildren: false);
+        }
     }
 
     private async Task SetPaperSizeAsync(
@@ -2290,6 +2398,7 @@ public sealed class LayoutFoundryPanel : Panel
         {
             InlineDraftKind.Folder => "Creating folder…",
             InlineDraftKind.Sheet => "Creating layout…",
+            InlineDraftKind.RenameFolder => "Renaming folder…",
             InlineDraftKind.RenameSheet => "Renaming layout…",
             _ => string.Empty,
         };
@@ -2301,6 +2410,10 @@ public sealed class LayoutFoundryPanel : Panel
                 name),
             InlineDraftKind.Sheet => await LayoutFoundryUiHost.CreateSheetAsync(
                 draft.ParentFolderId,
+                name),
+            InlineDraftKind.RenameFolder => await LayoutFoundryUiHost.RenameFolderAsync(
+                draft.Id,
+                draft.OriginalName,
                 name),
             InlineDraftKind.RenameSheet => ToOperationResult(
                 LayoutFoundryUiHost.RenameSheetDirect(draft.Id, name)),
@@ -2318,6 +2431,8 @@ public sealed class LayoutFoundryPanel : Panel
         _overview = LayoutFoundryUiHost.CaptureOverview();
         var createdKey = draft.Kind == InlineDraftKind.Folder
             ? new OverviewNodeKey(OverviewNodeKind.Folder, draft.Id)
+            : draft.Kind == InlineDraftKind.RenameFolder
+                ? new OverviewNodeKey(OverviewNodeKind.Folder, draft.Id)
             : draft.Kind == InlineDraftKind.RenameSheet
                 ? new OverviewNodeKey(OverviewNodeKind.Sheet, draft.Id)
                 : _overview.Sheets
@@ -2334,6 +2449,7 @@ public sealed class LayoutFoundryPanel : Panel
         {
             InlineDraftKind.Folder => $"Created folder '{name}'.",
             InlineDraftKind.Sheet => $"Created layout '{name}'. Rhino does not support Undo for layout creation.",
+            InlineDraftKind.RenameFolder => $"Renamed folder to '{name}'.",
             InlineDraftKind.RenameSheet => $"Renamed layout to '{name}'. Rhino does not support Undo for this change.",
             _ => string.Empty,
         };
@@ -2474,11 +2590,17 @@ public sealed class LayoutFoundryPanel : Panel
 
     private void OnTreeMouseDown(object? sender, MouseEventArgs eventArgs)
     {
-        CloseHierarchyDisplayModePicker();
         var cell = _treeGrid.GetCellAt(eventArgs.Location);
         var item = cell.Item as HierarchyTreeItem;
         var column = cell.Column;
+        if (_hierarchyDisplayModeEditingKey is { } editingKey &&
+            (item?.Node.Key != editingKey || !ReferenceEquals(column, _displayModeColumn)))
+        {
+            CloseHierarchyDisplayModePicker();
+        }
+
         _cellInteractionGuard = null;
+        _selectionPreservingCircleInteraction = null;
         _propertyInteractionTargets = [];
         if ((eventArgs.Buttons & MouseButtons.Primary) != 0 &&
             eventArgs.Modifiers == Keys.None &&
@@ -2490,13 +2612,35 @@ public sealed class LayoutFoundryPanel : Panel
             _propertyInteractionTargets = selected.Contains(item.Node.Key)
                 ? selected
                 : [item.Node.Key];
+
+            if (selected.Length > 1 &&
+                selected.Contains(item.Node.Key) &&
+                IsSelectionPreservingCircleColumn(column))
+            {
+                var interaction = new CellInteractionGuard(item.Node.Key, column);
+                _selectionPreservingCircleInteraction = interaction;
+                eventArgs.Handled = true;
+                ResetPendingDrag();
+                Application.Instance.AsyncInvoke(async () =>
+                {
+                    if (!ReferenceEquals(_selectionPreservingCircleInteraction, interaction))
+                        return;
+
+                    _selectionPreservingCircleInteraction = null;
+                    if (ReferenceEquals(column, _templateColumn))
+                        await ToggleTemplateRegistrationAsync(item);
+                    else if (item.HasSheetTargets)
+                        await TogglePrintInclusionAsync(item);
+                });
+                return;
+            }
         }
 
         if ((eventArgs.Buttons & MouseButtons.Primary) != 0 &&
             item is not null &&
             !item.IsInlineDraft &&
             column is not null &&
-            IsInteractivePropertyColumn(column) &&
+            (IsInteractivePropertyColumn(column) || IsInlineRenameTarget(item, column)) &&
             (eventArgs.Modifiers != Keys.None ||
              !_selection.Selected.Contains(item.Node.Key)))
         {
@@ -2550,6 +2694,16 @@ public sealed class LayoutFoundryPanel : Panel
         ReferenceEquals(column, _templateColumn) ||
         ReferenceEquals(column, _paperColumn) ||
         ReferenceEquals(column, _displayModeColumn);
+
+    private bool IsInlineRenameTarget(HierarchyTreeItem item, GridColumn? column = null) =>
+        (column is null || ReferenceEquals(column, _layoutsColumn)) &&
+        !item.IsInlineDraft &&
+        !item.Node.IsDocumentRoot &&
+        item.Node.Key.Kind is OverviewNodeKind.Folder or OverviewNodeKind.Sheet;
+
+    private bool IsSelectionPreservingCircleColumn(GridColumn column) =>
+        ReferenceEquals(column, _printColumn) ||
+        ReferenceEquals(column, _templateColumn);
 
     private bool ConsumeCellInteractionGuard(HierarchyTreeItem item, GridColumn column)
     {
@@ -3059,6 +3213,8 @@ public sealed class LayoutFoundryPanel : Panel
         }
     }
 
+    partial void RestoreVisibleTreeSelection(IReadOnlyList<HierarchyTreeItem> visibleRows);
+
     private static string PaperLabel(SheetOverview sheet)
     {
         var preset = PaperSizeChoices.FirstOrDefault(choice =>
@@ -3301,6 +3457,7 @@ public sealed class LayoutFoundryPanel : Panel
     {
         Folder,
         Sheet,
+        RenameFolder,
         RenameSheet,
     }
 
@@ -3330,6 +3487,8 @@ public sealed class LayoutFoundryPanel : Panel
         public Guid Id { get; } = id;
 
         public Guid ParentFolderId { get; } = parentFolderId;
+
+        public string OriginalName { get; } = name;
 
         public string Name { get; set; } = name;
     }

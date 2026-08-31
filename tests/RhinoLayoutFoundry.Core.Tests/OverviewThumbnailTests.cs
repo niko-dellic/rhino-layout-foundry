@@ -106,6 +106,23 @@ public sealed class OverviewThumbnailTests
         Assert.Equal(0L, cache.ByteCount);
     }
 
+    [Fact]
+    public void CacheKeepsPreviewBackgroundVariantsSeparate()
+    {
+        var cache = new OverviewThumbnailCache(maximumEntryCount: 10, maximumByteCount: 100);
+        var sheetId = TestSnapshots.SheetOneId;
+        var white = new OverviewThumbnailKey(42, sheetId, 72, 48, BackgroundArgb: 0xFFFFFFFF);
+        var warm = new OverviewThumbnailKey(42, sheetId, 72, 48, BackgroundArgb: 0xFFF5F0E8);
+
+        cache.Store(white, [1]);
+        cache.Store(warm, [2]);
+
+        Assert.True(cache.TryGet(white, out var whiteBytes));
+        Assert.True(cache.TryGet(warm, out var warmBytes));
+        Assert.Equal(1, Assert.Single(whiteBytes));
+        Assert.Equal(2, Assert.Single(warmBytes));
+    }
+
     private static OverviewThumbnailKey Key(Guid sheetId)
     {
         return new OverviewThumbnailKey(42, sheetId, 72, 48);

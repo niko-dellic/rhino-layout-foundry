@@ -120,8 +120,6 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
             .ToArray();
         if (details.Length != change.DetailViewportIds.Distinct().Count())
             return Failure("named_view.detail_missing", "A targeted detail viewport no longer exists.");
-        var namedView = document.NamedViews[namedViewIndex];
-
         var before = details.ToDictionary(
             detail => detail.Viewport.Id,
             detail => new ViewportInfo(detail.Viewport));
@@ -132,7 +130,7 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
         {
             foreach (var detail in details)
             {
-                if (!detail.Viewport.SetViewProjection(namedView.Viewport, true))
+                if (!document.NamedViews.RestoreWithAspectRatio(namedViewIndex, detail.Viewport))
                     throw new InvalidOperationException(
                         $"Rhino did not apply named view '{change.NamedViewName}' to detail '{detail.DescriptiveTitle}'.");
                 if (!detail.CommitViewportChanges())
@@ -1495,12 +1493,14 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
                     instance.Attributes.ViewportId != page.MainViewport.Id)
                     return Failure("template.title_block_invalid",
                         "The designated title block is not a block instance on the source layout.");
+                var role = beforeState.Sheets.GetValueOrDefault(page.MainViewport.Id)?.TitleBlock;
                 titleBlock = new TitleBlockTemplateRecipe(
                     instance.InstanceDefinition.Id,
                     instance.InstanceDefinition.Name,
                     TransformValues(instance.InstanceXform),
-                    "Captured",
-                    new Dictionary<string, string>(StringComparer.Ordinal));
+                    role?.AnchorName ?? "Captured",
+                    new Dictionary<string, string>(StringComparer.Ordinal),
+                    role?.InstanceObjectId == blockId ? role.BuiltInKind : null);
             }
 
             var sourceRecord = beforeState.Sheets.GetValueOrDefault(page.MainViewport.Id);
@@ -1760,8 +1760,7 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
             var index = document.NamedViews.FindByName(namedView);
             if (index >= 0)
             {
-                var storedView = document.NamedViews[index];
-                if (!detail.Viewport.SetViewProjection(storedView.Viewport, true))
+                if (!document.NamedViews.RestoreWithAspectRatio(index, detail.Viewport))
                     throw new InvalidOperationException(
                         $"Rhino did not apply named view '{namedView}' to detail '{slot.Name}'.");
                 viewportChanged = true;

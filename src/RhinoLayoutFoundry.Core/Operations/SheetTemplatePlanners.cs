@@ -374,13 +374,44 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
 
         if (adaptiveTitleBlock is not null)
         {
-            var content = adaptiveTitleBlock.Content;
+            var sourceContent = new TitleBlockRectangle(
+                0,
+                0,
+                spec.Paper.Width,
+                spec.Paper.Height);
+            if (source.TitleBlock?.BuiltInKind is { } sourceTitleBlockKind)
+            {
+                try
+                {
+                    var capturedContent = AdaptiveTitleBlockLayoutSolver.Solve(
+                        sourceTitleBlockKind,
+                        source.Paper,
+                        projectInformation,
+                        source.DetailSlots.Count).Content;
+                    sourceContent = new TitleBlockRectangle(
+                        capturedContent.Left * horizontalScale,
+                        capturedContent.Bottom * verticalScale,
+                        capturedContent.Width * horizontalScale,
+                        capturedContent.Height * verticalScale);
+                }
+                catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
+                {
+                    diagnostics.Add(CaptureSheetTemplatePlanner.Error(
+                        "title_block.template_constraints_invalid", exception.Message));
+                }
+            }
+
+            var targetContent = adaptiveTitleBlock.Content;
             details = details.Select(slot => slot with
             {
-                Left = content.Left + slot.Left / spec.Paper.Width * content.Width,
-                Right = content.Left + slot.Right / spec.Paper.Width * content.Width,
-                Bottom = content.Bottom + slot.Bottom / spec.Paper.Height * content.Height,
-                Top = content.Bottom + slot.Top / spec.Paper.Height * content.Height,
+                Left = MapCoordinate(slot.Left, sourceContent.Left, sourceContent.Width,
+                    targetContent.Left, targetContent.Width),
+                Right = MapCoordinate(slot.Right, sourceContent.Left, sourceContent.Width,
+                    targetContent.Left, targetContent.Width),
+                Bottom = MapCoordinate(slot.Bottom, sourceContent.Bottom, sourceContent.Height,
+                    targetContent.Bottom, targetContent.Height),
+                Top = MapCoordinate(slot.Top, sourceContent.Bottom, sourceContent.Height,
+                    targetContent.Bottom, targetContent.Height),
             }).ToArray();
         }
 
@@ -394,14 +425,22 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
         return new ResolvedCreationSpec(template, namedViewAssignments);
     }
 
+    private static double MapCoordinate(
+        double value,
+        double sourceOrigin,
+        double sourceLength,
+        double targetOrigin,
+        double targetLength) =>
+        targetOrigin + (value - sourceOrigin) / sourceLength * targetLength;
+
     private sealed record ResolvedCreationSpec(
         SheetTemplateRecipe Template,
         IReadOnlyDictionary<Guid, string> NamedViewAssignments);
 
     private static SheetTemplateRecipe BuiltInTemplate(BuiltInLayoutKind kind, PaperRecipe paper)
     {
-        var marginX = paper.Width * 0.05;
-        var marginY = paper.Height * 0.05;
+        var marginX = Math.Min(paper.Width, paper.Height) * 0.025;
+        var marginY = marginX;
         var left = marginX;
         var right = paper.Width - marginX;
         var bottom = marginY;

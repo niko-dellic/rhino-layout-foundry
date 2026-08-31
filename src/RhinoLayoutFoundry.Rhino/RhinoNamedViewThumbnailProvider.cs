@@ -74,8 +74,7 @@ internal sealed class RhinoNamedViewThumbnailProvider : INamedViewThumbnailProvi
         using var previous = new ViewInfo(view.ActiveViewport);
         try
         {
-            var namedView = document.NamedViews[namedViewIndex];
-            if (!view.ActiveViewport.SetViewProjection(namedView.Viewport, false))
+            if (!document.NamedViews.RestoreWithAspectRatio(namedViewIndex, view.ActiveViewport))
                 return Failure(request, "Rhino could not restore the named view for preview capture.");
 
             var capture = new ViewCapture

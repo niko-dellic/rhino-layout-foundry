@@ -7,6 +7,34 @@ namespace RhinoLayoutFoundry.Core.Tests;
 public sealed class DocumentStateSerializerTests
 {
     [Fact]
+    public void MissingSourcePagesRemoveOnlyDocumentBackedTemplates()
+    {
+        var retainedPageId = Guid.NewGuid();
+        var missingPageId = Guid.NewGuid();
+        SheetTemplateRecipe Template(string name, Guid? sourcePageViewId) => new(
+            Guid.NewGuid(),
+            SheetTemplateRecipe.CurrentRecipeVersion,
+            name,
+            new PaperRecipe(420, 297, "Millimeters"),
+            [],
+            null,
+            [],
+            new Dictionary<string, string>(),
+            "{index}")
+        {
+            SourcePageViewId = sourcePageViewId,
+        };
+        var retained = Template("Retained", retainedPageId);
+        var missing = Template("Missing", missingPageId);
+        var imported = Template("Imported", null);
+        var state = DocumentState.Empty() with { SheetTemplates = [retained, missing, imported] };
+
+        var cleaned = state.RemoveTemplatesForMissingSources(new HashSet<Guid> { retainedPageId });
+
+        Assert.Equal([retained.Id, imported.Id], cleaned.Templates.Select(template => template.Id));
+    }
+
+    [Fact]
     public void PopulatedStateRoundTrips()
     {
         var folder = new FolderRecord(Guid.NewGuid(), WellKnownIds.UnorganizedFolderId, "Plans", 1);

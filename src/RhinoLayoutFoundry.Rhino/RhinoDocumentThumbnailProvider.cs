@@ -96,9 +96,8 @@ internal sealed class RhinoDocumentThumbnailProvider : IDocumentThumbnailProvide
         using var captureSettings = new ViewCaptureSettings(page, requestedSize, captureDpi)
         {
             // Preserve Rhino's canonical per-detail display pipeline while
-            // presenting page and object colors as Rhino would for print. A
-            // transparent capture background composites onto the observer's
-            // white paper surface instead of retaining the viewport gray.
+            // presenting page and object colors as Rhino would for print. The
+            // framebuffer hook below supplies Foundry's preview surface color.
             DrawBackground = false,
             DrawBackgroundBitmap = false,
             DrawWallpaper = false,
@@ -112,15 +111,41 @@ internal sealed class RhinoDocumentThumbnailProvider : IDocumentThumbnailProvide
             requestedSize,
             new System.Drawing.Rectangle(System.Drawing.Point.Empty, requestedSize));
 
-        using var bitmap = ViewCapture.CaptureToBitmap(captureSettings);
-        if (bitmap is null)
+        var requestedBackground = request.Key.BackgroundArgb == 0
+            ? (System.Drawing.Color?)null
+            : System.Drawing.Color.FromArgb(unchecked((int)request.Key.BackgroundArgb));
+        EventHandler<InitFrameBufferEventArgs>? initializeFrameBuffer = requestedBackground is { } fill
+            ? (_, eventArgs) => eventArgs.SetFill(fill)
+            : null;
+        if (initializeFrameBuffer is not null)
+            DisplayPipeline.InitFrameBuffer += initializeFrameBuffer;
+
+        System.Drawing.Bitmap? bitmap;
+        try
         {
-            return new OverviewThumbnailResult(request.Key, null, "Rhino did not return a page preview.");
+            // Rhino initializes a separate framebuffer for page and detail
+            // display pipelines. Supplying the Foundry preview fill here keeps
+            // both surfaces consistent without changing the user's Rhino
+            // appearance or display-mode settings.
+            bitmap = ViewCapture.CaptureToBitmap(captureSettings);
+        }
+        finally
+        {
+            if (initializeFrameBuffer is not null)
+                DisplayPipeline.InitFrameBuffer -= initializeFrameBuffer;
         }
 
-        using var stream = new MemoryStream();
-        bitmap.Save(stream, ImageFormat.Png);
-        return new OverviewThumbnailResult(request.Key, stream.ToArray());
+        using (bitmap)
+        {
+            if (bitmap is null)
+            {
+                return new OverviewThumbnailResult(request.Key, null, "Rhino did not return a page preview.");
+            }
+
+            using var stream = new MemoryStream();
+            bitmap.Save(stream, ImageFormat.Png);
+            return new OverviewThumbnailResult(request.Key, stream.ToArray());
+        }
     }
 }
 

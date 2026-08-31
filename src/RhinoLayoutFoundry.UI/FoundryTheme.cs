@@ -94,6 +94,8 @@ internal static class FoundryTheme
         CanvasGridColor,
         (int)Math.Round(DefaultCanvasGridOpacity * 255));
 
+    internal static Color CanvasPreviewBackground => Colors.White;
+
     internal static Color SelectionAccent => RhinoColor(
         () => AppearanceSettings.SelectedObjectColor,
         Color.FromArgb(59, 130, 246, 255));

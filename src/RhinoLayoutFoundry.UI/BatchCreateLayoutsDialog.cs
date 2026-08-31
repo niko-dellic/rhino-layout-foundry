@@ -25,9 +25,11 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
     private readonly DropDown _destinationDropDown;
     private readonly NumericStepper _quantityStepper;
     private readonly TextBox _patternBox;
+    private readonly FoundryToolbarIconButton _patternHelpButton;
     private readonly NumericStepper _startStepper;
     private readonly NumericStepper _stepStepper;
     private readonly LayoutPreviewTray _layoutPreviewTray;
+    private readonly LayoutPickerDrawable _layoutPickerTrigger;
     private readonly LayoutSelectionDrawable _layoutSelectorPreview;
     private readonly DropDown _paperPresetDropDown;
     private readonly DropDown _orientationDropDown;
@@ -38,7 +40,6 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
     private readonly FoundryTextSegmentedControl _detailLayerModeControl;
     private readonly DropDown _detailLayerDropDown;
     private readonly Panel _detailLayerPickerHost;
-    private readonly Label _detailLayerHint;
     private readonly FoundryCheckBox _renameChangeCheck;
     private readonly FoundryCheckBox _paperChangeCheck;
     private readonly FoundryCheckBox _displayModeChangeCheck;
@@ -110,6 +111,10 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             Text = _isEditMode ? string.Empty : "Page {index}",
             PlaceholderText = _isEditMode ? "Example: A-{index:000}" : string.Empty,
         };
+        _patternHelpButton = new FoundryToolbarIconButton(
+            FoundryViewIcons.NamingPatternHelp(),
+            "Show naming-pattern wildcards");
+        _patternHelpButton.Click += (_, _) => new NamingPatternHelpDialog().ShowModal(this);
         _startStepper = IntegerStepper(
             _isEditMode ? 1 : FirstAvailablePageNumber(snapshot), -999999, 999999);
         _stepStepper = IntegerStepper(1, -999999, 999999);
@@ -131,9 +136,10 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             SelectedIndex = 0,
         };
         _layoutPreviewTray = new LayoutPreviewTray(_layoutChoices, selectedIndex: 1);
+        _layoutPickerTrigger = new LayoutPickerDrawable(_layoutChoices, selectedIndex: 1);
         _layoutSelectorPreview = new LayoutSelectionDrawable(_layoutChoices, selectedIndex: 1);
         _layoutSelectorPreview.ToolTip =
-            "Click a detail to edit its named view and display mode. Click elsewhere to change the layout.";
+            "Click a detail to edit its named view and display mode.";
         UpdateLayoutSelector();
         _displayModePicker = new FilteredPicker(
             new[] { InheritDisplayMode }.Concat(snapshot.DisplayModes.Values),
@@ -181,8 +187,6 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             Content = new FoundryFormField(_detailLayerDropDown),
             Visible = false,
         };
-        _detailLayerHint = FoundryTheme.MutedLabel(
-            "Foundry keeps tracking the dedicated layer if it is renamed or moved.");
         _titleBlockPreviewTray = new TitleBlockPreviewTray(_titleBlockChoices, selectedIndex: 0);
         _titleBlockSelectorPreview = new TitleBlockSelectionDrawable(_titleBlockChoices, selectedIndex: 0);
         _titleBlockModeControl = new FoundryTextSegmentedControl(
@@ -191,7 +195,9 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             segmentWidth: 62,
             leadingLabel: "Title block",
             leadingLabelWidth: 76);
+        _layoutSelectorPreview.SetTitleBlock(_titleBlockChoices[0]);
         _namedViewPreviewTray = new NamedViewPreviewTray(_namedViewChoices, selectedIndex: 0);
+        _namedViewPreviewTray.PreviewsChanged += (_, _) => RefreshDetailAssignments();
         _layoutGroupChips = new StackLayout
         {
             Orientation = Orientation.Horizontal,
@@ -256,7 +262,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         _patternBox.TextChanged += (_, _) => RefreshPreview();
         _paperPresetDropDown.SelectedIndexChanged += (_, _) => QueueApplyPaperPreset();
         _orientationDropDown.SelectedIndexChanged += (_, _) => QueueApplyPaperPreset();
-        _layoutSelectorPreview.Activated += (_, _) => ToggleLayoutGallery();
+        _layoutPickerTrigger.Activated += (_, _) => ToggleLayoutGallery();
         _layoutSelectorPreview.DetailActivated += (_, eventArgs) => OpenDetailAssignmentDialog(eventArgs.Index);
         _layoutPreviewTray.SelectedIndexChanged += OnLayoutSelectionChanged;
         _layoutPreviewTray.SelectionCommitted += (_, _) => HideLayoutGallery();
@@ -317,6 +323,13 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                 },
             },
         };
+        Shown += (_, _) =>
+        {
+            _layoutSelectorPreview.SetAvailableHeight(Math.Clamp(ClientSize.Height / 2, 260, 560));
+            _ = LoadNamedViewPreviewsAsync();
+        };
+        SizeChanged += (_, _) => _layoutSelectorPreview.SetAvailableHeight(
+            Math.Clamp(ClientSize.Height / 2, 260, 560));
         RefreshEditControlState();
         RefreshPreview();
     }
@@ -343,9 +356,10 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                     Spacing = FoundryTheme.Space3,
                     Items =
                     {
-                        FixedWidthCard("Batch", CreateBatchEditor(), 280),
+                        FixedWidthCard("Batch", CreateBatchEditor(), 320),
                         FixedWidthCard("Page size", CreatePaperEditor(), 240),
-                        FixedWidthCard("Layout && views", CreateLayoutEditor(), 420),
+                        FixedWidthCard("Layout", CreateLayoutEditor(), 320),
+                        FixedWidthCard("Preview", CreateSheetPreview(), 460),
                     },
                 },
             },
@@ -379,7 +393,13 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             table.Rows.Add(new TableRow(new Label { Text = "Quantity" }, new FoundryFormField(_quantityStepper)));
         else
             table.Rows.Add(new TableRow(new TableCell(_renameChangeCheck, true)));
-        table.Rows.Add(new TableRow(new Label { Text = "Name / pattern" },
+        table.Rows.Add(new TableRow(new StackLayout
+        {
+            Orientation = Orientation.Horizontal,
+            VerticalContentAlignment = VerticalAlignment.Center,
+            Spacing = FoundryTheme.Space1,
+            Items = { new Label { Text = "Name / pattern" }, _patternHelpButton },
+        },
             new TableCell(new FoundryFormField(_patternBox), true)));
         table.Rows.Add(new TableRow(new Label { Text = "Start / step" }, new StackLayout
         {
@@ -417,12 +437,24 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         else
         {
             editor.Items.Add(SectionLabel("Detail layout"));
-            editor.Items.Add(new Panel { Width = 380, Content = _layoutSelectorPreview });
+            editor.Items.Add(new Panel { Width = 280, Content = _layoutPickerTrigger });
         }
         editor.Items.Add(SectionLabel("Sheet defaults"));
         editor.Items.Add(CreateSheetDefaultsEditor());
         return editor;
     }
+
+    private Control CreateSheetPreview() => new StackLayout
+    {
+        Spacing = FoundryTheme.Space2,
+        HorizontalContentAlignment = HorizontalAlignment.Stretch,
+        Items =
+        {
+            new Panel { Width = 428, Content = _layoutSelectorPreview },
+            FoundryTheme.MutedLabel(
+                "Click a detail in the sheet preview to assign its named view and display mode."),
+        },
+    };
 
     private Control CreateSheetDefaultsEditor()
     {
@@ -451,7 +483,6 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                     {
                         new Panel { Width = _detailLayerModeControl.Width, Content = _detailLayerModeControl },
                         _detailLayerPickerHost,
-                        _detailLayerHint,
                     },
                 },
             },
@@ -945,9 +976,10 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
 
     private void UpdateLayoutSelector()
     {
-        _layoutSelectorPreview.SetSelection(
-            Math.Max(0, _layoutPreviewTray.SelectedIndex),
-            _layoutGallery?.Visible == true);
+        var selectedIndex = Math.Max(0, _layoutPreviewTray.SelectedIndex);
+        var expanded = _layoutGallery?.Visible == true;
+        _layoutPickerTrigger.SetSelection(selectedIndex, expanded);
+        _layoutSelectorPreview.SetSelection(selectedIndex);
     }
 
     private void ToggleLayoutGallery()
@@ -1048,8 +1080,8 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
     private void PositionLayoutGallery()
     {
         if (_layoutGallery is null) return;
-        var selectorBottomLeft = _layoutSelectorPreview.PointToScreen(
-            new PointF(0, _layoutSelectorPreview.Height));
+        var selectorBottomLeft = _layoutPickerTrigger.PointToScreen(
+            new PointF(0, _layoutPickerTrigger.Height));
         var screen = Screen.Screens.FirstOrDefault(candidate => candidate.Bounds.Contains(selectorBottomLeft)) ??
                      Screen.PrimaryScreen;
         var workArea = screen.WorkingArea;
@@ -1061,12 +1093,12 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         var desiredWidth = _layoutPreviewTray.ContentWidth + FoundryTheme.Space4 * 2 + 2;
         var width = Math.Min(desiredWidth, Math.Max(320, workRight - workLeft - FoundryTheme.Space4 * 2));
         var height = Math.Min(_layoutPreviewTray.ContentHeight + 58, 420);
-        var x = (int)Math.Round(selectorBottomLeft.X + _layoutSelectorPreview.Width - width);
+        var x = (int)Math.Round(selectorBottomLeft.X + _layoutPickerTrigger.Width - width);
         x = Math.Clamp(x, workLeft + FoundryTheme.Space2, workRight - width - FoundryTheme.Space2);
         var y = (int)Math.Round(selectorBottomLeft.Y + FoundryTheme.Space1);
         if (y + height > workBottom - FoundryTheme.Space2)
         {
-            var selectorTop = _layoutSelectorPreview.PointToScreen(PointF.Empty).Y;
+            var selectorTop = _layoutPickerTrigger.PointToScreen(PointF.Empty).Y;
             y = (int)Math.Round(selectorTop - height - FoundryTheme.Space1);
         }
         y = Math.Clamp(y, workTop + FoundryTheme.Space2, workBottom - height - FoundryTheme.Space2);
@@ -1255,8 +1287,8 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             var key = new NamedViewThumbnailKey(
                 _snapshot.DocumentRuntimeSerialNumber,
                 choice.Name!,
-                192,
-                120,
+                320,
+                200,
                 _snapshot.Revision);
             var result = await LayoutFoundryUiHost.CaptureNamedViewThumbnailAsync(
                 new NamedViewThumbnailRequest(key),
@@ -1318,14 +1350,6 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             0,
             (int)DetailLayerTargetMode.Other);
         _detailLayerPickerHost.Visible = mode == DetailLayerTargetMode.Other;
-        _detailLayerHint.Text = mode switch
-        {
-            DetailLayerTargetMode.Dedicated =>
-                "Foundry keeps tracking the dedicated layer if it is renamed or moved.",
-            DetailLayerTargetMode.Active =>
-                "Details are placed on Rhino's active layer when the batch is created.",
-            _ => "The selected layer is tracked by identity, so renaming or moving it is safe.",
-        };
         var layerId = mode == DetailLayerTargetMode.Other ? SelectedDetailLayerId() : null;
         ApplyToTargets(draft => draft with
         {
@@ -1357,9 +1381,9 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
 
     private void UpdateTitleBlockSelector()
     {
-        _titleBlockSelectorPreview.SetSelection(
-            Math.Max(0, _titleBlockPreviewTray.SelectedIndex),
-            _titleBlockGallery?.Visible == true);
+        var selectedIndex = Math.Max(0, _titleBlockPreviewTray.SelectedIndex);
+        _titleBlockSelectorPreview.SetSelection(selectedIndex, _titleBlockGallery?.Visible == true);
+        _layoutSelectorPreview.SetTitleBlock(_titleBlockChoices[selectedIndex]);
     }
 
     private void ApplyToTargets(Func<CreationDraft, CreationDraft> update)
@@ -1527,7 +1551,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         if (details.Count == 0)
         {
             _layoutSelectorPreview.SetDetailStates([]);
-            _layoutSelectorPreview.ToolTip = "This layout creates no details. Click to change the layout.";
+            _layoutSelectorPreview.ToolTip = "This layout creates no details.";
             return;
         }
 
@@ -1555,6 +1579,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                 details[detailIndex],
                 namedViewLabel,
                 displayModeLabel,
+                mixedNamedViews ? null : _namedViewPreviewTray.PreviewFor(namedViewValues[0]),
                 namedViewValues.Any(value => !string.IsNullOrWhiteSpace(value)),
                 displayModeValues.Any(value => value is not null),
                 mixedNamedViews,
@@ -1563,7 +1588,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
 
         _layoutSelectorPreview.SetDetailStates(states);
         _layoutSelectorPreview.ToolTip =
-            "Click a numbered detail to edit its named view and display mode. Click elsewhere to change the layout.";
+            "Click a numbered detail to edit its named view and display mode.";
     }
 
     private void OpenDetailAssignmentDialog(int detailIndex)
@@ -1674,14 +1699,6 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                 _detailLayerDropDown.SelectedIndex = Array.FindIndex(
                     _layerChoices, choice => choice.Id == detailLayerId);
             _detailLayerPickerHost.Visible = layerMode == DetailLayerTargetMode.Other;
-            _detailLayerHint.Text = layerMode switch
-            {
-                DetailLayerTargetMode.Dedicated =>
-                    "Foundry keeps tracking the dedicated layer if it is renamed or moved.",
-                DetailLayerTargetMode.Active =>
-                    "Details are placed on Rhino's active layer when the batch is created.",
-                _ => "The selected layer is tracked by identity, so renaming or moving it is safe.",
-            };
             _titleBlockPreviewTray.SelectedIndex = Math.Max(0, Array.IndexOf(_titleBlockChoices, draft.TitleBlock));
             _titleBlockModeControl.SelectedIndex = _titleBlockPreviewTray.SelectedIndex;
             UpdateTitleBlockSelector();
@@ -1857,7 +1874,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         .. snapshot.Templates
             .OrderBy(template => template.Name, StringComparer.OrdinalIgnoreCase)
             .Select(template => new LayoutChoice(
-                $"Template — {template.Name}", BuiltInLayoutKind.Blank, template.Id, template)),
+                $"{template.Name} — Template", BuiltInLayoutKind.Blank, template.Id, template)),
     ];
 
     private static TitleBlockChoice[] TitleBlockChoices(DocumentSnapshot snapshot, bool editMode) =>
@@ -1997,6 +2014,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         string Label,
         string NamedViewLabel,
         string DisplayModeLabel,
+        Bitmap? NamedViewPreview,
         bool HasNamedView,
         bool HasDisplayMode,
         bool NamedViewIsMixed,
@@ -2489,6 +2507,10 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             return _previews.GetValueOrDefault(name);
         }
 
+        internal Bitmap? PreviewFor(string? name) => string.IsNullOrWhiteSpace(name)
+            ? null
+            : _previews.GetValueOrDefault(name);
+
         internal void SetPreview(string name, Bitmap bitmap)
         {
             if (_previews.Remove(name, out var previous)) previous.Dispose();
@@ -2788,16 +2810,19 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             Graphics graphics,
             TitleBlockChoice choice,
             PaperRecipe paper,
-            RectangleF page)
+            RectangleF page,
+            bool showEmptyMarker = true)
         {
-            graphics.FillRectangle(Color.FromArgb(50, 0, 0, 0), page.X + 2, page.Y + 3, page.Width, page.Height);
-            graphics.FillRectangle(Colors.White, page);
-            graphics.DrawRectangle(new Pen(Color.FromArgb(160, 90, 90, 90), 1), page);
+            graphics.FillRectangle(FoundryTheme.WithAlpha(FoundryTheme.CanvasBorder, 55),
+                page.X + 2, page.Y + 3, page.Width, page.Height);
+            graphics.FillRectangle(FoundryTheme.CanvasSubtleSurface, page);
+            graphics.DrawRectangle(new Pen(FoundryTheme.CanvasBorder, 1), page);
             if (!choice.UseTemplate && choice.SourceInstanceObjectId is null && choice.BuiltInKind is null)
             {
-                graphics.DrawLine(new Pen(Color.FromArgb(180, 145, 145, 145), 2),
-                    page.X + page.Width * 0.28f, page.Y + page.Height * 0.72f,
-                    page.X + page.Width * 0.72f, page.Y + page.Height * 0.28f);
+                if (showEmptyMarker)
+                    graphics.DrawLine(new Pen(FoundryTheme.WithAlpha(FoundryTheme.MutedText, 145), 2),
+                        page.X + page.Width * 0.28f, page.Y + page.Height * 0.72f,
+                        page.X + page.Width * 0.72f, page.Y + page.Height * 0.28f);
                 return;
             }
 
@@ -2815,7 +2840,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                         Y(layout.Block.Top),
                         W(layout.Block.Width),
                         H(layout.Block.Height));
-                    var pen = new Pen(Color.FromArgb(190, 95, 98, 102), 1);
+                    var pen = new Pen(FoundryTheme.WithAlpha(FoundryTheme.PrimaryText, 155), 1);
                     graphics.DrawRectangle(pen, managedBlock);
                     graphics.DrawLine(pen, managedBlock.X, managedBlock.Y + managedBlock.Height * 0.32f,
                         managedBlock.Right, managedBlock.Y + managedBlock.Height * 0.32f);
@@ -2832,7 +2857,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             }
 
             var margin = Math.Max(2, page.Width * 0.035f);
-            graphics.DrawRectangle(new Pen(Color.FromArgb(180, 115, 115, 115), 1),
+            graphics.DrawRectangle(new Pen(FoundryTheme.WithAlpha(FoundryTheme.MutedText, 150), 1),
                 page.X + margin, page.Y + margin, page.Width - margin * 2, page.Height - margin * 2);
             var blockWidth = page.Width * (choice.UseTemplate ? 0.42f : 0.48f);
             var blockHeight = page.Height * 0.24f;
@@ -2841,11 +2866,11 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                 page.Bottom - margin - blockHeight,
                 blockWidth,
                 blockHeight);
-            graphics.FillRectangle(Color.FromArgb(255, 226, 228, 231), block);
-            graphics.DrawRectangle(new Pen(Color.FromArgb(190, 95, 98, 102), 1), block);
-            graphics.DrawLine(new Pen(Color.FromArgb(150, 95, 98, 102), 1),
+            graphics.FillRectangle(FoundryTheme.ToolbarButtonBackground, block);
+            graphics.DrawRectangle(new Pen(FoundryTheme.WithAlpha(FoundryTheme.PrimaryText, 155), 1), block);
+            graphics.DrawLine(new Pen(FoundryTheme.WithAlpha(FoundryTheme.MutedText, 145), 1),
                 block.X + block.Width * 0.62f, block.Y, block.X + block.Width * 0.62f, block.Bottom);
-            graphics.DrawLine(new Pen(Color.FromArgb(150, 95, 98, 102), 1),
+            graphics.DrawLine(new Pen(FoundryTheme.WithAlpha(FoundryTheme.MutedText, 145), 1),
                 block.X, block.Y + block.Height * 0.5f, block.Right, block.Y + block.Height * 0.5f);
         }
 
@@ -2906,18 +2931,90 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         }
     }
 
-    private sealed class LayoutSelectionDrawable : Drawable
+    private sealed class LayoutPickerDrawable : Drawable
     {
         private readonly LayoutChoice[] _choices;
         private readonly Font _titleFont = SystemFonts.Bold(9);
         private readonly Font _subtitleFont = SystemFonts.Default(8);
+        private int _selectedIndex;
+        private bool _expanded;
+        private bool _hovered;
+
+        internal LayoutPickerDrawable(LayoutChoice[] choices, int selectedIndex)
+            : base(true)
+        {
+            _choices = choices;
+            _selectedIndex = Math.Clamp(selectedIndex, 0, Math.Max(0, choices.Length - 1));
+            CanFocus = true;
+            Size = new Size(280, 48);
+            MinimumSize = Size;
+            BackgroundColor = Colors.Transparent;
+            Paint += OnPaint;
+            MouseEnter += (_, _) => { _hovered = true; Invalidate(); };
+            MouseLeave += (_, _) => { _hovered = false; Invalidate(); };
+            MouseDown += (_, eventArgs) =>
+            {
+                if (!Enabled || !eventArgs.Buttons.HasFlag(MouseButtons.Primary)) return;
+                Focus();
+                Activated?.Invoke(this, EventArgs.Empty);
+                eventArgs.Handled = true;
+            };
+            KeyDown += (_, eventArgs) =>
+            {
+                if (!Enabled || eventArgs.Key is not (Keys.Enter or Keys.Space)) return;
+                Activated?.Invoke(this, EventArgs.Empty);
+                eventArgs.Handled = true;
+            };
+        }
+
+        internal event EventHandler? Activated;
+
+        internal void SetSelection(int selectedIndex, bool expanded)
+        {
+            _selectedIndex = Math.Clamp(selectedIndex, 0, Math.Max(0, _choices.Length - 1));
+            _expanded = expanded;
+            Invalidate();
+        }
+
+        private void OnPaint(object? sender, PaintEventArgs eventArgs)
+        {
+            var graphics = eventArgs.Graphics;
+            graphics.AntiAlias = true;
+            var bounds = new RectangleF(0.5f, 0.5f, Math.Max(1, Width - 1), Math.Max(1, Height - 1));
+            using var surface = GraphicsPath.GetRoundRect(bounds, 6);
+            graphics.FillPath(
+                _hovered && Enabled ? FoundryTheme.CanvasSubtleSurface : FoundryTheme.ToolbarButtonBackground,
+                surface);
+            graphics.DrawPath(new Pen(
+                HasFocus ? FoundryTheme.PrimaryText : FoundryTheme.CanvasBorder,
+                HasFocus ? 2 : 1), surface);
+
+            var parts = _choices[_selectedIndex].Label.Split([" — "], 2, StringSplitOptions.None);
+            graphics.DrawText(_titleFont, Enabled ? FoundryTheme.PrimaryText : FoundryTheme.MutedText,
+                10, parts.Length > 1 ? 8 : 16,
+                LayoutPreviewTray.FitText(graphics, _titleFont, parts[0], Math.Max(20, Width - 40)));
+            if (parts.Length > 1)
+                graphics.DrawText(_subtitleFont, FoundryTheme.MutedText, 10, 26,
+                    LayoutPreviewTray.FitText(graphics, _subtitleFont, parts[1], Math.Max(20, Width - 40)));
+            graphics.DrawText(SystemFonts.Default(10), FoundryTheme.MutedText,
+                Math.Max(16, Width - 22), 15, _expanded ? "▴" : "▾");
+        }
+    }
+
+    private sealed class LayoutSelectionDrawable : Drawable
+    {
+        private const int PreviewWidth = 428;
+        private const int MinimumPreviewHeight = 240;
+        private readonly LayoutChoice[] _choices;
         private readonly Font _detailFont = SystemFonts.Bold(7);
         private readonly Font _detailMetaFont = SystemFonts.Default(6);
         private DetailPreviewState[] _detailStates = [];
         private int _selectedIndex;
         private int _hoveredDetailIndex = -1;
         private int _keyboardDetailIndex = -1;
-        private bool _expanded;
+        private PaperRecipe _paper = new(594, 420, "Millimeters");
+        private TitleBlockChoice? _titleBlock;
+        private int _availableHeight = 420;
 
         internal LayoutSelectionDrawable(LayoutChoice[] choices, int selectedIndex)
             : base(true)
@@ -2925,8 +3022,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             _choices = choices;
             _selectedIndex = Math.Clamp(selectedIndex, 0, Math.Max(0, choices.Length - 1));
             CanFocus = true;
-            Height = 126;
-            MinimumSize = new Size(380, 126);
+            UpdatePreviewSize();
             BackgroundColor = FoundryTheme.CanvasSurface;
             Paint += OnPaint;
             MouseDown += OnMouseDown;
@@ -2935,10 +3031,9 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             KeyDown += OnKeyDown;
         }
 
-        internal event EventHandler? Activated;
         internal event EventHandler<DetailActivatedEventArgs>? DetailActivated;
 
-        internal void SetSelection(int selectedIndex, bool expanded)
+        internal void SetSelection(int selectedIndex)
         {
             if (_selectedIndex != selectedIndex)
             {
@@ -2946,7 +3041,6 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                 _keyboardDetailIndex = -1;
             }
             _selectedIndex = Math.Clamp(selectedIndex, 0, Math.Max(0, _choices.Length - 1));
-            _expanded = expanded;
             Invalidate();
         }
 
@@ -2958,8 +3052,25 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             Invalidate();
         }
 
-        internal void SetPaper(PaperRecipe _)
+        internal void SetPaper(PaperRecipe paper)
         {
+            _paper = paper;
+            UpdatePreviewSize();
+            Invalidate();
+        }
+
+        internal void SetAvailableHeight(int availableHeight)
+        {
+            var next = Math.Max(MinimumPreviewHeight, availableHeight);
+            if (_availableHeight == next) return;
+            _availableHeight = next;
+            UpdatePreviewSize();
+            Invalidate();
+        }
+
+        internal void SetTitleBlock(TitleBlockChoice titleBlock)
+        {
+            _titleBlock = titleBlock;
             Invalidate();
         }
 
@@ -2967,40 +3078,43 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         {
             var graphics = eventArgs.Graphics;
             graphics.AntiAlias = true;
-            var bounds = new RectangleF(0.5f, 0.5f, Math.Max(1, Width - 1), Math.Max(1, Height - 1));
-            graphics.FillRectangle(FoundryTheme.CanvasSurface, bounds);
-            graphics.DrawRectangle(new Pen(FoundryTheme.CanvasBorder, HasFocus ? 2 : 1), bounds);
-
-            var parts = _choices[_selectedIndex].Label.Split([" — "], 2, StringSplitOptions.None);
-            var title = LayoutPreviewTray.FitText(graphics, _titleFont, parts[0], Math.Max(20, Width - 120));
-            graphics.DrawText(_titleFont, FoundryTheme.PrimaryText, 10, 10, title);
-            if (parts.Length > 1)
-            {
-                var subtitle = LayoutPreviewTray.FitText(graphics, _subtitleFont, parts[1], 78);
-                graphics.DrawText(_subtitleFont, FoundryTheme.MutedText,
-                    Math.Max(92, Width - 104), 10, subtitle);
-            }
-            graphics.DrawText(SystemFonts.Default(10), FoundryTheme.MutedText,
-                Math.Max(16, Width - 22), 8, _expanded ? "▴" : "▾");
-
             var page = PageBounds();
-            graphics.FillRectangle(FoundryTheme.CanvasSubtleSurface, page);
-            graphics.DrawRectangle(new Pen(FoundryTheme.CanvasBorder, 1), page);
-            var details = LayoutPreviewTray.DetailBounds(_choices[_selectedIndex], page);
+            TitleBlockPreviewTray.DrawTitleBlock(
+                graphics,
+                _titleBlock ?? new TitleBlockChoice(false, null, null, "None", null),
+                _paper,
+                page,
+                showEmptyMarker: false);
+            var details = PreviewDetailBounds(page);
             for (var detailIndex = 0; detailIndex < details.Count; detailIndex++)
             {
                 var detail = details[detailIndex];
                 var interactive = detailIndex < _detailStates.Length;
                 var highlighted = interactive &&
                                   (detailIndex == _hoveredDetailIndex || detailIndex == _keyboardDetailIndex);
-                graphics.FillRectangle(
-                    highlighted ? FoundryTheme.ToolbarActiveBackground : FoundryTheme.ToolbarButtonBackground,
-                    detail);
+                var state = interactive ? _detailStates[detailIndex] : null;
+                if (state?.NamedViewPreview is { } namedViewPreview)
+                {
+                    graphics.DrawImage(namedViewPreview, detail);
+                    graphics.FillRectangle(
+                        FoundryTheme.WithAlpha(FoundryTheme.CanvasSurface, 175),
+                        detail.X, detail.Y, detail.Width, Math.Min(24, detail.Height));
+                    if (detail.Height >= 30)
+                        graphics.FillRectangle(
+                            FoundryTheme.WithAlpha(FoundryTheme.CanvasSurface, 165),
+                            detail.X, detail.Bottom - 17, detail.Width, 17);
+                }
+                else
+                {
+                    graphics.FillRectangle(
+                        highlighted ? FoundryTheme.ToolbarActiveBackground : FoundryTheme.ToolbarButtonBackground,
+                        detail);
+                }
                 graphics.DrawRectangle(new Pen(
                     highlighted ? FoundryTheme.PrimaryText : FoundryTheme.CanvasBorder,
                     highlighted ? 2 : 1), detail);
                 if (!interactive) continue;
-                var state = _detailStates[detailIndex];
+                var previewState = _detailStates[detailIndex];
                 if (detail.Width < 28 || detail.Height < 20)
                 {
                     DrawCentered(graphics, _detailFont, FoundryTheme.PrimaryText,
@@ -3017,10 +3131,10 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                 DrawFittedText(
                     graphics,
                     _detailFont,
-                    state.HasNamedView || state.NamedViewIsMixed
+                    previewState.HasNamedView || previewState.NamedViewIsMixed
                         ? FoundryTheme.PrimaryText
                         : FoundryTheme.MutedText,
-                    state.NamedViewLabel,
+                    previewState.NamedViewLabel,
                     detail.X + 22,
                     detail.Y + 5,
                     Math.Max(8, detail.Width - 31));
@@ -3028,17 +3142,18 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                     DrawFittedText(
                         graphics,
                         _detailMetaFont,
-                        state.HasDisplayMode || state.DisplayModeIsMixed
+                        previewState.HasDisplayMode || previewState.DisplayModeIsMixed
                             ? FoundryTheme.PrimaryText
                             : FoundryTheme.MutedText,
-                        state.DisplayModeLabel,
+                        previewState.DisplayModeLabel,
                         detail.X + 5,
                         detail.Bottom - 12,
                         Math.Max(8, detail.Width - 15));
                 graphics.DrawText(_detailMetaFont, FoundryTheme.MutedText,
                     detail.Right - 9, detail.Bottom - 12, "›");
             }
-
+            if (HasFocus)
+                graphics.DrawRectangle(new Pen(FoundryTheme.PrimaryText, 2), page);
         }
 
         private void OnMouseDown(object? sender, MouseEventArgs eventArgs)
@@ -3054,8 +3169,6 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                 Invalidate();
                 return;
             }
-            Activated?.Invoke(this, EventArgs.Empty);
-            eventArgs.Handled = true;
         }
 
         private void OnMouseMove(object? sender, MouseEventArgs eventArgs)
@@ -3065,7 +3178,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             _hoveredDetailIndex = next;
             ToolTip = next >= 0
                 ? $"{_detailStates[next].Label}\nNamed view: {_detailStates[next].NamedViewLabel}\nDisplay mode: {_detailStates[next].DisplayModeLabel}\nClick to edit."
-                : "Click outside the detail buttons to change the layout.";
+                : "Sheet preview. Click a detail to edit its named view and display mode.";
             Invalidate();
         }
 
@@ -3073,7 +3186,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         {
             if (_hoveredDetailIndex < 0) return;
             _hoveredDetailIndex = -1;
-            ToolTip = "Click a detail to edit its named view and display mode. Click elsewhere to change the layout.";
+            ToolTip = "Click a detail to edit its named view and display mode.";
             Invalidate();
         }
 
@@ -3103,16 +3216,68 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                 eventArgs.Handled = true;
                 return;
             }
-            if (eventArgs.Key is Keys.Enter or Keys.Space)
-            {
-                Activated?.Invoke(this, EventArgs.Empty);
-                eventArgs.Handled = true;
-            }
         }
 
         private RectangleF PageBounds()
         {
-            return new RectangleF(8, 32, Math.Max(1, Width - 16), Math.Max(1, Height - 40));
+            return TitleBlockPreviewTray.PageBounds(
+                _paper,
+                new RectangleF(0, 0, Math.Max(1, Width), Math.Max(1, Height)));
+        }
+
+        private void UpdatePreviewSize()
+        {
+            var ratio = Math.Max(0.001, _paper.Height) / Math.Max(0.001, _paper.Width);
+            var height = Math.Clamp(
+                (int)Math.Round(PreviewWidth * ratio),
+                MinimumPreviewHeight,
+                _availableHeight);
+            Size = new Size(PreviewWidth, height);
+            MinimumSize = Size;
+        }
+
+        private RectangleF DetailContentBounds(RectangleF page)
+        {
+            if (_titleBlock?.BuiltInKind is not { } kind) return page;
+            try
+            {
+                var layout = AdaptiveTitleBlockLayoutSolver.Solve(kind, _paper);
+                return new RectangleF(
+                    page.X + (float)(layout.Content.Left / _paper.Width * page.Width),
+                    page.Bottom - (float)(layout.Content.Top / _paper.Height * page.Height),
+                    (float)(layout.Content.Width / _paper.Width * page.Width),
+                    (float)(layout.Content.Height / _paper.Height * page.Height));
+            }
+            catch (Exception)
+            {
+                return page;
+            }
+        }
+
+        private IReadOnlyList<RectangleF> PreviewDetailBounds(RectangleF page)
+        {
+            var choice = _choices[_selectedIndex];
+            var targetContent = DetailContentBounds(page);
+            if (_titleBlock?.BuiltInKind is null ||
+                choice.Template is not { TitleBlock.BuiltInKind: { } sourceKind } template)
+                return LayoutPreviewTray.DetailBounds(choice, targetContent);
+
+            try
+            {
+                var sourceContent = AdaptiveTitleBlockLayoutSolver.Solve(
+                    sourceKind,
+                    template.Paper).Content;
+                return template.DetailSlots.Select(slot => LayoutPreviewTray.FromNormalized(
+                    targetContent,
+                    (slot.Left - sourceContent.Left) / sourceContent.Width,
+                    (slot.Bottom - sourceContent.Bottom) / sourceContent.Height,
+                    (slot.Right - sourceContent.Left) / sourceContent.Width,
+                    (slot.Top - sourceContent.Bottom) / sourceContent.Height)).ToArray();
+            }
+            catch (Exception)
+            {
+                return LayoutPreviewTray.DetailBounds(choice, targetContent);
+            }
         }
 
         private static void DrawCentered(
@@ -3145,7 +3310,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         private int HitTestDetail(PointF location)
         {
             if (_detailStates.Length == 0) return -1;
-            var details = LayoutPreviewTray.DetailBounds(_choices[_selectedIndex], PageBounds());
+            var details = PreviewDetailBounds(PageBounds());
             for (var index = 0; index < Math.Min(details.Count, _detailStates.Length); index++)
                 if (details[index].Contains(location)) return index;
             return -1;
@@ -3272,35 +3437,42 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                     slot.Top / height)).ToArray();
             }
 
-            const double margin = 0.05;
-            const double gap = 0.02;
-            var halfGap = gap / 2;
+            var shortSide = Math.Min(page.Width, page.Height);
+            var margin = shortSide * 0.025f;
+            var halfGap = shortSide * 0.01f;
+            var left = page.Left + margin;
+            var right = page.Right - margin;
+            var top = page.Top + margin;
+            var bottom = page.Bottom - margin;
+            var midX = page.Center.X;
+            var midY = page.Center.Y;
             return choice.BuiltInLayout switch
             {
                 BuiltInLayoutKind.Blank => [],
-                BuiltInLayoutKind.SingleDetail => [FromNormalized(page, margin, margin, 1 - margin, 1 - margin)],
+                BuiltInLayoutKind.SingleDetail => [new RectangleF(left, top, right - left, bottom - top)],
                 BuiltInLayoutKind.TwoDetailsHorizontal =>
                 [
-                    FromNormalized(page, margin, 0.5 + halfGap, 1 - margin, 1 - margin),
-                    FromNormalized(page, margin, margin, 1 - margin, 0.5 - halfGap),
+                    new RectangleF(left, top, right - left, midY - halfGap - top),
+                    new RectangleF(left, midY + halfGap, right - left, bottom - midY - halfGap),
                 ],
                 BuiltInLayoutKind.TwoDetailsVertical =>
                 [
-                    FromNormalized(page, margin, margin, 0.5 - halfGap, 1 - margin),
-                    FromNormalized(page, 0.5 + halfGap, margin, 1 - margin, 1 - margin),
+                    new RectangleF(left, top, midX - halfGap - left, bottom - top),
+                    new RectangleF(midX + halfGap, top, right - midX - halfGap, bottom - top),
                 ],
                 BuiltInLayoutKind.FourDetailsGrid =>
                 [
-                    FromNormalized(page, margin, 0.5 + halfGap, 0.5 - halfGap, 1 - margin),
-                    FromNormalized(page, 0.5 + halfGap, 0.5 + halfGap, 1 - margin, 1 - margin),
-                    FromNormalized(page, margin, margin, 0.5 - halfGap, 0.5 - halfGap),
-                    FromNormalized(page, 0.5 + halfGap, margin, 1 - margin, 0.5 - halfGap),
+                    new RectangleF(left, top, midX - halfGap - left, midY - halfGap - top),
+                    new RectangleF(midX + halfGap, top, right - midX - halfGap, midY - halfGap - top),
+                    new RectangleF(left, midY + halfGap, midX - halfGap - left, bottom - midY - halfGap),
+                    new RectangleF(midX + halfGap, midY + halfGap,
+                        right - midX - halfGap, bottom - midY - halfGap),
                 ],
                 _ => [],
             };
         }
 
-        private static RectangleF FromNormalized(
+        internal static RectangleF FromNormalized(
             RectangleF page,
             double left,
             double bottom,

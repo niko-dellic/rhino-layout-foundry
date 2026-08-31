@@ -17,13 +17,25 @@ internal sealed class DocumentStateStore
     {
         if (_states.TryGetValue(document.RuntimeSerialNumber, out var state))
         {
-            return state;
+            return RemoveTemplatesForMissingSources(document, state);
         }
 
         state = DocumentState.Empty();
         _states[document.RuntimeSerialNumber] = state;
         _writeSchemaVersions[document.RuntimeSerialNumber] = DocumentState.CurrentSchemaVersion;
-        return state;
+        return RemoveTemplatesForMissingSources(document, state);
+    }
+
+    private DocumentState RemoveTemplatesForMissingSources(RhinoDoc document, DocumentState state)
+    {
+        var pageViewIds = document.Views.GetPageViews()
+            .Select(page => page.MainViewport.Id)
+            .ToHashSet();
+        var cleaned = state.RemoveTemplatesForMissingSources(pageViewIds);
+        if (ReferenceEquals(cleaned, state)) return state;
+        _states[document.RuntimeSerialNumber] = cleaned;
+        document.Modified = true;
+        return cleaned;
     }
 
     public void Set(RhinoDoc document, DocumentState state)

@@ -713,6 +713,41 @@ public static class LayoutFoundryUiHost
     }
 
     public static async Task<OperationResult> SetSheetTemplateRegistrationAsync(
+        IReadOnlyList<OverviewNodeKey> targets,
+        bool registered,
+        CancellationToken cancellationToken = default)
+    {
+        if (_snapshotProvider is null)
+            return UnavailableResult("Foundry is not connected to an active Rhino plug-in.");
+
+        try
+        {
+            var snapshot = _snapshotProvider.Capture();
+            var sheetIds = BatchTargetResolver.ResolveSheetIds(snapshot, targets);
+            if (sheetIds.Count == 0)
+                return UnavailableResult("The selected rows do not contain any layouts.");
+
+            var diagnostics = new List<Diagnostic>();
+            foreach (var sheetId in sheetIds)
+            {
+                var result = await SetSheetTemplateRegistrationAsync(
+                    sheetId,
+                    registered,
+                    cancellationToken);
+                diagnostics.AddRange(result.Diagnostics);
+                if (!result.Succeeded)
+                    return new OperationResult(false, diagnostics);
+            }
+
+            return new OperationResult(true, diagnostics);
+        }
+        catch (InvalidOperationException exception)
+        {
+            return UnavailableResult(exception.Message);
+        }
+    }
+
+    public static async Task<OperationResult> SetSheetTemplateRegistrationAsync(
         Guid sourcePageViewId,
         bool registered,
         CancellationToken cancellationToken = default)
@@ -737,10 +772,6 @@ public static class LayoutFoundryUiHost
                 var usedNames = snapshot.Templates.Select(template => template.Name)
                     .ToHashSet(StringComparer.OrdinalIgnoreCase);
                 var name = UniqueTemplateName(sheet.Name, usedNames);
-                var titleBlocks = snapshot.TitleBlockInstances.Values
-                    .Where(block => block.SourcePageViewId == sourcePageViewId)
-                    .Take(2)
-                    .ToArray();
                 plan = new CaptureSheetTemplatePlanner().Plan(new CaptureSheetTemplateRequest(
                     snapshot.DocumentRuntimeSerialNumber,
                     snapshot.Revision,
@@ -748,7 +779,7 @@ public static class LayoutFoundryUiHost
                     sourcePageViewId,
                     name,
                     "{folder}-{index:00}",
-                    null), snapshot);
+                    sheet.TitleBlockInstanceObjectId), snapshot);
             }
             else
             {

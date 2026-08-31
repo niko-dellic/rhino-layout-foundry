@@ -22,7 +22,7 @@ internal sealed class CaptureTemplateDialog : Dialog
         _sourcePageViewId = sourcePageViewId;
         _blocks = context.TitleBlockCandidates;
         Title = "Capture layout template";
-        MinimumSize = new Size(460, 300);
+        MinimumSize = new Size(460, 350);
         Resizable = false;
         Padding = new Padding(FoundryTheme.Space4);
         BackgroundColor = FoundryTheme.PanelBackground;
@@ -60,6 +60,7 @@ internal sealed class CaptureTemplateDialog : Dialog
                 Header("Capture template", $"Use '{sourceName}' as a reusable sheet recipe."),
                 Field("Template name", _nameBox),
                 Field("Default naming pattern", _patternBox),
+                Field("Title block", _titleBlockDropDown),
                 _statusLabel,
                 new TableLayout
                 {
@@ -78,7 +79,12 @@ internal sealed class CaptureTemplateDialog : Dialog
         _captureButton.Enabled = false;
         _statusLabel.Text = "Capturing layout recipe…";
         var result = await LayoutFoundryUiHost.CaptureSheetTemplateAsync(
-            _sourcePageViewId, _nameBox.Text, _patternBox.Text, null);
+            _sourcePageViewId,
+            _nameBox.Text,
+            _patternBox.Text,
+            _titleBlockDropDown.SelectedIndex > 0
+                ? _blocks[_titleBlockDropDown.SelectedIndex - 1].InstanceObjectId
+                : null);
         if (!result.Succeeded)
         {
             _statusLabel.Text = string.Join(" ", result.Diagnostics.Select(item => item.Message));

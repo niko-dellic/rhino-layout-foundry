@@ -23,7 +23,8 @@ internal sealed class FoundryFormField : PixelLayout
         Control? interactionControl = null,
         int minimumHeight = SingleLineHeight,
         int? horizontalInset = null,
-        float cornerRadius = 6)
+        float cornerRadius = 6,
+        int? fixedHeight = null)
     {
         _input = input ?? throw new ArgumentNullException(nameof(input));
         _interactionControl = interactionControl ?? input;
@@ -36,7 +37,7 @@ internal sealed class FoundryFormField : PixelLayout
         PrepareNativeInput(input);
         input.Load += (_, _) => SuppressNativeFocusRing(input);
         var requestedHeight = input.Height > 0 ? input.Height + (_verticalInset * 2) : SingleLineHeight;
-        Height = Math.Max(minimumHeight, requestedHeight);
+        Height = fixedHeight ?? Math.Max(minimumHeight, requestedHeight);
         if (input.Width > 0) Width = input.Width;
         Add(_chrome, 0, 0);
         Add(_input, _horizontalInset, _verticalInset);

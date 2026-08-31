@@ -18,9 +18,11 @@ internal sealed class FilteredPicker : Panel
     internal FilteredPicker(
         IEnumerable<string> labels,
         string placeholder,
-        int popupHeight = DefaultPopupHeight)
+        int popupHeight = DefaultPopupHeight,
+        int controlHeight = 32)
     {
-        MinimumSize = new Size(0, 32);
+        controlHeight = Math.Max(24, controlHeight);
+        MinimumSize = new Size(0, controlHeight);
         _popupHeight = Math.Max(86, popupHeight);
         _allLabels = labels.Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(label => label, StringComparer.OrdinalIgnoreCase)
@@ -29,6 +31,7 @@ internal sealed class FilteredPicker : Panel
         _toggleButton = new FoundryToolbarIconButton(
             FoundryViewIcons.ChevronDown(),
             "Show matching choices");
+        _toggleButton.Size = new Size(controlHeight, controlHeight);
         _visibleResultCount = _allLabels.Length;
         _results = new ListBox { DataStore = _allLabels, Height = _popupHeight - 2 };
         _textBox.TextChanged += (_, _) =>
@@ -72,8 +75,12 @@ internal sealed class FilteredPicker : Panel
         UnLoad += (_, _) => ClosePopup();
         var textField = new Panel
         {
-            MinimumSize = new Size(0, 32),
-            Content = new FoundryFormField(_textBox),
+            MinimumSize = new Size(0, controlHeight),
+            Content = new FoundryFormField(
+                _textBox,
+                minimumHeight: controlHeight,
+                cornerRadius: controlHeight < 32 ? 4 : 6,
+                fixedHeight: controlHeight),
         };
         Content = new StackLayout
         {
@@ -122,8 +129,8 @@ internal sealed class FilteredPicker : Panel
 
     internal void OpenResults()
     {
-        _textBox.Focus();
         Filter(showResults: true, showAllForExactValue: true);
+        _textBox.Focus();
     }
 
     public new bool Enabled

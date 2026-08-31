@@ -6,7 +6,8 @@ public readonly record struct OverviewThumbnailKey(
     int Width,
     int Height,
     long ContentVersion = 0,
-    int ResolutionBucket = 0);
+    int ResolutionBucket = 0,
+    uint BackgroundArgb = 0);
 
 public sealed record OverviewThumbnailRequest(
     OverviewThumbnailKey Key,

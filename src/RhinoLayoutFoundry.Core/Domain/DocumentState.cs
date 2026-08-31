@@ -34,6 +34,18 @@ public sealed record DocumentState(
     [JsonIgnore]
     public ProjectInformation ProjectInfo => ProjectData ?? ProjectInformation.Empty;
 
+    public DocumentState RemoveTemplatesForMissingSources(IReadOnlySet<Guid> existingPageViewIds)
+    {
+        ArgumentNullException.ThrowIfNull(existingPageViewIds);
+        var retained = Templates
+            .Where(template => template.SourcePageViewId is not { } sourceId ||
+                               existingPageViewIds.Contains(sourceId))
+            .ToArray();
+        return retained.Length == Templates.Count
+            ? this
+            : this with { SheetTemplates = retained };
+    }
+
     public static DocumentState Empty()
     {
         var root = new FolderRecord(WellKnownIds.UnorganizedFolderId, null, "Unorganized", 0);
