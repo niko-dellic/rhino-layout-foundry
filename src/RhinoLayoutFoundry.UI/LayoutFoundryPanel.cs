@@ -57,6 +57,7 @@ public sealed class LayoutFoundryPanel : Panel
     private readonly Panel _renameActions;
     private readonly Control _managementView;
     private readonly ThumbnailFoundryPanel _thumbnailView;
+    private readonly Control _thumbnailDensityControl;
     private readonly ObserverFoundryPanel _observerView;
     private readonly Panel _viewHost;
     private readonly Control _panelShell;
@@ -282,6 +283,8 @@ public sealed class LayoutFoundryPanel : Panel
             },
         };
         _thumbnailView = new ThumbnailFoundryPanel();
+        _thumbnailDensityControl = _thumbnailView.DensityControl;
+        _thumbnailDensityControl.Visible = false;
         _observerView = new ObserverFoundryPanel();
         _observerView.ExitFullscreenRequested += (_, _) => ExitFullscreen();
         _thumbnailView.DeleteSelectionRequested += OnDeleteSelectionRequested;
@@ -677,6 +680,7 @@ public sealed class LayoutFoundryPanel : Panel
         _listViewButton.Checked = mode == FoundryPanelViewMode.List;
         _thumbnailViewButton.Checked = mode == FoundryPanelViewMode.Thumbnail;
         _canvasViewButton.Checked = mode == FoundryPanelViewMode.Canvas;
+        _thumbnailDensityControl.Visible = mode == FoundryPanelViewMode.Thumbnail;
         _fullscreenButton.Checked = _fullscreenWindow is not null;
         _fullscreenButton.ToolTip = _fullscreenWindow is null
             ? $"Expand {ViewModeLabel(mode)} to a maximized workspace"
@@ -848,6 +852,7 @@ public sealed class LayoutFoundryPanel : Panel
                 BackgroundColor = FoundryTheme.CanvasBorder,
             },
             _viewModeButtonGroup,
+            _thumbnailDensityControl,
             new StackLayoutItem(_statusLabel, expand: true),
             _summaryLabel,
         },

@@ -56,6 +56,10 @@ internal static class FoundryTheme
         ? Color.FromArgb(36, 36, 36, 255)
         : Color.FromArgb(250, 250, 250, 255);
 
+    internal static Color CanvasFolderBackground => IsDarkMode
+        ? Color.FromArgb(36, 36, 36, 255)
+        : Color.FromArgb(250, 250, 250, 255);
+
     internal static Color InputBackground => IsDarkMode
         ? Color.FromArgb(36, 36, 36, 255)
         : Color.FromArgb(255, 255, 255, 255);

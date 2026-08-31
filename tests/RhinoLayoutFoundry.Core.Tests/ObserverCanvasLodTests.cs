@@ -5,6 +5,31 @@ namespace RhinoLayoutFoundry.Core.Tests;
 
 public sealed class ObserverCanvasLodTests
 {
+    [Theory]
+    [InlineData(1, 40)]
+    [InlineData(0.5, 80)]
+    [InlineData(0.25, 160)]
+    [InlineData(0.125, 320)]
+    public void GridSpacingCoarsensByStablePowersOfTwo(double zoom, double expectedWorldSpacing)
+    {
+        Assert.Equal(expectedWorldSpacing, ObserverCanvasGridPolicy.EffectiveWorldSpacing(zoom));
+    }
+
+    [Theory]
+    [InlineData(0.18)]
+    [InlineData(0.25)]
+    [InlineData(0.4)]
+    [InlineData(0.7)]
+    public void FarZoomGridMaintainsBoundedScreenDensity(double zoom)
+    {
+        var projectedSpacing = ObserverCanvasGridPolicy.EffectiveWorldSpacing(zoom) * zoom;
+
+        Assert.InRange(
+            projectedSpacing,
+            ObserverCanvasGridPolicy.MinimumProjectedSpacingPixels,
+            ObserverCanvasGridPolicy.MinimumProjectedSpacingPixels * 2);
+    }
+
     [Fact]
     public void TierSelectionUsesBothHysteresisBands()
     {

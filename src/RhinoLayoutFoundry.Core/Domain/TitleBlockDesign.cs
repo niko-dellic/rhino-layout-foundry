@@ -80,7 +80,7 @@ public sealed record AdaptiveTitleBlockLayout(
 
 public static class AdaptiveTitleBlockLayoutSolver
 {
-    public const int StyleVersion = 1;
+    public const int StyleVersion = 4;
 
     public static AdaptiveTitleBlockLayout Solve(BuiltInTitleBlockKind kind, PaperRecipe paper)
     {

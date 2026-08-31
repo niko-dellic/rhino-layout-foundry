@@ -13,6 +13,7 @@ internal sealed class FoundrySlider : Drawable
     private readonly int _minimum;
     private readonly int _maximum;
     private readonly Func<int, string> _toolTipFormatter;
+    private readonly bool _drawFocusRing;
     private int _value;
     private bool _dragging;
     private bool _hovered;
@@ -23,7 +24,8 @@ internal sealed class FoundrySlider : Drawable
         int maximum,
         int value,
         int width = 170,
-        Func<int, string>? toolTipFormatter = null)
+        Func<int, string>? toolTipFormatter = null,
+        bool drawFocusRing = true)
         : base(true)
     {
         if (maximum <= minimum)
@@ -32,6 +34,7 @@ internal sealed class FoundrySlider : Drawable
         _minimum = minimum;
         _maximum = maximum;
         _toolTipFormatter = toolTipFormatter ?? (current => $"{current}% opacity");
+        _drawFocusRing = drawFocusRing;
         _value = Math.Clamp(value, minimum, maximum);
         Size = new Size(width, 32);
         BackgroundColor = Colors.Transparent;
@@ -179,7 +182,7 @@ internal sealed class FoundrySlider : Drawable
                 _dragging ? 1.5f : 1),
             thumb);
 
-        if (!Enabled || !HasFocus || !_showFocusRing) return;
+        if (!_drawFocusRing || !Enabled || !HasFocus || !_showFocusRing) return;
         using var focus = GraphicsPath.GetRoundRect(
             new RectangleF(1.5f, 3.5f, Math.Max(0, Width - 3), Math.Max(0, Height - 7)),
             6);

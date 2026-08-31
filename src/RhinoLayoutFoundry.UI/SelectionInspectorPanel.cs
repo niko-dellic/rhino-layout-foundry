@@ -14,8 +14,8 @@ internal sealed class SelectionInspectorPanel : Panel
     private const string CustomPaperPreset = "Custom";
     private const string RemoveTitleBlock = "Remove title block";
     private const int NamedViewThumbnailMinimum = 64;
-    private const int NamedViewThumbnailMaximum = 144;
-    private const int NamedViewThumbnailDefault = 88;
+    private const int NamedViewThumbnailMaximum = 240;
+    private const int NamedViewThumbnailDefault = 128;
     private static readonly string[] Units = ["Millimeters", "Centimeters", "Meters", "Inches", "Feet"];
 
     private readonly Label _selectionSummary = FoundryTheme.MutedLabel();
@@ -44,6 +44,8 @@ internal sealed class SelectionInspectorPanel : Panel
     private readonly Label _namedViewThumbnailSizeValue;
     private readonly Panel _namedViewThumbnailSizeRow;
     private readonly GridView _namedViews;
+    private readonly NamedViewThumbnailGrid _namedViewThumbnailGrid;
+    private readonly Scrollable _namedViewThumbnailBrowser;
     private readonly FoundryDialogButton _assignNamedView = new("Assign to selection", FoundryDialogButtonStyle.Secondary, 154);
     private readonly Label _namedViewError = ErrorLabel();
     private readonly Panel _namedViewSection;
@@ -139,7 +141,7 @@ internal sealed class SelectionInspectorPanel : Panel
             NamedViewThumbnailMaximum,
             NamedViewThumbnailDefault,
             width: 220,
-            toolTipFormatter: value => $"Named-view thumbnail height: {value} px");
+            toolTipFormatter: value => $"Named-view tile width: {value} px");
         _namedViewThumbnailSizeValue = FoundryTheme.MutedLabel();
         _namedViewThumbnailSizeValue.Width = 46;
         _namedViewThumbnailSizeValue.TextAlignment = TextAlignment.Right;
@@ -176,6 +178,17 @@ internal sealed class SelectionInspectorPanel : Panel
             DataCell = new ImageTextCell(nameof(NamedViewRow.Image), nameof(NamedViewRow.Name)),
             AutoSize = true,
         });
+        _namedViewThumbnailGrid = new NamedViewThumbnailGrid();
+        _namedViewThumbnailBrowser = new Scrollable
+        {
+            Border = BorderType.None,
+            ExpandContentWidth = true,
+            ExpandContentHeight = true,
+            Height = 120,
+            Visible = false,
+            BackgroundColor = FoundryTheme.CanvasOverlayBackground,
+            Content = _namedViewThumbnailGrid,
+        };
         _namedViewSection = Section("Named views", new StackLayout
         {
             Spacing = FoundryTheme.Space2,
@@ -185,6 +198,7 @@ internal sealed class SelectionInspectorPanel : Panel
                 _namedViewModeGroup,
                 _namedViewThumbnailSizeRow,
                 _namedViews,
+                _namedViewThumbnailBrowser,
                 _assignNamedView,
                 _namedViewError,
             },
@@ -258,7 +272,7 @@ internal sealed class SelectionInspectorPanel : Panel
         _namedViewThumbnailSize.ValueChanged += (_, _) =>
         {
             UpdateNamedViewThumbnailSizeLabel();
-            ReloadNamedViews();
+            UpdateNamedViewThumbnailLayout();
         };
         _namedViews.SelectedRowsChanged += (_, _) =>
         {
@@ -268,6 +282,14 @@ internal sealed class SelectionInspectorPanel : Panel
                 : null;
             _assignNamedView.Enabled = _model?.AffectedDetailCount > 0 && _selectedNamedView is not null;
         };
+        _namedViewThumbnailGrid.SelectionChanged += (_, eventArgs) =>
+        {
+            _selectedNamedView = eventArgs.Name;
+            _namedViews.SelectedRow = Array.FindIndex(_namedViewRows,
+                row => string.Equals(row.Name, _selectedNamedView, StringComparison.OrdinalIgnoreCase));
+            _assignNamedView.Enabled = _model?.AffectedDetailCount > 0 && _selectedNamedView is not null;
+        };
+        _namedViewThumbnailBrowser.SizeChanged += (_, _) => UpdateNamedViewThumbnailLayout();
         _namedViews.MouseDown += (_, eventArgs) =>
             _namedViewPress = new ObserverPoint(eventArgs.Location.X, eventArgs.Location.Y);
         _namedViews.MouseMove += (_, eventArgs) =>
@@ -371,6 +393,7 @@ internal sealed class SelectionInspectorPanel : Panel
         _namedViewThumbnailMode.Enabled = namedViewBrowsingEnabled;
         _namedViewThumbnailSize.Enabled = namedViewBrowsingEnabled;
         _namedViews.Enabled = namedViewBrowsingEnabled && snapshot!.NamedViews.Count > 0;
+        _namedViewThumbnailGrid.Enabled = namedViewBrowsingEnabled && snapshot!.NamedViews.Count > 0;
         ReloadNamedViews();
         _assignNamedView.Enabled = model?.AffectedDetailCount > 0 && _selectedNamedView is not null;
         _updating = false;
@@ -535,6 +558,8 @@ internal sealed class SelectionInspectorPanel : Panel
         _namedViewListMode.Checked = !thumbnails;
         _namedViewThumbnailMode.Checked = thumbnails;
         _namedViewThumbnailSizeRow.Visible = thumbnails;
+        _namedViews.Visible = !thumbnails;
+        _namedViewThumbnailBrowser.Visible = thumbnails;
         ReloadNamedViews();
         if (thumbnails) NamedViewPreviewsRequested?.Invoke(this, EventArgs.Empty);
     }
@@ -543,19 +568,36 @@ internal sealed class SelectionInspectorPanel : Panel
     {
         var names = _snapshot?.NamedViews.OrderBy(name => name, StringComparer.OrdinalIgnoreCase).ToArray() ?? [];
         var thumbnailMode = UsesNamedViewThumbnails;
-        var rowHeight = thumbnailMode ? _namedViewThumbnailSize.Value : 28;
-        _namedViews.RowHeight = rowHeight;
-        _namedViews.Height = thumbnailMode
-            ? Math.Clamp(Math.Max(1, names.Length) * rowHeight, Math.Max(120, rowHeight), 352)
-            : Math.Clamp(Math.Max(1, names.Length) * 28, 84, 224);
+        _namedViews.RowHeight = 28;
+        _namedViews.Height = Math.Clamp(Math.Max(1, names.Length) * 28, 84, 224);
         if (_selectedNamedView is null || !names.Contains(_selectedNamedView, StringComparer.OrdinalIgnoreCase))
             _selectedNamedView = names.FirstOrDefault();
         _namedViewRows = names.Select(name => new NamedViewRow(
             name,
-            thumbnailMode && _namedViewPreviews.TryGetValue(name, out var image) ? image : null)).ToArray();
+            null)).ToArray();
         _namedViews.DataStore = _namedViewRows;
         _namedViews.SelectedRow = Array.FindIndex(_namedViewRows,
             row => string.Equals(row.Name, _selectedNamedView, StringComparison.OrdinalIgnoreCase));
+        _namedViewThumbnailGrid.SetItems(names.Select(name => new NamedViewThumbnailItem(
+            name,
+            _namedViewPreviews.TryGetValue(name, out var image) ? image : null)));
+        _namedViewThumbnailGrid.SetSelectedName(_selectedNamedView);
+        if (thumbnailMode) UpdateNamedViewThumbnailLayout();
+    }
+
+    private void UpdateNamedViewThumbnailLayout()
+    {
+        var availableWidth = _namedViewThumbnailBrowser.ClientSize.Width > 1
+            ? _namedViewThumbnailBrowser.ClientSize.Width
+            : OverlayWidth - FoundryTheme.Space3 * 2 - FoundryTheme.Space1;
+        _namedViewThumbnailGrid.SetLayout(
+            availableWidth,
+            _namedViewThumbnailSize.Value,
+            minimumHeight: 120);
+        _namedViewThumbnailBrowser.Height = Math.Clamp(
+            (int)Math.Ceiling(_namedViewThumbnailGrid.ContentHeight),
+            120,
+            352);
     }
 
     private void UpdateNamedViewThumbnailSizeLabel() =>

@@ -7,7 +7,7 @@ using RhinoLayoutFoundry.Core.Overview;
 
 namespace RhinoLayoutFoundry.UI;
 
-internal sealed class ObserverCanvasDrawable : Drawable
+internal sealed partial class ObserverCanvasDrawable : Drawable
 {
     internal const string NamedViewDragType = "application/x-layout-foundry-named-view";
     private const double RightPanActivationDistance = 5;
@@ -25,6 +25,9 @@ internal sealed class ObserverCanvasDrawable : Drawable
     private const int NamedViewsActionHeight = 30;
     private const int NamedViewsThumbnailColumns = 2;
     private const int NamedViewsThumbnailCardHeight = 92;
+    private const double CameraInputFrameInterval = 1d / 60d;
+    private const double CameraInputSettleInterval = 0.08;
+    private const double WheelZoomSensitivity = 0.115;
     private readonly Font _folderFont = SystemFonts.Bold(11);
     private readonly Font _sheetFont = SystemFonts.Bold(10);
     private readonly Font _smallFont = SystemFonts.Default(8);
@@ -33,12 +36,15 @@ internal sealed class ObserverCanvasDrawable : Drawable
         new(StringComparer.OrdinalIgnoreCase);
     private readonly UITimer _navigatorDragTimer;
     private readonly UITimer _navigatorHoverTimer;
+    private readonly UITimer _cameraInputFrameTimer;
+    private readonly UITimer _cameraInputSettleTimer;
     private ObserverSnapshot _snapshot = ObserverSnapshot.NoDocument;
     private OverviewFilterProjection _filter = new(false, new HashSet<OverviewNodeKey>(), new HashSet<Guid>());
     private ObserverBoardLayout _layout = ObserverBoardLayout.Empty;
     private ObserverSpatialIndex _spatialIndex = new(ObserverBoardLayout.Empty);
     private readonly ObserverCanvasLodPolicy _lodPolicy = new();
     private ObserverCanvasPresentation _presentation = ObserverCanvasPresentation.Empty;
+    private HashSet<Guid> _drawableFolderIds = [];
     private ObserverPackingMode _packingMode = ObserverPackingMode.NestedFolders;
     private ObserverCamera _camera = ObserverCamera.Default;
     private Color _gridColor = FoundryTheme.CanvasGridColor;
@@ -76,6 +82,10 @@ internal sealed class ObserverCanvasDrawable : Drawable
     private string? _dragNamedView;
     private Guid? _hoverDetailId;
     private bool _hasCanvasPastePoint;
+    private ObserverPoint _pendingPanScreen;
+    private ObserverPoint _pendingZoomAnchorScreen;
+    private double _pendingZoomFactor = 1;
+    private bool _cameraInputFrameScheduled;
 
     internal ObserverCanvasDrawable()
         : base(true)
@@ -96,6 +106,12 @@ internal sealed class ObserverCanvasDrawable : Drawable
         DragOver += OnDragOver;
         DragDrop += OnDragDrop;
         SizeChanged += (_, _) => RefreshPresentation();
+        LoadComplete += (_, _) => AttachNativeTrackpadInput();
+        UnLoad += (_, _) =>
+        {
+            DetachNativeTrackpadInput();
+            StopQueuedCameraInput();
+        };
         _navigatorDragTimer = new UITimer { Interval = 0.07 };
         _navigatorDragTimer.Elapsed += (_, _) =>
         {
@@ -119,6 +135,14 @@ internal sealed class ObserverCanvasDrawable : Drawable
             ClampNavigatorScroll();
             _navigatorDrop = ResolveNavigatorDrop(_navigatorPointer);
             Invalidate();
+        };
+        _cameraInputFrameTimer = new UITimer { Interval = CameraInputFrameInterval };
+        _cameraInputFrameTimer.Elapsed += (_, _) => FlushQueuedCameraInput();
+        _cameraInputSettleTimer = new UITimer { Interval = CameraInputSettleInterval };
+        _cameraInputSettleTimer.Elapsed += (_, _) =>
+        {
+            _cameraInputSettleTimer.Stop();
+            ViewChanged?.Invoke(this, EventArgs.Empty);
         };
     }
 
@@ -434,7 +458,7 @@ internal sealed class ObserverCanvasDrawable : Drawable
         {
             var tier = _presentation.TierForSheet(card.Sheet.PageViewId);
             if (tier != ObserverCanvasLodTier.Folder)
-                DrawSheet(graphics, card, viewport, tier);
+                DrawSheet(graphics, card, viewport, tier, eventArgs.ClipRectangle);
         }
 
         foreach (var summary in _presentation.FolderSummaries)
@@ -455,7 +479,7 @@ internal sealed class ObserverCanvasDrawable : Drawable
     private void DrawGrid(Graphics graphics, ObserverSize viewport)
     {
         if (_camera.Zoom < 0.18 || _gridOpacity <= 0) return;
-        var spacing = 40d;
+        var spacing = ObserverCanvasGridPolicy.EffectiveWorldSpacing(_camera.Zoom);
         var visible = _camera.VisibleWorld(viewport);
         var startX = Math.Floor(visible.Left / spacing) * spacing;
         var startY = Math.Floor(visible.Top / spacing) * spacing;
@@ -492,9 +516,10 @@ internal sealed class ObserverCanvasDrawable : Drawable
             bounds);
         graphics.DrawRectangle(new Pen(outline, selected ? 2 : 1), bounds);
         var headerHeight = Math.Max(22, ObserverPlacementPlanner.FolderHeaderHeight * _camera.Zoom);
-        graphics.FillRectangle(FoundryTheme.WithAlpha(
-                FoundryTheme.CanvasSubtleSurface,
-                emphasized ? 220 : 55),
+        graphics.FillRectangle(
+            emphasized
+                ? FoundryTheme.CanvasFolderBackground
+                : FoundryTheme.WithAlpha(FoundryTheme.CanvasFolderBackground, 55),
             bounds.X, bounds.Y, bounds.Width, (float)Math.Min(bounds.Height, headerHeight));
         var headerColor = emphasized
             ? FoundryTheme.PrimaryText
@@ -519,7 +544,8 @@ internal sealed class ObserverCanvasDrawable : Drawable
         Graphics graphics,
         ObserverSheetCard card,
         ObserverSize viewport,
-        ObserverCanvasLodTier tier)
+        ObserverCanvasLodTier tier,
+        RectangleF clipRectangle)
     {
         var worldBounds = PreviewBounds(card.Bounds, card.Sheet.PageViewId);
         var bounds = ScreenRect(worldBounds, viewport);
@@ -541,7 +567,7 @@ internal sealed class ObserverCanvasDrawable : Drawable
         if (_previews.TryGetValue(card.Sheet.PageViewId, out var preview) &&
             preview.Key.ContentVersion == card.Sheet.PreviewContentVersion)
         {
-            graphics.DrawImage(preview.Bitmap, bounds);
+            DrawVisibleImage(graphics, preview.Bitmap, bounds, clipRectangle);
         }
         else
         {
@@ -615,6 +641,28 @@ internal sealed class ObserverCanvasDrawable : Drawable
                 new Pen(FoundryTheme.WithAlpha(FoundryTheme.SelectionAccent, 180), 1),
                 bounds);
         }
+    }
+
+    private static void DrawVisibleImage(
+        Graphics graphics,
+        Image image,
+        RectangleF destination,
+        RectangleF clipRectangle)
+    {
+        var left = Math.Max(destination.Left, clipRectangle.Left);
+        var top = Math.Max(destination.Top, clipRectangle.Top);
+        var right = Math.Min(destination.Right, clipRectangle.Right);
+        var bottom = Math.Min(destination.Bottom, clipRectangle.Bottom);
+        if (right <= left || bottom <= top || destination.Width <= 0 || destination.Height <= 0)
+            return;
+
+        var visibleDestination = new RectangleF(left, top, right - left, bottom - top);
+        var source = new RectangleF(
+            (left - destination.Left) / destination.Width * image.Width,
+            (top - destination.Top) / destination.Height * image.Height,
+            visibleDestination.Width / destination.Width * image.Width,
+            visibleDestination.Height / destination.Height * image.Height);
+        graphics.DrawImage(image, source, visibleDestination);
     }
 
     private void DrawSheetSummary(
@@ -756,9 +804,7 @@ internal sealed class ObserverCanvasDrawable : Drawable
         });
     }
 
-    private bool FolderHasDrawableDescendant(Guid folderId) => _layout.Sheets.Values.Any(card =>
-        _presentation.TierForSheet(card.Sheet.PageViewId) != ObserverCanvasLodTier.Folder &&
-        IsFolderDescendant(card.Sheet.FolderId, folderId));
+    private bool FolderHasDrawableDescendant(Guid folderId) => _drawableFolderIds.Contains(folderId);
 
     private static string FitText(Graphics graphics, Font font, string text, float maximumWidth)
     {
@@ -2113,11 +2159,9 @@ internal sealed class ObserverCanvasDrawable : Drawable
             }
         }
 
-        _camera = _camera.ZoomAt(
-            Point(eventArgs.Location),
-            delta > 0 ? 1.12 : 1 / 1.12,
-            ViewportSize());
-        NotifyViewChanged();
+        QueueCameraZoom(
+            Math.Exp(delta * WheelZoomSensitivity),
+            Point(eventArgs.Location));
         eventArgs.Handled = true;
     }
 
@@ -2573,10 +2617,80 @@ internal sealed class ObserverCanvasDrawable : Drawable
 
     private void NotifyViewChanged()
     {
+        StopQueuedCameraInput();
         RefreshPresentation();
         Invalidate();
         ViewChanged?.Invoke(this, EventArgs.Empty);
     }
+
+    private void QueueCameraPan(double screenX, double screenY)
+    {
+        if (Math.Abs(screenX) < double.Epsilon && Math.Abs(screenY) < double.Epsilon) return;
+        _pendingPanScreen += new ObserverPoint(screenX, screenY);
+        ScheduleCameraInputFrame();
+    }
+
+    private void QueueCameraZoom(double factor, ObserverPoint anchorScreen)
+    {
+        if (!double.IsFinite(factor) || factor <= 0 || Math.Abs(factor - 1) < double.Epsilon) return;
+        _pendingZoomFactor *= factor;
+        _pendingZoomAnchorScreen = anchorScreen;
+        ScheduleCameraInputFrame();
+    }
+
+    private void ScheduleCameraInputFrame()
+    {
+        if (_cameraInputFrameScheduled) return;
+        _cameraInputFrameScheduled = true;
+        _cameraInputFrameTimer.Start();
+    }
+
+    private void FlushQueuedCameraInput()
+    {
+        _cameraInputFrameTimer.Stop();
+        _cameraInputFrameScheduled = false;
+        var pan = _pendingPanScreen;
+        var zoomFactor = _pendingZoomFactor;
+        var zoomAnchor = _pendingZoomAnchorScreen;
+        _pendingPanScreen = new ObserverPoint();
+        _pendingZoomFactor = 1;
+
+        if (Math.Abs(pan.X) < double.Epsilon &&
+            Math.Abs(pan.Y) < double.Epsilon &&
+            Math.Abs(zoomFactor - 1) < double.Epsilon)
+            return;
+
+        if (Math.Abs(pan.X) >= double.Epsilon || Math.Abs(pan.Y) >= double.Epsilon)
+            _camera = _camera.PanScreen(pan.X, pan.Y);
+        if (Math.Abs(zoomFactor - 1) >= double.Epsilon)
+            _camera = _camera.ZoomAt(zoomAnchor, zoomFactor, ViewportSize());
+
+        RefreshPresentation();
+        _cameraInputSettleTimer.Stop();
+        _cameraInputSettleTimer.Start();
+    }
+
+    private void StopQueuedCameraInput()
+    {
+        _cameraInputFrameTimer.Stop();
+        _cameraInputSettleTimer.Stop();
+        _cameraInputFrameScheduled = false;
+        _pendingPanScreen = new ObserverPoint();
+        _pendingZoomFactor = 1;
+    }
+
+    private bool IsCanvasOverlay(PointF point)
+    {
+        if (_navigatorVisible && point.X >= 0 && point.X <= NavigatorWidth && point.Y >= NavigatorTop)
+            return true;
+        return _namedViewsVisible &&
+               point.X >= NamedViewsLeft(ViewportSize()) &&
+               point.Y >= NamedViewsTop;
+    }
+
+    partial void AttachNativeTrackpadInput();
+
+    partial void DetachNativeTrackpadInput();
 
     private void RefreshPresentation()
     {
@@ -2587,6 +2701,7 @@ internal sealed class ObserverCanvasDrawable : Drawable
             ViewportSize(),
             _packingMode,
             _presentation);
+        _drawableFolderIds = BuildDrawableFolderIds();
         if (_hoverDetailId is { } detailId)
         {
             var owner = _snapshot.Sheets.FirstOrDefault(sheet =>
@@ -2595,6 +2710,27 @@ internal sealed class ObserverCanvasDrawable : Drawable
                 _hoverDetailId = null;
         }
         Invalidate();
+    }
+
+    private HashSet<Guid> BuildDrawableFolderIds()
+    {
+        var folders = _snapshot.Folders.ToDictionary(folder => folder.Id);
+        var result = new HashSet<Guid>();
+        foreach (var card in _layout.Sheets.Values)
+        {
+            if (_presentation.TierForSheet(card.Sheet.PageViewId) == ObserverCanvasLodTier.Folder)
+                continue;
+
+            Guid? current = card.Sheet.FolderId;
+            while (current is { } folderId &&
+                   folders.TryGetValue(folderId, out var folder))
+            {
+                if (!result.Add(folderId)) break;
+                current = folder.ParentId;
+            }
+        }
+
+        return result;
     }
 
     private void ResetDrag()

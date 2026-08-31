@@ -1246,7 +1246,7 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
         var data = record.TitleBlockData ?? new SheetTitleBlockData(string.Empty, []);
         var details = page.GetDetailViews().Select(CaptureDetail).ToArray();
         foreach (var pair in TitleBlockValues(state.ProjectInfo, page.PageName, data, details))
-            attributes.SetUserString(pair.Key, pair.Value);
+            SetBlockAttributeValue(attributes, pair.Key, pair.Value);
         if (!document.Objects.ModifyAttributes(instance.Id, attributes, quiet: true))
             throw new InvalidOperationException($"Rhino could not refresh title-block fields on '{page.PageName}'.");
     }
@@ -1364,6 +1364,7 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
         var afterState = stateBefore with { Sheets = sheets };
         _stateStore.SetCurrentSchema(document, afterState);
         foreach (var page in pages) RefreshManagedTitleBlockAttributes(document, page, afterState);
+        DeleteUnusedGeneratedTitleBlockDefinitions(document);
     }
 
     private static TitleBlockBefore CaptureTitleBlockBefore(
@@ -1580,6 +1581,7 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
             document.Modified = true;
             _revisionTracker.Bump(document);
             document.Views.Redraw();
+            DeleteUnusedGeneratedTitleBlockDefinitions(document);
             return new OperationResult(true, plan.Diagnostics);
         }
         catch (Exception exception)
@@ -1805,6 +1807,7 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
             document.Modified = true;
             _revisionTracker.Bump(document);
             document.Views.Redraw();
+            DeleteUnusedGeneratedTitleBlockDefinitions(document);
             return new OperationResult(true, plan.Diagnostics);
         }
         catch (Exception exception)
@@ -1864,50 +1867,60 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
             Add(new LineCurve(new Point3d(block.Left, yTwo, 0), new Point3d(block.Right, yTwo, 0)));
             Add(new LineCurve(new Point3d(xSplit, block.Bottom, 0), new Point3d(xSplit, block.Top, 0)));
 
-            var revisionHeight = Math.Max(0, block.Top - yTwo);
+            var body = X(layout.BodyTextHeight);
+            var heading = X(layout.HeadingTextHeight);
+            var inset = Math.Max(X(layout.Gutter) * 0.45, body * 0.7);
+            var topSectionHeight = Math.Max(0, block.Top - yTwo);
+            var firmBandHeight = Math.Min(
+                topSectionHeight * 0.38,
+                Math.Max(heading * 1.9, inset * 2.2));
+            var revisionTop = block.Top - firmBandHeight;
+            var revisionHeight = Math.Max(0, revisionTop - yTwo);
+            Add(new LineCurve(new Point3d(block.Left, revisionTop, 0), new Point3d(block.Right, revisionTop, 0)));
             for (var row = 1; row < layout.VisibleRevisionRows; row++)
             {
                 var y = yTwo + revisionHeight * row / layout.VisibleRevisionRows;
                 Add(new LineCurve(new Point3d(block.Left, y, 0), new Point3d(block.Right, y, 0)));
             }
 
-            var body = X(layout.BodyTextHeight);
-            var heading = X(layout.HeadingTextHeight);
-            var inset = Math.Max(X(layout.Gutter) * 0.45, body * 0.7);
-            AddFieldText(document, Add, "firm.name", "Firm name", block.Left + inset, block.Top - heading - inset,
-                heading, block.Width * 0.56);
-            AddFieldText(document, Add, "project.name", "Project name", block.Left + inset, yTwo - body - inset,
-                heading, block.Width * 0.56);
-            AddFieldText(document, Add, "project.number", "Project no.", xSplit + inset, yTwo - body - inset,
+            var firmValueHeight = Math.Min(heading, Math.Max(body, firmBandHeight * 0.38));
+            AddFieldText(document, Add, "firm.name", "Firm name", block.Left + inset, block.Top - inset,
+                firmValueHeight, xSplit - block.Left - inset * 2);
+            AddFieldText(document, Add, "project.name", "Project name", block.Left + inset, yTwo - inset,
+                heading, xSplit - block.Left - inset * 2);
+            AddFieldText(document, Add, "project.number", "Project no.", xSplit + inset, yTwo - inset,
                 body, block.Right - xSplit - inset * 2);
-            AddFieldText(document, Add, "sheet.title", "Sheet title", block.Left + inset, yOne - body - inset,
-                body, block.Width * 0.56);
-            AddFieldText(document, Add, "sheet.number", "Sheet no.", xSplit + inset, yOne - body - inset,
+            var bottomMetaTop = block.Bottom + (yOne - block.Bottom) * 0.34;
+            Add(new LineCurve(new Point3d(block.Left, bottomMetaTop, 0), new Point3d(block.Right, bottomMetaTop, 0)));
+            AddFieldText(document, Add, "sheet.title", "Sheet title", block.Left + inset, yOne - inset,
+                body, xSplit - block.Left - inset * 2);
+            AddFieldText(document, Add, "sheet.number", "Sheet no.", xSplit + inset, yOne - inset,
                 heading, block.Right - xSplit - inset * 2);
-            AddFieldText(document, Add, "issue.purpose", "Issue", block.Left + inset, block.Bottom + inset,
-                body, block.Width * 0.36);
-            AddFieldText(document, Add, "sheet.scale", "Scale", xSplit + inset, block.Bottom + inset,
+            AddFieldText(document, Add, "issue.purpose", "Issue", block.Left + inset, bottomMetaTop - inset,
+                body, xSplit - block.Left - inset * 2);
+            AddFieldText(document, Add, "sheet.scale", "Scale", xSplit + inset, bottomMetaTop - inset,
                 body, block.Right - xSplit - inset * 2);
 
             for (var row = 0; row < layout.VisibleRevisionRows; row++)
             {
-                var y = yTwo + revisionHeight * row / layout.VisibleRevisionRows + inset * 0.45;
-                AddFieldText(document, Add, $"revision.{row + 1}.summary", "Revision", block.Left + inset, y,
-                    Math.Max(body * 0.78, X(2.2)), block.Width - inset * 2);
+                var rowTop = yTwo + revisionHeight * (row + 1) / layout.VisibleRevisionRows - inset * 0.35;
+                var rowHeight = revisionHeight / layout.VisibleRevisionRows;
+                var revisionTextHeight = Math.Min(
+                    Math.Max(body * 0.72, X(1.8)),
+                    Math.Max(X(1.4), rowHeight * 0.34));
+                AddFieldText(document, Add, $"revision.{row + 1}.summary", "Revision", block.Left + inset, rowTop,
+                    revisionTextHeight, xSplit - block.Left - inset * 2);
             }
 
             Guid pictureId = Guid.Empty;
-            string? temporaryLogoPath = null;
             try
             {
                 if (projectInfo.Logo is { } logo)
                 {
-                    var extension = logo.MediaType == "image/png" ? ".png" : ".jpg";
-                    temporaryLogoPath = Path.Combine(Path.GetTempPath(), $"rlf-{logo.Sha256}{extension}");
-                    File.WriteAllBytes(temporaryLogoPath, logo.Data);
+                    var logoPath = EnsureCachedLogoFile(logo);
                     using var logoImage = new Eto.Drawing.Bitmap(logo.Data);
-                    var logoWidth = block.Width * 0.18;
-                    var logoHeight = block.Height * 0.24;
+                    var logoWidth = block.Width * 0.20;
+                    var logoHeight = Math.Max(0, firmBandHeight - inset * 2);
                     var imageAspect = logoImage.Width / (double)Math.Max(1, logoImage.Height);
                     if (logoWidth / logoHeight > imageAspect)
                         logoWidth = logoHeight * imageAspect;
@@ -1918,34 +1931,32 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
                         Vector3d.XAxis,
                         Vector3d.YAxis);
                     pictureId = document.Objects.AddPictureFrame(
-                        plane, temporaryLogoPath, false, logoWidth, logoHeight, true, true);
+                        plane, logoPath, false, logoWidth, logoHeight, true, true);
                     if (pictureId != Guid.Empty && document.Objects.FindId(pictureId) is { } picture)
                     {
-                        Add(picture.Geometry.Duplicate(), picture.Attributes.Duplicate());
-                        document.Objects.Delete(pictureId, quiet: true);
-                        pictureId = Guid.Empty;
+                        var pictureAttributes = picture.Attributes.Duplicate();
+                        pictureAttributes.Space = ActiveSpace.ModelSpace;
+                        pictureAttributes.ViewportId = Guid.Empty;
+                        Add(picture.Geometry.Duplicate(), pictureAttributes);
                     }
+                    else
+                        throw new InvalidOperationException("Rhino could not create the embedded project logo.");
                 }
+
+                var index = document.InstanceDefinitions.Add(
+                    definitionName,
+                    $"Adaptive Layout Foundry title block ({AdaptiveTitleBlockLayoutSolver.Label(kind)})",
+                    Point3d.Origin,
+                    geometry,
+                    attributes);
+                if (index < 0)
+                    throw new InvalidOperationException("Rhino could not create the adaptive title-block definition.");
+                definition = document.InstanceDefinitions[index];
             }
             finally
             {
                 if (pictureId != Guid.Empty) document.Objects.Delete(pictureId, quiet: true);
-                if (temporaryLogoPath is not null)
-                {
-                    try { File.Delete(temporaryLogoPath); }
-                    catch (IOException) { }
-                }
             }
-
-            var index = document.InstanceDefinitions.Add(
-                definitionName,
-                $"Adaptive Layout Foundry title block ({AdaptiveTitleBlockLayoutSolver.Label(kind)})",
-                Point3d.Origin,
-                geometry,
-                attributes);
-            if (index < 0)
-                throw new InvalidOperationException("Rhino could not create the adaptive title-block definition.");
-            definition = document.InstanceDefinitions[index];
         }
 
         var instanceAttributes = new ObjectAttributes
@@ -1954,7 +1965,7 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
             ViewportId = page.MainViewport.Id,
         };
         foreach (var pair in TitleBlockValues(projectInfo, page.PageName, sheetData, details))
-            instanceAttributes.SetUserString(pair.Key, pair.Value);
+            SetBlockAttributeValue(instanceAttributes, pair.Key, pair.Value);
         var id = document.Objects.AddInstanceObject(definition.Index, Transform.Identity, instanceAttributes);
         if (id == Guid.Empty)
             throw new InvalidOperationException("Rhino did not place the adaptive title block.");
@@ -1989,13 +2000,67 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
         double height,
         double width)
     {
-        var field = $"{prompt.ToUpperInvariant()}\n" +
-                    global::Rhino.Runtime.TextFields.BlockAttributeText(key, prompt, string.Empty);
-        var plane = new Plane(new Point3d(x, y, 0), Vector3d.XAxis, Vector3d.YAxis);
-        var text = TextEntity.Create(field, plane, document.DimStyles.Current, true, Math.Max(width, height * 2), 0);
-        if (text is null) return;
-        text.TextHeight = height;
-        add(text, null);
+        var safeWidth = Math.Max(width, height * 2);
+        var labelHeight = height * 0.52;
+        var labelPlane = new Plane(new Point3d(x, y, 0), Vector3d.XAxis, Vector3d.YAxis);
+        var label = TextEntity.Create(prompt.ToUpperInvariant(), labelPlane, document.DimStyles.Current, false, safeWidth, 0);
+        if (label is not null)
+        {
+            label.TextHeight = labelHeight;
+            label.TextHorizontalAlignment = TextHorizontalAlignment.Left;
+            label.TextVerticalAlignment = TextVerticalAlignment.Top;
+            add(label, null);
+        }
+
+        var valueTop = y - labelHeight * 1.35;
+        var valuePlane = new Plane(new Point3d(x, valueTop, 0), Vector3d.XAxis, Vector3d.YAxis);
+        var escapedKey = EscapeTextFieldArgument(key);
+        var escapedPrompt = EscapeTextFieldArgument(prompt);
+        var field = $"%<UserText(\"block\",\"{escapedKey}\",\"{escapedPrompt}\",\"{EmptyTitleBlockValue}\")>%";
+        var value = TextEntity.Create(field, valuePlane, document.DimStyles.Current, true, safeWidth, 0);
+        if (value is null) return;
+        value.TextHeight = height;
+        value.TextHorizontalAlignment = TextHorizontalAlignment.Left;
+        value.TextVerticalAlignment = TextVerticalAlignment.Top;
+        add(value, null);
+    }
+
+    private static void SetBlockAttributeValue(ObjectAttributes attributes, string key, string value)
+    {
+        attributes.SetUserString(key, string.IsNullOrEmpty(value) ? EmptyTitleBlockValue : value);
+    }
+
+    private const string EmptyTitleBlockValue = "\u00A0";
+
+    private static string EnsureCachedLogoFile(BrandAsset logo)
+    {
+        var extension = logo.MediaType == "image/png" ? ".png" : ".jpg";
+        var directory = Path.Combine(
+            System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData),
+            "Rhino Layout Foundry",
+            "Logos");
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, $"v{AdaptiveTitleBlockLayoutSolver.StyleVersion}-{logo.Sha256}{extension}");
+        if (!File.Exists(path) || new FileInfo(path).Length != logo.Data.Length)
+            File.WriteAllBytes(path, logo.Data);
+        return path;
+    }
+
+    private static string EscapeTextFieldArgument(string value) =>
+        value.Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("\"", "\\\"", StringComparison.Ordinal);
+
+    private static void DeleteUnusedGeneratedTitleBlockDefinitions(RhinoDoc document)
+    {
+        for (var index = 0; index < document.InstanceDefinitions.Count; index++)
+        {
+            var definition = document.InstanceDefinitions[index];
+            if (definition is null || definition.IsDeleted ||
+                !definition.Name.StartsWith("RLF tb", StringComparison.Ordinal) ||
+                definition.UseCount() != 0)
+                continue;
+            document.InstanceDefinitions.Delete(index, deleteReferences: false, quiet: true);
+        }
     }
 
     private static IReadOnlyDictionary<string, string> TitleBlockValues(
@@ -2027,6 +2092,8 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
             ["sheet.title"] = sheetTitle,
             ["sheet.scale"] = ScaleSummary(details),
         };
+        for (var index = 1; index <= 6; index++)
+            result[$"revision.{index}.summary"] = string.Empty;
         foreach (var pair in project.CustomFields) result[$"custom.{pair.Key}"] = pair.Value;
         foreach (var pair in sheet.Custom) result[$"sheet.custom.{pair.Key}"] = pair.Value;
         for (var index = 0; index < sheet.Revisions.Count; index++)

@@ -11,7 +11,7 @@ internal sealed class ThumbnailFoundryPanel : Panel
     private readonly ThumbnailGridDrawable _grid;
     private readonly Scrollable _scrollable;
     private readonly FoundrySlider _sizeSlider;
-    private readonly Label _densityLabel;
+    private readonly FoundryToolbarField _densityControl;
     private readonly Label _status;
     private readonly UITimer _thumbnailTimer;
     private readonly UITimer _invalidationTimer;
@@ -46,19 +46,15 @@ internal sealed class ThumbnailFoundryPanel : Panel
             100,
             50,
             150,
-            value => $"Thumbnail size: {value}%");
-        _densityLabel = FoundryTheme.MutedLabel();
-        _densityLabel.Width = 92;
+            value => $"Thumbnail size: {value}%",
+            drawFocusRing: false);
+        _densityControl = new FoundryToolbarField(_sizeSlider, 170);
         _status = FoundryTheme.MutedLabel();
         _status.Visible = false;
         _thumbnailTimer = new UITimer { Interval = 0.06 };
         _invalidationTimer = new UITimer { Interval = 0.12 };
         _resizeTimer = new UITimer { Interval = 0.12 };
 
-        var smaller = ToolbarButton(FoundryViewIcons.ZoomOut(), "Show more layouts per row");
-        var larger = ToolbarButton(FoundryViewIcons.ZoomIn(), "Show fewer, larger layouts per row");
-        smaller.Click += (_, _) => AdjustColumns(1);
-        larger.Click += (_, _) => AdjustColumns(-1);
         _sizeSlider.ValueChanged += (_, _) => ApplyGridSize();
         _scrollable.Scroll += (_, _) => QueueVisiblePreviews();
         _scrollable.SizeChanged += (_, _) =>
@@ -89,19 +85,6 @@ internal sealed class ThumbnailFoundryPanel : Panel
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Items =
             {
-                new StackLayout
-                {
-                    Orientation = Orientation.Horizontal,
-                    Spacing = FoundryTheme.Space1,
-                    VerticalContentAlignment = VerticalAlignment.Center,
-                    Items =
-                    {
-                        smaller,
-                        _sizeSlider,
-                        larger,
-                        _densityLabel,
-                    },
-                },
                 new StackLayoutItem(_scrollable, true),
                 _status,
             },
@@ -122,10 +105,9 @@ internal sealed class ThumbnailFoundryPanel : Panel
         RefreshSnapshot();
     }
 
-    private static FoundryToolbarIconButton ToolbarButton(Image image, string toolTip) =>
-        new(image, toolTip);
-
     internal void FocusContent() => _grid.Focus();
+
+    internal Control DensityControl => _densityControl;
 
     internal void PrepareForDisplay()
     {
@@ -256,15 +238,6 @@ internal sealed class ThumbnailFoundryPanel : Panel
     private double GridMinimumHeight() => Math.Max(1, _scrollable.Size.Height - 2);
 
     private double Density => _sizeSlider.Value / 100d;
-
-    private void AdjustColumns(int delta)
-    {
-        var maximum = ThumbnailGridLayout.MaximumColumns(_grid.Snapshot.Sheets.Count, GridWidth());
-        if (maximum <= 1) return;
-        var desired = Math.Clamp(_grid.GridLayout.Columns + delta, 1, maximum);
-        var density = (maximum - desired) / (double)(maximum - 1);
-        _sizeSlider.Value = (int)Math.Round(density * 100, MidpointRounding.AwayFromZero);
-    }
 
     private void ApplyFilteredSnapshot()
     {
@@ -419,9 +392,6 @@ internal sealed class ThumbnailFoundryPanel : Panel
 
     private void UpdateStatus()
     {
-        _densityLabel.Text = _grid.GridLayout.Columns == 1
-            ? "1 per row"
-            : $"{_grid.GridLayout.Columns} per row";
         SetStatus(_snapshot.HasDocument ? string.Empty : "No active Rhino document");
     }
 
