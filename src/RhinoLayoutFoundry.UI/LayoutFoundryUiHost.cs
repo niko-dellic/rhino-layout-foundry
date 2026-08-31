@@ -747,6 +747,208 @@ public static class LayoutFoundryUiHost
         }
     }
 
+    public static async Task<OperationResult> SetTemplateCapabilitiesAsync(
+        IReadOnlyList<OverviewNodeKey> targets,
+        TemplateCapability capabilities,
+        CancellationToken cancellationToken = default)
+    {
+        if (_snapshotProvider is null || _mutationService is null)
+            return UnavailableResult("Foundry is not connected to an active Rhino plug-in.");
+        var diagnostics = new List<Diagnostic>();
+        foreach (var target in targets.Distinct())
+        {
+            try
+            {
+                var snapshot = _snapshotProvider.Capture();
+                var scope = ToHierarchyScope(target);
+                var plan = new SetTemplateCapabilitiesPlanner().Plan(
+                    new SetTemplateCapabilitiesRequest(
+                        snapshot.DocumentRuntimeSerialNumber,
+                        snapshot.Revision,
+                        scope,
+                        capabilities),
+                    snapshot);
+                var result = plan.CanApply
+                    ? await _mutationService.ApplyAsync(plan, cancellationToken)
+                    : new OperationResult(false, plan.Diagnostics);
+                diagnostics.AddRange(result.Diagnostics);
+                if (!result.Succeeded) return new OperationResult(false, diagnostics);
+            }
+            catch (InvalidOperationException exception)
+            {
+                return UnavailableResult(exception.Message);
+            }
+        }
+        NotifyOverviewChanged(new OverviewInvalidation(null,
+            OverviewInvalidationKind.Metadata |
+            OverviewInvalidationKind.Diagnostics |
+            OverviewInvalidationKind.Thumbnails));
+        return new OperationResult(true, diagnostics);
+    }
+
+    public static async Task<OperationResult> SetLayerVisibilityRulesAsync(
+        IReadOnlyList<OverviewNodeKey> targets,
+        IReadOnlyList<Guid> layerIds,
+        LayerVisibilityOverride? visibility,
+        CancellationToken cancellationToken = default)
+    {
+        if (_snapshotProvider is null || _mutationService is null)
+            return UnavailableResult("Foundry is not connected to an active Rhino plug-in.");
+        var diagnostics = new List<Diagnostic>();
+        foreach (var target in targets.Distinct())
+        {
+            var snapshot = _snapshotProvider.Capture();
+            var scope = ToHierarchyScope(target);
+            var current = snapshot.AppearanceRules.LastOrDefault(item => item.Scope == scope);
+            var selected = layerIds.ToHashSet();
+            var rules = (current?.LayerRules ?? [])
+                .Where(rule => !selected.Contains(rule.Layer.LayerId))
+                .ToList();
+            if (visibility is { } nextVisibility)
+            {
+                foreach (var layerId in selected)
+                {
+                    if (!snapshot.LayerSnapshots.TryGetValue(layerId, out var layer))
+                        return UnavailableResult("A selected Rhino layer is no longer available.");
+                    rules.Add(new LayerVisibilityRule(
+                        new LayerReference(layer.Id, layer.FullPath),
+                        nextVisibility));
+                }
+            }
+            var plan = new SetHierarchyViewportRulesPlanner().Plan(
+                new SetHierarchyViewportRulesRequest(
+                    snapshot.DocumentRuntimeSerialNumber,
+                    snapshot.Revision,
+                    scope,
+                    rules,
+                    null),
+                snapshot);
+            var result = plan.CanApply
+                ? await _mutationService.ApplyAsync(plan, cancellationToken)
+                : new OperationResult(false, plan.Diagnostics);
+            diagnostics.AddRange(result.Diagnostics);
+            if (!result.Succeeded) return new OperationResult(false, diagnostics);
+        }
+        NotifyOverviewChanged(OverviewInvalidation.All);
+        return new OperationResult(true, diagnostics);
+    }
+
+    public static async Task<OperationResult> SetObjectDisplayRulesAsync(
+        IReadOnlyList<OverviewNodeKey> targets,
+        IReadOnlyList<ObjectDisplayRule> rules,
+        CancellationToken cancellationToken = default)
+    {
+        if (_snapshotProvider is null || _mutationService is null)
+            return UnavailableResult("Foundry is not connected to an active Rhino plug-in.");
+        var diagnostics = new List<Diagnostic>();
+        foreach (var target in targets.Distinct())
+        {
+            var snapshot = _snapshotProvider.Capture();
+            var scope = ToHierarchyScope(target);
+            var plan = new SetHierarchyViewportRulesPlanner().Plan(
+                new SetHierarchyViewportRulesRequest(
+                    snapshot.DocumentRuntimeSerialNumber,
+                    snapshot.Revision,
+                    scope,
+                    null,
+                    rules),
+                snapshot);
+            var result = plan.CanApply
+                ? await _mutationService.ApplyAsync(plan, cancellationToken)
+                : new OperationResult(false, plan.Diagnostics);
+            diagnostics.AddRange(result.Diagnostics);
+            if (!result.Succeeded) return new OperationResult(false, diagnostics);
+        }
+        NotifyOverviewChanged(OverviewInvalidation.All);
+        return new OperationResult(true, diagnostics);
+    }
+
+    public static async Task<OperationResult> LinkTemplateCapabilityAsync(
+        IReadOnlyList<OverviewNodeKey> targets,
+        Guid sourceRegistrationId,
+        TemplateCapability capability,
+        CancellationToken cancellationToken = default)
+    {
+        if (_snapshotProvider is null || _mutationService is null)
+            return UnavailableResult("Foundry is not connected to an active Rhino plug-in.");
+        var diagnostics = new List<Diagnostic>();
+        foreach (var target in targets.Distinct())
+        {
+            var snapshot = _snapshotProvider.Capture();
+            var registration = snapshot.TemplateRegistrations
+                .LastOrDefault(item => item.Id == sourceRegistrationId);
+            if (registration is null)
+                return UnavailableResult("The selected template source is no longer available.");
+            var sourceRules = snapshot.AppearanceRules
+                .LastOrDefault(item => item.Scope == registration.Source);
+            var payload = new TemplateCapabilityPayload(
+                LayerRules: capability == TemplateCapability.LayerStates
+                    ? sourceRules?.LayerRules.ToArray() ?? []
+                    : null,
+                ObjectDisplayRules: capability == TemplateCapability.ObjectDisplayModes
+                    ? sourceRules?.ObjectDisplayRules.ToArray() ?? []
+                    : null);
+            var plan = new LinkTemplateCapabilityPlanner().Plan(
+                new LinkTemplateCapabilityRequest(
+                    snapshot.DocumentRuntimeSerialNumber,
+                    snapshot.Revision,
+                    ToHierarchyScope(target),
+                    sourceRegistrationId,
+                    capability,
+                    LastResolved: payload),
+                snapshot);
+            var result = plan.CanApply
+                ? await _mutationService.ApplyAsync(plan, cancellationToken)
+                : new OperationResult(false, plan.Diagnostics);
+            diagnostics.AddRange(result.Diagnostics);
+            if (!result.Succeeded) return new OperationResult(false, diagnostics);
+        }
+        NotifyOverviewChanged(OverviewInvalidation.All);
+        return new OperationResult(true, diagnostics);
+    }
+
+    public static async Task<OperationResult> DetachTemplateCapabilityAsync(
+        IReadOnlyList<OverviewNodeKey> targets,
+        TemplateCapability capability,
+        CancellationToken cancellationToken = default)
+    {
+        if (_snapshotProvider is null || _mutationService is null)
+            return UnavailableResult("Foundry is not connected to an active Rhino plug-in.");
+        var diagnostics = new List<Diagnostic>();
+        foreach (var target in targets.Distinct())
+        {
+            var snapshot = _snapshotProvider.Capture();
+            var scope = ToHierarchyScope(target);
+            if (!snapshot.TemplateLinks.Any(link =>
+                    link.Target == scope && link.Capability == capability))
+                continue;
+            var plan = new DetachTemplateCapabilityPlanner().Plan(
+                new DetachTemplateCapabilityRequest(
+                    snapshot.DocumentRuntimeSerialNumber,
+                    snapshot.Revision,
+                    scope,
+                    capability),
+                snapshot);
+            var result = plan.CanApply
+                ? await _mutationService.ApplyAsync(plan, cancellationToken)
+                : new OperationResult(false, plan.Diagnostics);
+            diagnostics.AddRange(result.Diagnostics);
+            if (!result.Succeeded) return new OperationResult(false, diagnostics);
+        }
+        NotifyOverviewChanged(OverviewInvalidation.All);
+        return new OperationResult(true, diagnostics);
+    }
+
+    private static HierarchyScope ToHierarchyScope(OverviewNodeKey key) => new(
+        key.Kind switch
+        {
+            OverviewNodeKind.Folder => HierarchyScopeKind.Folder,
+            OverviewNodeKind.Sheet => HierarchyScopeKind.Sheet,
+            OverviewNodeKind.Detail => HierarchyScopeKind.Detail,
+            _ => throw new ArgumentOutOfRangeException(nameof(key)),
+        },
+        key.Id);
+
     public static async Task<OperationResult> SetSheetTemplateRegistrationAsync(
         Guid sourcePageViewId,
         bool registered,

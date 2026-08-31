@@ -1,3 +1,5 @@
+using RhinoLayoutFoundry.Core.Domain;
+
 namespace RhinoLayoutFoundry.Core.Overview;
 
 public sealed record DocumentOverview(
@@ -23,7 +25,9 @@ public sealed record FolderOverview(
     Guid Id,
     Guid? ParentId,
     string Name,
-    int Order);
+    int Order,
+    TemplateCapability TemplateCapabilities = TemplateCapability.None,
+    ViewportAppearanceSummary? Appearance = null);
 
 public sealed record SheetOverview(
     Guid PageViewId,
@@ -37,7 +41,9 @@ public sealed record SheetOverview(
     double PageHeight = 0,
     string PageUnitSystem = "",
     bool IncludeInPrintAll = true,
-    bool IsTemplate = false)
+    bool IsTemplate = false,
+    TemplateCapability TemplateCapabilities = TemplateCapability.None,
+    ViewportAppearanceSummary? Appearance = null)
 {
     public int DetailCount => Details.Count;
 
@@ -51,7 +57,17 @@ public sealed record DetailOverview(
     string Name,
     int Order,
     Guid DisplayModeId = default,
-    string DisplayModeName = "");
+    string DisplayModeName = "",
+    TemplateCapability TemplateCapabilities = TemplateCapability.None,
+    ViewportAppearanceSummary? Appearance = null);
+
+public sealed record ViewportAppearanceSummary(
+    int VisibleLayerCount,
+    int HiddenLayerCount,
+    int ObjectDisplayOverrideCount,
+    bool IsInherited,
+    bool IsMixed = false,
+    int UnresolvedCount = 0);
 
 public readonly record struct DocumentOverviewIdentity(
     uint? DocumentRuntimeSerialNumber,

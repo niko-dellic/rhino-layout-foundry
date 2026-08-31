@@ -111,14 +111,149 @@ internal sealed class RhinoDocumentSnapshotProvider : IDocumentSnapshotProvider
             .Where(layer => !layer.IsDeleted && !layer.IsReference)
             .OrderBy(layer => layer.FullPath, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(layer => layer.Id, layer => layer.FullPath);
+        var layerSettings = document.Layers
+            .Where(layer => !layer.IsDeleted && !layer.IsReference)
+            .ToDictionary(
+                layer => layer.Id,
+                layer => new LayerSnapshot(
+                    layer.Id,
+                    layer.ParentLayerId == Guid.Empty ? null : layer.ParentLayerId,
+                    layer.FullPath,
+                    layer.IsVisible));
+        var modelObjects = document.Objects
+            .Where(item => item is not DetailViewObject &&
+                           item.Attributes.Space == ActiveSpace.ModelSpace)
+            .Select(item =>
+            {
+                var layer = document.Layers[item.Attributes.LayerIndex];
+                return new ModelObjectSnapshot(
+                    item.Id,
+                    string.IsNullOrWhiteSpace(item.Attributes.Name)
+                        ? item.ObjectType.ToString()
+                        : item.Attributes.Name,
+                    layer.Id,
+                    layer.FullPath,
+                    item is InstanceObject);
+            })
+            .ToDictionary(item => item.Id);
+        var detailLayerVisibilities = new List<DetailLayerVisibilitySnapshot>();
+        var objectOverrides = new List<DetailObjectDisplayOverrideSnapshot>();
+        foreach (var detail in pageViews.SelectMany(page => page.GetDetailViews()))
+        {
+            var detailId = detail.Viewport.Id;
+            foreach (var layer in document.Layers.Where(layer =>
+                         !layer.IsDeleted && !layer.IsReference && layer.HasPerViewportSettings(detailId)))
+            {
+                detailLayerVisibilities.Add(new DetailLayerVisibilitySnapshot(
+                    detailId,
+                    layer.Id,
+                    layer.PerViewportIsVisible(detailId),
+                    HasExplicitOverride: true));
+            }
+            foreach (var item in document.Objects.Where(item =>
+                         item is not DetailViewObject &&
+                         item.Attributes.Space == ActiveSpace.ModelSpace &&
+                         item.Attributes.HasDisplayModeOverride(detailId)))
+            {
+                var modeId = item.Attributes.GetDisplayModeOverride(detailId);
+                objectOverrides.Add(new DetailObjectDisplayOverrideSnapshot(
+                    detailId,
+                    item.Id,
+                    modeId,
+                    displayModeNames.GetValueOrDefault(modeId) ?? "Missing display mode"));
+            }
+        }
         var pagesById = pageViews.ToDictionary(page => page.MainViewport.Id);
+        var layoutTemplateSources = state.TemplateRegistrations
+            .Where(item => item.Capabilities.HasFlag(TemplateCapability.Layout))
+            .Select(item => item.Source)
+            .ToHashSet();
         var templates = state.Templates
-            .Select(template => RefreshDocumentBackedTemplate(
-                document,
-                template,
-                pagesById,
-                state.Sheets))
-            .ToArray();
+            .Where(template => template.SourcePageViewId is not { } sourceId ||
+                               layoutTemplateSources.Contains(new HierarchyScope(
+                                   HierarchyScopeKind.Sheet, sourceId)))
+            .Select(template =>
+            {
+                var refreshed = RefreshDocumentBackedTemplate(
+                    document,
+                    template,
+                    pagesById,
+                    state.Sheets);
+                if (template.SourcePageViewId is not { } sourceId) return refreshed;
+                var capabilities = state.TemplateRegistrations.LastOrDefault(item =>
+                        item.Source == new HierarchyScope(HierarchyScopeKind.Sheet, sourceId))
+                    ?.Capabilities ?? TemplateCapability.None;
+                return refreshed with
+                {
+                    TitleBlock = capabilities.HasFlag(TemplateCapability.TitleBlock)
+                        ? refreshed.TitleBlock
+                        : null,
+                    DetailSlots = refreshed.DetailSlots.Select(slot => slot with
+                    {
+                        LayerRules = capabilities.HasFlag(TemplateCapability.LayerStates)
+                            ? slot.Layers
+                            : [],
+                        ObjectDisplayRules = capabilities.HasFlag(TemplateCapability.ObjectDisplayModes)
+                            ? slot.Objects
+                            : [],
+                    }).ToArray(),
+                };
+            })
+            .ToList();
+        foreach (var registration in state.TemplateRegistrations.Where(item =>
+                     item.Capabilities.HasFlag(TemplateCapability.Layout)))
+        {
+            RhinoPageView? sourcePage = null;
+            DetailViewObject[] sourceDetails = [];
+            if (registration.Source.Kind == HierarchyScopeKind.Sheet &&
+                pagesById.TryGetValue(registration.Source.Id, out sourcePage))
+                sourceDetails = sourcePage.GetDetailViews();
+            else if (registration.Source.Kind == HierarchyScopeKind.Detail)
+            {
+                sourcePage = pageViews.FirstOrDefault(page => page.GetDetailViews()
+                    .Any(detail => detail.Viewport.Id == registration.Source.Id));
+                sourceDetails = sourcePage?.GetDetailViews()
+                    .Where(detail => detail.Viewport.Id == registration.Source.Id).ToArray() ?? [];
+            }
+            if (sourcePage is null || templates.Any(template =>
+                    template.SourcePageViewId == sourcePage.MainViewport.Id &&
+                    registration.Source.Kind == HierarchyScopeKind.Sheet))
+                continue;
+            var sourceRecord = state.Sheets.GetValueOrDefault(sourcePage.MainViewport.Id);
+            templates.Add(new SheetTemplateRecipe(
+                registration.Id,
+                SheetTemplateRecipe.CurrentRecipeVersion,
+                registration.Source.Kind == HierarchyScopeKind.Detail
+                    ? $"{sourceDetails[0].DescriptiveTitle} — Detail template"
+                    : $"{sourcePage.PageName} — Layout template",
+                new PaperRecipe(sourcePage.PageWidth, sourcePage.PageHeight,
+                    document.PageUnitSystem.ToString()),
+                sourceDetails.Select(detail =>
+                {
+                    var slot = CaptureDetail(document, detail, null);
+                    return slot with
+                    {
+                        LayerRules = registration.Capabilities.HasFlag(TemplateCapability.LayerStates)
+                            ? slot.Layers
+                            : [],
+                        ObjectDisplayRules = registration.Capabilities.HasFlag(
+                                TemplateCapability.ObjectDisplayModes)
+                            ? slot.Objects
+                            : [],
+                    };
+                }).ToArray(),
+                registration.Source.Kind == HierarchyScopeKind.Sheet &&
+                registration.Capabilities.HasFlag(TemplateCapability.TitleBlock)
+                    ? CaptureTitleBlock(document, sourceRecord?.TitleBlock, null)
+                    : null,
+                sourceRecord?.Tags.ToArray() ?? [],
+                sourceRecord?.Metadata.ToDictionary(pair => pair.Key, pair => pair.Value) ??
+                new Dictionary<string, string>(StringComparer.Ordinal),
+                "{Template}-{n}")
+            {
+                SourcePageViewId = sourcePage.MainViewport.Id,
+            });
+        }
 
         return new DocumentSnapshot(
             document.RuntimeSerialNumber,
@@ -128,7 +263,7 @@ internal sealed class RhinoDocumentSnapshotProvider : IDocumentSnapshotProvider
             sheets,
             objectIds,
             displayModeIds,
-            templates,
+            templates.ToArray(),
             state.Metadata,
             document.NamedViews.Select(view => view.Name).ToHashSet(StringComparer.OrdinalIgnoreCase),
             document.InstanceDefinitions.Select(definition => definition.Id).ToHashSet(),
@@ -136,7 +271,14 @@ internal sealed class RhinoDocumentSnapshotProvider : IDocumentSnapshotProvider
             titleBlockInstances,
             state.Canvas,
             state.ProjectInfo,
-            layerNames);
+            layerNames,
+            layerSettings,
+            modelObjects,
+            detailLayerVisibilities,
+            objectOverrides,
+            state.AppearanceRules,
+            state.TemplateRegistrations,
+            state.TemplateLinks);
     }
 
     private static SheetTemplateRecipe RefreshDocumentBackedTemplate(
@@ -152,6 +294,7 @@ internal sealed class RhinoDocumentSnapshotProvider : IDocumentSnapshotProvider
         var existingSlots = template.DetailSlots;
         var details = page.GetDetailViews()
             .Select((detail, index) => CaptureDetail(
+                document,
                 detail,
                 index < existingSlots.Count ? existingSlots[index] : null))
             .ToArray();
@@ -168,6 +311,7 @@ internal sealed class RhinoDocumentSnapshotProvider : IDocumentSnapshotProvider
     }
 
     private static DetailSlotRecipe CaptureDetail(
+        RhinoDoc document,
         DetailViewObject detail,
         DetailSlotRecipe? existing)
     {
@@ -187,7 +331,30 @@ internal sealed class RhinoDocumentSnapshotProvider : IDocumentSnapshotProvider
             existing?.DefaultNamedView,
             [viewport.CameraLocation.X, viewport.CameraLocation.Y, viewport.CameraLocation.Z],
             [viewport.CameraTarget.X, viewport.CameraTarget.Y, viewport.CameraTarget.Z],
-            [viewport.CameraUp.X, viewport.CameraUp.Y, viewport.CameraUp.Z]);
+            [viewport.CameraUp.X, viewport.CameraUp.Y, viewport.CameraUp.Z],
+            document.Layers
+                .Where(layer => !layer.IsDeleted && !layer.IsReference &&
+                                layer.HasPerViewportSettings(viewport.Id))
+                .Select(layer => new LayerVisibilityRule(
+                    new LayerReference(layer.Id, layer.FullPath),
+                    layer.PerViewportIsVisible(viewport.Id)
+                        ? LayerVisibilityOverride.Visible
+                        : LayerVisibilityOverride.Hidden))
+                .ToArray(),
+            document.Objects
+                .Where(item => item is not DetailViewObject &&
+                               item.Attributes.Space == ActiveSpace.ModelSpace &&
+                               item.Attributes.HasDisplayModeOverride(viewport.Id))
+                .Select(item =>
+                {
+                    var modeId = item.Attributes.GetDisplayModeOverride(viewport.Id);
+                    using var mode = DisplayModeDescription.GetDisplayMode(modeId);
+                    return new ObjectDisplayRule(
+                        new ObjectDisplaySelector(ObjectDisplaySelectorKind.ExactObject, ObjectId: item.Id),
+                        modeId,
+                        mode?.LocalName ?? "Missing display mode");
+                })
+                .ToArray());
     }
 
     private static TitleBlockTemplateRecipe? CaptureTitleBlock(

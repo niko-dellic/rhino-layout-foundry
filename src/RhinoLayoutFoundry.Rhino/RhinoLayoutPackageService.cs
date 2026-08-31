@@ -168,13 +168,16 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
 
                 foreach (var detail in sheet.Details)
                 {
-                    var recipe = detail.Recipe;
-                    Guid? modeId = recipe.DisplayModeId is { } sourceModeId
-                        ? displayModeMap.GetValueOrDefault(sourceModeId, sourceModeId)
-                        : null;
-                    var created = CreateDetail(document, page, recipe with { DisplayModeId = modeId }, unit, scale);
+                    var recipe = RemapDetailRecipe(
+                        document,
+                        detail.Recipe,
+                        displayModeMap,
+                        objectMap);
+                    var created = CreateDetail(document, page, recipe, unit, scale);
                     detailsBySource[detail.SourceDetailViewportId] = created.Viewport.Id;
                     ApplyLayerOverrides(document, created.Viewport.Id, detail.LayerOverrides, warnings);
+                    ApplyLayerRules(document, created.Viewport.Id, recipe.Layers, warnings);
+                    ApplyObjectDisplayRules(document, created.Viewport.Id, recipe.Objects, warnings);
                 }
             }
 
@@ -292,7 +295,7 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
                     referencedDisplayModes.Add(detail.Viewport.DisplayMode.Id);
                     return new LayoutPackageDetail(
                         detail.Viewport.Id,
-                        CaptureDetail(detail),
+                        CaptureDetail(document, detail),
                         CaptureLayerOverrides(document, detail.Viewport.Id));
                 }).ToArray();
                 var pageObjectIds = document.Objects
@@ -452,7 +455,7 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
             values[..3], values[3..6], values[6..9], viewport.IsPerspectiveProjection);
     }
 
-    private static DetailSlotRecipe CaptureDetail(DetailViewObject detail)
+    private static DetailSlotRecipe CaptureDetail(RhinoDoc document, DetailViewObject detail)
     {
         var bounds = detail.DetailGeometry.GetBoundingBox(true);
         var viewport = detail.Viewport;
@@ -470,7 +473,30 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
             null,
             [viewport.CameraLocation.X, viewport.CameraLocation.Y, viewport.CameraLocation.Z],
             [viewport.CameraTarget.X, viewport.CameraTarget.Y, viewport.CameraTarget.Z],
-            [viewport.CameraUp.X, viewport.CameraUp.Y, viewport.CameraUp.Z]);
+            [viewport.CameraUp.X, viewport.CameraUp.Y, viewport.CameraUp.Z],
+            document.Layers
+                .Where(layer => !layer.IsDeleted && !layer.IsReference &&
+                                layer.HasPerViewportSettings(viewport.Id))
+                .Select(layer => new LayerVisibilityRule(
+                    new LayerReference(layer.Id, layer.FullPath),
+                    layer.PerViewportIsVisible(viewport.Id)
+                        ? LayerVisibilityOverride.Visible
+                        : LayerVisibilityOverride.Hidden))
+                .ToArray(),
+            document.Objects
+                .Where(item => item is not DetailViewObject &&
+                               item.Attributes.Space == ActiveSpace.ModelSpace &&
+                               item.Attributes.HasDisplayModeOverride(viewport.Id))
+                .Select(item =>
+                {
+                    var modeId = item.Attributes.GetDisplayModeOverride(viewport.Id);
+                    using var mode = DisplayModeDescription.GetDisplayMode(modeId);
+                    return new ObjectDisplayRule(
+                        new ObjectDisplaySelector(ObjectDisplaySelectorKind.ExactObject, ObjectId: item.Id),
+                        modeId,
+                        mode?.LocalName ?? "Missing display mode");
+                })
+                .ToArray());
     }
 
     private static IReadOnlyList<LayoutPackageLayerOverride> CaptureLayerOverrides(
@@ -796,6 +822,121 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
         }
     }
 
+    private static DetailSlotRecipe RemapDetailRecipe(
+        RhinoDoc document,
+        DetailSlotRecipe recipe,
+        IReadOnlyDictionary<Guid, Guid> displayModeMap,
+        IReadOnlyDictionary<Guid, Guid> objectMap)
+    {
+        var layers = recipe.Layers.Select(rule =>
+        {
+            var index = document.Layers.FindByFullPath(rule.Layer.FullPath, -1);
+            return index >= 0
+                ? rule with { Layer = new LayerReference(document.Layers[index].Id, rule.Layer.FullPath) }
+                : rule;
+        }).ToArray();
+        var objects = recipe.Objects.Select(rule =>
+        {
+            var selector = rule.Selector;
+            if (selector.Kind == ObjectDisplaySelectorKind.ExactObject && selector.ObjectId is { } objectId)
+                selector = selector with { ObjectId = objectMap.GetValueOrDefault(objectId, objectId) };
+            else if (selector.Kind == ObjectDisplaySelectorKind.Layer &&
+                     !string.IsNullOrWhiteSpace(selector.LayerFullPath))
+            {
+                var index = document.Layers.FindByFullPath(selector.LayerFullPath, -1);
+                if (index >= 0) selector = selector with { LayerId = document.Layers[index].Id };
+            }
+            return rule with
+            {
+                Selector = selector,
+                DisplayModeId = displayModeMap.GetValueOrDefault(rule.DisplayModeId, rule.DisplayModeId),
+            };
+        }).ToArray();
+        return recipe with
+        {
+            DisplayModeId = recipe.DisplayModeId is { } modeId
+                ? displayModeMap.GetValueOrDefault(modeId, modeId)
+                : null,
+            LayerRules = layers,
+            ObjectDisplayRules = objects,
+        };
+    }
+
+    private static void ApplyLayerRules(
+        RhinoDoc document,
+        Guid detailId,
+        IReadOnlyList<LayerVisibilityRule> rules,
+        ICollection<string> warnings)
+    {
+        foreach (var rule in rules)
+        {
+            var layer = document.Layers.FindId(rule.Layer.LayerId);
+            if (layer is null)
+            {
+                var index = document.Layers.FindByFullPath(rule.Layer.FullPath, -1);
+                if (index >= 0) layer = document.Layers[index];
+            }
+            if (layer is null)
+            {
+                warnings.Add($"Layer '{rule.Layer.FullPath}' is unavailable; its template rule remains unresolved.");
+                continue;
+            }
+            var copy = new Layer();
+            copy.CopyAttributesFrom(layer);
+            copy.SetPerViewportVisible(detailId, rule.Visibility == LayerVisibilityOverride.Visible);
+            document.Layers.Modify(copy, layer.Index, quiet: true);
+        }
+    }
+
+    private static void ApplyObjectDisplayRules(
+        RhinoDoc document,
+        Guid detailId,
+        IReadOnlyList<ObjectDisplayRule> rules,
+        ICollection<string> warnings)
+    {
+        var layers = document.Layers.Where(layer => !layer.IsDeleted && !layer.IsReference)
+            .Select(layer => new LayerSnapshot(
+                layer.Id,
+                layer.ParentLayerId == Guid.Empty ? null : layer.ParentLayerId,
+                layer.FullPath,
+                layer.IsVisible))
+            .ToDictionary(layer => layer.Id);
+        var objects = document.Objects.Where(item => item is not DetailViewObject &&
+                                                      item.Attributes.Space == ActiveSpace.ModelSpace)
+            .Select(item =>
+            {
+                var layer = document.Layers[item.Attributes.LayerIndex];
+                return new ModelObjectSnapshot(
+                    item.Id,
+                    item.Attributes.Name,
+                    layer.Id,
+                    layer.FullPath,
+                    item is InstanceObject);
+            }).ToDictionary(item => item.Id);
+        var scope = new HierarchyScope(HierarchyScopeKind.Detail, detailId);
+        var resolved = ViewportAppearanceResolver.Resolve(
+            [scope],
+            new Dictionary<HierarchyScope, HierarchyViewportRuleSet>
+            {
+                [scope] = new HierarchyViewportRuleSet(scope, [], rules),
+            },
+            layers,
+            objects);
+        foreach (var pair in resolved.Objects)
+        {
+            var item = document.Objects.FindId(pair.Key);
+            using var mode = DisplayModeDescription.GetDisplayMode(pair.Value.DisplayModeId);
+            if (item is null || mode is null)
+            {
+                warnings.Add("An object display-mode rule remains unresolved after import.");
+                continue;
+            }
+            var attributes = item.Attributes.Duplicate();
+            if (attributes.SetDisplayModeOverride(mode, detailId))
+                document.Objects.ModifyAttributes(item, attributes, quiet: true);
+        }
+    }
+
     private static void ImportPageSpaceObjects(
         RhinoDoc document,
         LayoutPackageContents contents,
@@ -1096,6 +1237,42 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
                     DefaultNamedView = slot.DefaultNamedView is { } viewName
                         ? namedViewMap.GetValueOrDefault(viewName, viewName)
                         : null,
+                    LayerRules = slot.Layers.Select(rule =>
+                    {
+                        var layerIndex = document.Layers.FindByFullPath(rule.Layer.FullPath, -1);
+                        return layerIndex >= 0
+                            ? rule with
+                            {
+                                Layer = new LayerReference(
+                                    document.Layers[layerIndex].Id,
+                                    rule.Layer.FullPath),
+                            }
+                            : rule;
+                    }).ToArray(),
+                    ObjectDisplayRules = slot.Objects.Select(rule =>
+                    {
+                        var selector = rule.Selector;
+                        if (selector.Kind == ObjectDisplaySelectorKind.ExactObject &&
+                            selector.ObjectId is { } sourceObjectId)
+                            selector = selector with
+                            {
+                                ObjectId = objectMap.GetValueOrDefault(sourceObjectId, sourceObjectId),
+                            };
+                        else if (selector.Kind == ObjectDisplaySelectorKind.Layer &&
+                                 !string.IsNullOrWhiteSpace(selector.LayerFullPath))
+                        {
+                            var layerIndex = document.Layers.FindByFullPath(selector.LayerFullPath, -1);
+                            if (layerIndex >= 0)
+                                selector = selector with { LayerId = document.Layers[layerIndex].Id };
+                        }
+                        return rule with
+                        {
+                            Selector = selector,
+                            DisplayModeId = displayModeMap.GetValueOrDefault(
+                                rule.DisplayModeId,
+                                rule.DisplayModeId),
+                        };
+                    }).ToArray(),
                 }).ToArray(),
                 TitleBlock = template.TitleBlock is { } titleBlock &&
                              definitionMap.TryGetValue(titleBlock.InstanceDefinitionId, out var mappedDefinition)
@@ -1107,6 +1284,97 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
                     : template.TitleBlock,
             });
             templateNames.Add(name);
+        }
+
+        HierarchyScope? RemapScope(HierarchyScope source) => source.Kind switch
+        {
+            HierarchyScopeKind.Folder when folderMap.TryGetValue(source.Id, out var folderId) =>
+                new HierarchyScope(source.Kind, folderId),
+            HierarchyScopeKind.Sheet when pagesBySource.TryGetValue(source.Id, out var page) =>
+                new HierarchyScope(source.Kind, page.MainViewport.Id),
+            HierarchyScopeKind.Detail when detailsBySource.TryGetValue(source.Id, out var detailId) =>
+                new HierarchyScope(source.Kind, detailId),
+            _ => null,
+        };
+
+        LayerVisibilityRule RemapLayerRule(LayerVisibilityRule rule)
+        {
+            var index = document.Layers.FindByFullPath(rule.Layer.FullPath, -1);
+            return index >= 0
+                ? rule with { Layer = new LayerReference(document.Layers[index].Id, rule.Layer.FullPath) }
+                : rule;
+        }
+
+        ObjectDisplayRule RemapObjectRule(ObjectDisplayRule rule)
+        {
+            var selector = rule.Selector;
+            if (selector.Kind == ObjectDisplaySelectorKind.ExactObject && selector.ObjectId is { } sourceObjectId)
+                selector = selector with { ObjectId = objectMap.GetValueOrDefault(sourceObjectId, sourceObjectId) };
+            else if (selector.Kind == ObjectDisplaySelectorKind.Layer &&
+                     !string.IsNullOrWhiteSpace(selector.LayerFullPath))
+            {
+                var index = document.Layers.FindByFullPath(selector.LayerFullPath, -1);
+                if (index >= 0) selector = selector with { LayerId = document.Layers[index].Id };
+            }
+            return rule with
+            {
+                Selector = selector,
+                DisplayModeId = displayModeMap.GetValueOrDefault(rule.DisplayModeId, rule.DisplayModeId),
+            };
+        }
+
+        var appearanceRules = mode == LayoutPackageImportMode.Merge
+            ? before.AppearanceRules.ToList()
+            : [];
+        foreach (var sourceRules in manifest.FoundryState.AppearanceRules)
+        {
+            if (RemapScope(sourceRules.Scope) is not { } targetScope) continue;
+            appearanceRules.Add(new HierarchyViewportRuleSet(
+                targetScope,
+                sourceRules.LayerRules.Select(RemapLayerRule).ToArray(),
+                sourceRules.ObjectDisplayRules.Select(RemapObjectRule).ToArray()));
+        }
+
+        var registrations = mode == LayoutPackageImportMode.Merge
+            ? before.TemplateRegistrations.ToList()
+            : [];
+        var registrationMap = new Dictionary<Guid, Guid>();
+        foreach (var sourceRegistration in manifest.FoundryState.TemplateRegistrations)
+        {
+            if (RemapScope(sourceRegistration.Source) is not { } sourceScope) continue;
+            var id = Guid.NewGuid();
+            registrationMap[sourceRegistration.Id] = id;
+            registrations.Add(new CapabilityTemplateRegistration(
+                id,
+                sourceScope,
+                sourceRegistration.Capabilities));
+        }
+
+        var capabilityLinks = mode == LayoutPackageImportMode.Merge
+            ? before.TemplateLinks.ToList()
+            : [];
+        foreach (var sourceLink in manifest.FoundryState.TemplateLinks)
+        {
+            if (RemapScope(sourceLink.Target) is not { } targetScope ||
+                !registrationMap.TryGetValue(sourceLink.SourceRegistrationId, out var registrationId))
+                continue;
+            var payload = sourceLink.LastResolved with
+            {
+                LayerRules = sourceLink.LastResolved.Layers.Select(RemapLayerRule).ToArray(),
+                ObjectDisplayRules = sourceLink.LastResolved.Objects.Select(RemapObjectRule).ToArray(),
+            };
+            capabilityLinks.Add(sourceLink with
+            {
+                Id = Guid.NewGuid(),
+                Target = targetScope,
+                SourceRegistrationId = registrationId,
+                DetailMappings = sourceLink.DetailMappings.Select(mapping => new TemplateDetailMapping(
+                    detailsBySource.GetValueOrDefault(mapping.SourceDetailViewportId,
+                        mapping.SourceDetailViewportId),
+                    detailsBySource.GetValueOrDefault(mapping.TargetDetailViewportId,
+                        mapping.TargetDetailViewportId))).ToArray(),
+                LastResolved = payload,
+            });
         }
 
         var metadata = mode == LayoutPackageImportMode.Replace
@@ -1129,7 +1397,10 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
                 before.ProjectInfo,
                 manifest.FoundryState.ProjectInfo,
                 mode,
-                importProjectInformation));
+                importProjectInformation),
+            appearanceRules,
+            registrations,
+            capabilityLinks);
     }
 
     private static ObserverCanvasState RemapCanvas(

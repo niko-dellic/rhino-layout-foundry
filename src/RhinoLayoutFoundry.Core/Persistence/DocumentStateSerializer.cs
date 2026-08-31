@@ -24,7 +24,7 @@ public static class DocumentStateSerializer
         var state = JsonSerializer.Deserialize<DocumentState>(payload, Options)
             ?? throw new JsonException("The document state payload was empty.");
 
-        if (state.SchemaVersion is >= 1 and <= 7)
+        if (state.SchemaVersion is >= 1 and <= 8)
         {
             var projectInformation = state.SchemaVersion < 7
                 ? NormalizeProjectInformation(ProjectInformation.Empty)
@@ -42,6 +42,9 @@ public static class DocumentStateSerializer
                 ImportRecovery = state.SchemaVersion < 5 ? [] : state.Recovery,
                 DedicatedDetailLayerId = state.SchemaVersion < 6 ? null : state.DedicatedDetailLayerId,
                 ProjectData = projectInformation,
+                ViewportRuleSets = [],
+                CapabilityTemplates = MigrateTemplateRegistrations(state),
+                CapabilityLinks = [],
             };
         }
 
@@ -56,8 +59,21 @@ public static class DocumentStateSerializer
             ObserverCanvas = state.Canvas,
             ImportRecovery = state.Recovery,
             ProjectData = NormalizeProjectInformation(state.ProjectInfo),
+            ViewportRuleSets = state.AppearanceRules,
+            CapabilityTemplates = state.TemplateRegistrations,
+            CapabilityLinks = state.TemplateLinks,
         };
     }
+
+    private static IReadOnlyList<CapabilityTemplateRegistration> MigrateTemplateRegistrations(
+        DocumentState state) => state.Templates
+        .Where(template => template.SourcePageViewId is not null)
+        .Select(template => new CapabilityTemplateRegistration(
+            template.Id,
+            new HierarchyScope(HierarchyScopeKind.Sheet, template.SourcePageViewId!.Value),
+            TemplateCapability.Layout |
+            (template.TitleBlock is null ? TemplateCapability.None : TemplateCapability.TitleBlock)))
+        .ToArray();
 
     private static ProjectInformation NormalizeProjectInformation(ProjectInformation information) =>
         information with { TitleBlockOptions = information.ContentOptions };

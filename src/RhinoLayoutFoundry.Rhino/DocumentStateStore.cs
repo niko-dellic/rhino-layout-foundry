@@ -44,7 +44,10 @@ internal sealed class DocumentStateStore
         ArgumentNullException.ThrowIfNull(state);
         var serial = document.RuntimeSerialNumber;
         if (_states.TryGetValue(serial, out var before) &&
-            !ObserverCanvasStateComparer.ContentEquals(before.Canvas, state.Canvas))
+            (!ObserverCanvasStateComparer.ContentEquals(before.Canvas, state.Canvas) ||
+             !before.AppearanceRules.SequenceEqual(state.AppearanceRules) ||
+             !before.TemplateRegistrations.SequenceEqual(state.TemplateRegistrations) ||
+             !before.TemplateLinks.SequenceEqual(state.TemplateLinks)))
         {
             _writeSchemaVersions[serial] = DocumentState.CurrentSchemaVersion;
         }
@@ -77,6 +80,9 @@ internal sealed class DocumentStateStore
             ImportRecovery = writeVersion >= 5 ? state.Recovery : null,
             DedicatedDetailLayerId = writeVersion >= 6 ? state.DedicatedDetailLayerId : null,
             ProjectData = writeVersion >= 7 ? state.ProjectInfo : null,
+            ViewportRuleSets = writeVersion >= 9 ? state.AppearanceRules : null,
+            CapabilityTemplates = writeVersion >= 9 ? state.TemplateRegistrations : null,
+            CapabilityLinks = writeVersion >= 9 ? state.TemplateLinks : null,
         };
         var envelope = new ArchivableDictionary(1, "RhinoLayoutFoundry.DocumentState");
         envelope.Set(SchemaVersionKey, writeVersion);

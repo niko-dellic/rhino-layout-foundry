@@ -163,6 +163,22 @@ public sealed record SetObserverCanvasStateChange(
     ObserverCanvasState ExpectedState,
     ObserverCanvasState NewState) : OperationChange;
 
+public sealed record SetHierarchyViewportRulesChange(
+    HierarchyScope Scope,
+    HierarchyViewportRuleSet? ExpectedRules,
+    HierarchyViewportRuleSet? NewRules) : OperationChange;
+
+public sealed record SetTemplateCapabilitiesChange(
+    HierarchyScope Source,
+    CapabilityTemplateRegistration? ExpectedRegistration,
+    CapabilityTemplateRegistration? NewRegistration) : OperationChange;
+
+public sealed record SetCapabilityTemplateLinkChange(
+    HierarchyScope Target,
+    TemplateCapability Capability,
+    CapabilityTemplateLink? ExpectedLink,
+    CapabilityTemplateLink? NewLink) : OperationChange;
+
 public sealed record AssignNamedViewToDetailsChange(
     IReadOnlyList<Guid> DetailViewportIds,
     string NamedViewName) : OperationChange;

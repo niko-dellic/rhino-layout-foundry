@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using Eto.Drawing;
 using Eto.Forms;
+using RhinoLayoutFoundry.Core.Domain;
 using RhinoLayoutFoundry.Core.Operations;
 using RhinoLayoutFoundry.Core.Observer;
 using RhinoLayoutFoundry.Core.Overview;
@@ -50,6 +51,9 @@ public sealed partial class LayoutFoundryPanel : Panel
     private readonly GridColumn _paperColumn;
     private readonly GridColumn _detailsColumn;
     private readonly GridColumn _displayModeColumn;
+    private readonly GridColumn _layersColumn;
+    private readonly GridColumn _objectModesColumn;
+    private readonly GridColumn _statusColumn;
     private readonly TextBoxCell _paperCell;
     private readonly CustomCell _displayModeCell;
     private readonly Panel _contentHost;
@@ -63,6 +67,7 @@ public sealed partial class LayoutFoundryPanel : Panel
     private readonly Control _panelShell;
     private readonly PixelLayout _panelOverlayHost;
     private readonly DeleteConfirmationOverlay _deleteConfirmationOverlay;
+    private readonly TemplateRolesOverlay _templateRolesOverlay;
     private ButtonMenuItem _setCurrentMenuItem = null!;
     private ButtonMenuItem _newFolderMenuItem = null!;
     private ButtonMenuItem _newPageMenuItem = null!;
@@ -266,7 +271,7 @@ public sealed partial class LayoutFoundryPanel : Panel
         };
         _displayModeCell = CreateDisplayModeCell();
         (_treeGrid, _layoutsColumn, _printColumn, _templateColumn, _paperColumn, _detailsColumn,
-            _displayModeColumn) = CreateTreeGrid();
+            _displayModeColumn, _layersColumn, _objectModesColumn, _statusColumn) = CreateTreeGrid();
         CreateHierarchyContextMenu();
         _toolbarSurface = FoundryTheme.Surface(
             CreateToolbarContent(),
@@ -319,11 +324,15 @@ public sealed partial class LayoutFoundryPanel : Panel
         _deleteConfirmationOverlay.CancelRequested += (_, _) => CancelDeleteConfirmation();
         _deleteConfirmationOverlay.ConfirmRequested += async (_, _) =>
             await ConfirmDeleteSelectionAsync();
+        _templateRolesOverlay = new TemplateRolesOverlay();
+        _templateRolesOverlay.CommitRequested += async (_, eventArgs) =>
+            await CommitTemplateRolesAsync(eventArgs.Values);
         _panelOverlayHost = new PixelLayout
         {
             BackgroundColor = FoundryTheme.PanelBackground,
         };
         _panelOverlayHost.Add(_panelShell, 0, 0);
+        _panelOverlayHost.Add(_templateRolesOverlay, 0, 0);
         _panelOverlayHost.Add(_deleteConfirmationOverlay, 0, 0);
         _panelOverlayHost.SizeChanged += (_, _) => LayoutPanelOverlay();
         Content = _panelOverlayHost;
@@ -418,7 +427,8 @@ public sealed partial class LayoutFoundryPanel : Panel
 
     private (TreeGridView TreeGrid, GridColumn LayoutsColumn, GridColumn PrintColumn,
         GridColumn TemplateColumn,
-        GridColumn PaperColumn, GridColumn DetailsColumn, GridColumn DisplayModeColumn) CreateTreeGrid()
+        GridColumn PaperColumn, GridColumn DetailsColumn, GridColumn DisplayModeColumn,
+        GridColumn LayersColumn, GridColumn ObjectModesColumn, GridColumn StatusColumn) CreateTreeGrid()
     {
         var treeGrid = new TreeGridView
         {
@@ -452,13 +462,12 @@ public sealed partial class LayoutFoundryPanel : Panel
         treeGrid.Columns.Add(printColumn);
         var templateColumn = new GridColumn
         {
-            HeaderText = "Template",
+            HeaderText = "Template roles",
             DataCell = new TextBoxCell
             {
                 Binding = Binding.Property<HierarchyTreeItem, string>(item => item.TemplateText),
-                TextAlignment = TextAlignment.Center,
             },
-            Width = 76,
+            Width = 156,
             Sortable = true,
         };
         treeGrid.Columns.Add(templateColumn);
@@ -491,7 +500,29 @@ public sealed partial class LayoutFoundryPanel : Panel
             Sortable = true,
         };
         treeGrid.Columns.Add(displayModeColumn);
-        treeGrid.Columns.Add(new GridColumn
+        var layersColumn = new GridColumn
+        {
+            HeaderText = "Layers",
+            DataCell = new TextBoxCell
+            {
+                Binding = Binding.Property<HierarchyTreeItem, string>(item => item.LayerStateText),
+            },
+            Width = 142,
+            Sortable = false,
+        };
+        treeGrid.Columns.Add(layersColumn);
+        var objectModesColumn = new GridColumn
+        {
+            HeaderText = "Object modes",
+            DataCell = new TextBoxCell
+            {
+                Binding = Binding.Property<HierarchyTreeItem, string>(item => item.ObjectModesText),
+            },
+            Width = 144,
+            Sortable = false,
+        };
+        treeGrid.Columns.Add(objectModesColumn);
+        var statusColumn = new GridColumn
         {
             HeaderText = "Status",
             DataCell = new FoundryBadgeCell<HierarchyTreeItem>(
@@ -499,10 +530,11 @@ public sealed partial class LayoutFoundryPanel : Panel
                 item => item.StatusTone),
             Width = 96,
             Sortable = true,
-        });
+        };
+        treeGrid.Columns.Add(statusColumn);
 
         return (treeGrid, layoutsColumn, printColumn, templateColumn, paperColumn, detailsColumn,
-            displayModeColumn);
+            displayModeColumn, layersColumn, objectModesColumn, statusColumn);
     }
 
     private void OnHierarchyCellFormatting(
@@ -861,8 +893,10 @@ public sealed partial class LayoutFoundryPanel : Panel
             return;
 
         _panelShell.Size = size;
+        _templateRolesOverlay.Size = size;
         _deleteConfirmationOverlay.Size = size;
         _panelOverlayHost.Move(_panelShell, 0, 0);
+        _panelOverlayHost.Move(_templateRolesOverlay, 0, 0);
         _panelOverlayHost.Move(_deleteConfirmationOverlay, 0, 0);
     }
 
@@ -1602,6 +1636,7 @@ public sealed partial class LayoutFoundryPanel : Panel
     {
         _fullscreenWindow?.Close();
         CloseHierarchyDisplayModePicker();
+        _templateRolesOverlay.Dismiss(commit: false);
 
         if (!_isLoaded)
         {
@@ -1858,19 +1893,13 @@ public sealed partial class LayoutFoundryPanel : Panel
     {
         _layoutsColumn.HeaderText = SortHeader("Layouts", OverviewSortProperty.Name);
         _printColumn.HeaderText = SortHeader("Print", OverviewSortProperty.Print);
-        _templateColumn.HeaderText = SortHeader("Template", OverviewSortProperty.Template);
+        _templateColumn.HeaderText = SortHeader("Template roles", OverviewSortProperty.Template);
         _paperColumn.HeaderText = SortHeader("Paper size", OverviewSortProperty.PaperSize);
         _detailsColumn.HeaderText = SortHeader("Details", OverviewSortProperty.DetailCount);
         _displayModeColumn.HeaderText = SortHeader("Display mode", OverviewSortProperty.DisplayMode);
-        var statusColumn = _treeGrid.Columns.FirstOrDefault(column =>
-            !ReferenceEquals(column, _layoutsColumn) &&
-            !ReferenceEquals(column, _printColumn) &&
-            !ReferenceEquals(column, _templateColumn) &&
-            !ReferenceEquals(column, _paperColumn) &&
-            !ReferenceEquals(column, _detailsColumn) &&
-            !ReferenceEquals(column, _displayModeColumn));
-        if (statusColumn is not null)
-            statusColumn.HeaderText = SortHeader("Status", OverviewSortProperty.Status);
+        _layersColumn.HeaderText = "Layers";
+        _objectModesColumn.HeaderText = "Object modes";
+        _statusColumn.HeaderText = SortHeader("Status", OverviewSortProperty.Status);
     }
 
     private string SortHeader(string label, OverviewSortProperty property) =>
@@ -2151,7 +2180,23 @@ public sealed partial class LayoutFoundryPanel : Panel
 
         if (ReferenceEquals(eventArgs.GridColumn, _templateColumn))
         {
-            await ToggleTemplateRegistrationAsync(item);
+            ShowTemplateRolesPicker(PropertyInteractionTargets(item.Node.Key), eventArgs.Location);
+            return;
+        }
+
+        if (ReferenceEquals(eventArgs.GridColumn, _layersColumn))
+        {
+            OpenAppearanceSettings(
+                PropertyInteractionTargets(item.Node.Key),
+                SelectionInspectorContent.Layers);
+            return;
+        }
+
+        if (ReferenceEquals(eventArgs.GridColumn, _objectModesColumn))
+        {
+            OpenAppearanceSettings(
+                PropertyInteractionTargets(item.Node.Key),
+                SelectionInspectorContent.ObjectModes);
             return;
         }
 
@@ -2159,25 +2204,6 @@ public sealed partial class LayoutFoundryPanel : Panel
             return;
 
         await TogglePrintInclusionAsync(item);
-    }
-
-    private async Task ToggleTemplateRegistrationAsync(HierarchyTreeItem item)
-    {
-        if (item.Node.Sheet is not { } sheet) return;
-        var targets = PropertyInteractionTargets(item.Node.Key);
-        var register = !sheet.IsTemplate;
-        _statusLabel.Text = register
-            ? "Registering layout as a template…"
-            : "Unregistering layout template…";
-        var registrationResult = await LayoutFoundryUiHost.SetSheetTemplateRegistrationAsync(
-            targets,
-            register);
-        _statusLabel.Text = registrationResult.Succeeded
-            ? register
-                ? "Selected layouts are available as layout templates."
-                : "Selected layouts are no longer layout templates."
-            : DiagnosticMessage(registrationResult);
-        RefreshOverview();
     }
 
     private async Task TogglePrintInclusionAsync(HierarchyTreeItem item)
@@ -2628,7 +2654,9 @@ public sealed partial class LayoutFoundryPanel : Panel
 
                     _selectionPreservingCircleInteraction = null;
                     if (ReferenceEquals(column, _templateColumn))
-                        await ToggleTemplateRegistrationAsync(item);
+                        ShowTemplateRolesPicker(
+                            PropertyInteractionTargets(item.Node.Key),
+                            eventArgs.Location);
                     else if (item.HasSheetTargets)
                         await TogglePrintInclusionAsync(item);
                 });
@@ -2693,7 +2721,9 @@ public sealed partial class LayoutFoundryPanel : Panel
         ReferenceEquals(column, _printColumn) ||
         ReferenceEquals(column, _templateColumn) ||
         ReferenceEquals(column, _paperColumn) ||
-        ReferenceEquals(column, _displayModeColumn);
+        ReferenceEquals(column, _displayModeColumn) ||
+        ReferenceEquals(column, _layersColumn) ||
+        ReferenceEquals(column, _objectModesColumn);
 
     private bool IsInlineRenameTarget(HierarchyTreeItem item, GridColumn? column = null) =>
         (column is null || ReferenceEquals(column, _layoutsColumn)) &&
@@ -2914,7 +2944,32 @@ public sealed partial class LayoutFoundryPanel : Panel
             _statusLabel.Text = "The active Rhino document is unavailable.";
             return;
         }
-        var targets = BatchTargetResolver.Resolve(snapshot, SelectedKeys());
+        var selection = SelectedKeys().Distinct().ToArray();
+        if (selection.Length == 0)
+        {
+            _statusLabel.Text = "Select a folder, layout, or detail first.";
+            return;
+        }
+
+        if (selection.Any(key => key.Kind == OverviewNodeKind.Detail))
+        {
+            var detailIds = BatchTargetResolver.ResolveDetailIds(snapshot, selection);
+            if (detailIds.Count == 0)
+            {
+                _statusLabel.Text = "The selection does not contain any detail viewports.";
+                return;
+            }
+            var detailDialog = new DetailPropertiesDialog(snapshot, detailIds);
+            detailDialog.ShowModal(this);
+            if (detailDialog.Succeeded)
+            {
+                _statusLabel.Text = $"Updated {detailIds.Count} detail{(detailIds.Count == 1 ? string.Empty : "s")}.";
+                RefreshOverview();
+            }
+            return;
+        }
+
+        var targets = BatchTargetResolver.Resolve(snapshot, selection);
         if (targets.Count == 0)
         {
             _statusLabel.Text = "The selection does not contain any layouts.";
@@ -2928,6 +2983,95 @@ public sealed partial class LayoutFoundryPanel : Panel
             RefreshOverview();
         }
     }
+
+    private void OpenAppearanceSettings(
+        IReadOnlyList<OverviewNodeKey> selection,
+        SelectionInspectorContent contentMode)
+    {
+        var snapshot = LayoutFoundryUiHost.CaptureSnapshot();
+        if (snapshot is null)
+        {
+            _statusLabel.Text = "The active Rhino document is unavailable.";
+            return;
+        }
+        var targets = selection.Distinct().ToArray();
+        if (targets.Length == 0)
+        {
+            _statusLabel.Text = "Select a folder, layout, or detail first.";
+            return;
+        }
+        var dialog = new SelectionInspectorDialog(snapshot, targets, contentMode);
+        dialog.ShowModal(this);
+        if (dialog.Changed)
+        {
+            _statusLabel.Text = $"Updated {targets.Length} selected item{(targets.Length == 1 ? string.Empty : "s")}.";
+            RefreshOverview();
+        }
+    }
+
+    private void ShowTemplateRolesPicker(
+        IReadOnlyList<OverviewNodeKey> selection,
+        PointF hierarchyLocation)
+    {
+        var snapshot = LayoutFoundryUiHost.CaptureSnapshot();
+        if (snapshot is null)
+        {
+            _statusLabel.Text = "The active Rhino document is unavailable.";
+            return;
+        }
+        var targets = selection.Distinct().Where(key => key.Kind is
+            OverviewNodeKind.Folder or OverviewNodeKind.Sheet or OverviewNodeKind.Detail).ToArray();
+        if (targets.Length == 0)
+        {
+            _statusLabel.Text = "Template roles apply to folders, layouts, and details.";
+            return;
+        }
+
+        var initial = targets.ToDictionary(key => key, key =>
+        {
+            var scope = ToHierarchyScope(key);
+            return snapshot.TemplateRegistrations.LastOrDefault(item => item.Source == scope)
+                ?.Capabilities ?? TemplateCapability.None;
+        });
+        var allowed = targets.Select(key => TemplateCapabilityPolicy.AllowedFor(
+                ToHierarchyScope(key).Kind))
+            .Aggregate((left, right) => left & right);
+        var screenPoint = _treeGrid.PointToScreen(hierarchyLocation);
+        var overlayPoint = _panelOverlayHost.PointFromScreen(screenPoint);
+        _templateRolesOverlay.ShowPicker(
+            initial,
+            allowed,
+            new Point((int)Math.Round(overlayPoint.X), (int)Math.Round(overlayPoint.Y + _treeGrid.RowHeight)));
+    }
+
+    private async Task CommitTemplateRolesAsync(
+        IReadOnlyDictionary<OverviewNodeKey, TemplateCapability> values)
+    {
+        if (values.Count == 0) return;
+        _statusLabel.Text = "Updating template roles…";
+        foreach (var group in values.GroupBy(pair => pair.Value))
+        {
+            var result = await LayoutFoundryUiHost.SetTemplateCapabilitiesAsync(
+                group.Select(pair => pair.Key).ToArray(),
+                group.Key);
+            if (result.Succeeded) continue;
+            _statusLabel.Text = DiagnosticMessage(result);
+            RefreshOverview();
+            return;
+        }
+        _statusLabel.Text = "Template roles updated.";
+        RefreshOverview();
+    }
+
+    private static HierarchyScope ToHierarchyScope(OverviewNodeKey key) => new(
+        key.Kind switch
+        {
+            OverviewNodeKind.Folder => HierarchyScopeKind.Folder,
+            OverviewNodeKind.Sheet => HierarchyScopeKind.Sheet,
+            OverviewNodeKind.Detail => HierarchyScopeKind.Detail,
+            _ => throw new ArgumentOutOfRangeException(nameof(key)),
+        },
+        key.Id);
 
     private void OpenCreateLayouts(Guid? preferredFolderId)
     {
@@ -3367,9 +3511,42 @@ public sealed partial class LayoutFoundryPanel : Panel
             }
         }
 
-        public string TemplateText => Node.Sheet is null
-            ? string.Empty
-            : Node.Sheet.IsTemplate ? "●" : "○";
+        public string TemplateText => CapabilitySummary(Node.Folder?.TemplateCapabilities ??
+                                                        Node.Sheet?.TemplateCapabilities ??
+                                                        Node.Detail?.TemplateCapabilities ??
+                                                        TemplateCapability.None);
+
+        public string LayerStateText => AppearanceSummary() is not { } appearance
+            ? "—"
+            : appearance.IsMixed
+                ? "Mixed"
+                : appearance.VisibleLayerCount == 0 && appearance.HiddenLayerCount == 0
+                    ? "Inherited"
+                    : $"On {appearance.VisibleLayerCount} · Off {appearance.HiddenLayerCount}";
+
+        public string ObjectModesText => AppearanceSummary() is not { } appearance
+            ? "—"
+            : appearance.IsMixed
+                ? "Mixed"
+                : appearance.ObjectDisplayOverrideCount == 0
+                    ? "Inherited"
+                    : appearance.UnresolvedCount > 0
+                        ? $"{appearance.ObjectDisplayOverrideCount} · {appearance.UnresolvedCount} missing"
+                        : $"{appearance.ObjectDisplayOverrideCount} override{(appearance.ObjectDisplayOverrideCount == 1 ? string.Empty : "s")}";
+
+        private ViewportAppearanceSummary? AppearanceSummary() =>
+            Node.Folder?.Appearance ?? Node.Sheet?.Appearance ?? Node.Detail?.Appearance;
+
+        private static string CapabilitySummary(TemplateCapability capabilities)
+        {
+            if (capabilities == TemplateCapability.None) return "—";
+            var labels = new List<string>(4);
+            if (capabilities.HasFlag(TemplateCapability.Layout)) labels.Add("Layout");
+            if (capabilities.HasFlag(TemplateCapability.TitleBlock)) labels.Add("Title block");
+            if (capabilities.HasFlag(TemplateCapability.LayerStates)) labels.Add("Layers");
+            if (capabilities.HasFlag(TemplateCapability.ObjectDisplayModes)) labels.Add("Objects");
+            return string.Join(" · ", labels);
+        }
 
         private string? _paperText;
 

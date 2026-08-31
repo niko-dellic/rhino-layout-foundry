@@ -176,6 +176,62 @@ public sealed class SheetTemplatePlannerTests
     }
 
     [Fact]
+    public void BatchCreationAppliesIndependentAppearanceTemplateSources()
+    {
+        var layerRegistrationId = Guid.NewGuid();
+        var objectRegistrationId = Guid.NewGuid();
+        var layerId = Guid.NewGuid();
+        var objectId = Guid.NewGuid();
+        var layerSource = new HierarchyScope(HierarchyScopeKind.Folder, Guid.NewGuid());
+        var objectSource = new HierarchyScope(HierarchyScopeKind.Detail, Guid.NewGuid());
+        var layerRule = new LayerVisibilityRule(
+            new LayerReference(layerId, "Architecture::Notes"),
+            LayerVisibilityOverride.Hidden);
+        var objectRule = new ObjectDisplayRule(
+            new ObjectDisplaySelector(ObjectDisplaySelectorKind.ExactObject, ObjectId: objectId),
+            TestSnapshots.DisplayModeOneId,
+            "Technical");
+        var snapshot = WithTemplates(TestSnapshots.Create(), []) with
+        {
+            ViewportRuleSets =
+            [
+                new HierarchyViewportRuleSet(layerSource, [layerRule], []),
+                new HierarchyViewportRuleSet(objectSource, [], [objectRule]),
+            ],
+            CapabilityTemplates =
+            [
+                new CapabilityTemplateRegistration(
+                    layerRegistrationId, layerSource, TemplateCapability.LayerStates),
+                new CapabilityTemplateRegistration(
+                    objectRegistrationId, objectSource, TemplateCapability.ObjectDisplayModes),
+            ],
+        };
+        var plan = new BatchCreateSheetsPlanner().Plan(new BatchCreateSheetsRequest(
+            42,
+            1,
+            TestSnapshots.RootFolderId,
+            [],
+            "Page {index}",
+            1,
+            1,
+            CreationSpecs:
+            [
+                new LayoutCreationSpec(
+                    1,
+                    new PaperRecipe(594, 420, "Millimeters"),
+                    BuiltInLayoutKind.SingleDetail,
+                    LayerStateTemplateRegistrationId: layerRegistrationId,
+                    ObjectDisplayTemplateRegistrationId: objectRegistrationId),
+            ]), snapshot);
+
+        Assert.True(plan.CanApply);
+        var detail = Assert.Single(Assert.IsType<CreateSheetFromTemplateChange>(
+            Assert.Single(plan.Changes)).Template.DetailSlots);
+        Assert.Equal(layerRule, Assert.Single(detail.Layers));
+        Assert.Equal(objectRule, Assert.Single(detail.Objects));
+    }
+
+    [Fact]
     public void WrongPerDetailDisplayModeCountBlocksBatch()
     {
         var snapshot = WithTemplates(TestSnapshots.Create(), []);

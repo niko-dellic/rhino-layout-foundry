@@ -109,6 +109,43 @@ public sealed class LayoutPackageArchiveTests
         }
     }
 
+    [Fact]
+    public void VersionOnePackageIsReadAndNormalizedToVersionTwo()
+    {
+        var path = TemporaryPath();
+        try
+        {
+            byte[] layout = [4, 3, 2, 1];
+            var manifest = Manifest() with
+            {
+                PackageVersion = 1,
+                FoundryState = DocumentState.Empty() with { SchemaVersion = 8 },
+                AssetChecksums = new Dictionary<string, string>
+                {
+                    [LayoutPackageManifest.LayoutAssetEntryName] = LayoutPackageArchive.Sha256(layout),
+                },
+            };
+            using (var archive = ZipFile.Open(path, ZipArchiveMode.Create))
+            {
+                var manifestEntry = archive.CreateEntry(LayoutPackageManifest.ManifestEntryName);
+                using (var writer = new StreamWriter(manifestEntry.Open()))
+                    writer.Write(JsonSerializer.Serialize(manifest));
+                var layoutEntry = archive.CreateEntry(LayoutPackageManifest.LayoutAssetEntryName);
+                using var output = layoutEntry.Open();
+                output.Write(layout);
+            }
+
+            var restored = LayoutPackageArchive.Read(path);
+
+            Assert.Equal(2, restored.Manifest.PackageVersion);
+            Assert.Equal(DocumentState.CurrentSchemaVersion, restored.Manifest.FoundryState.SchemaVersion);
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
     private static LayoutPackageManifest Manifest() => new(
         LayoutPackageManifest.CurrentPackageVersion,
         "Example",

@@ -87,7 +87,9 @@ public sealed record LayoutCreationSpec(
     bool UseDedicatedDetailLayer = true,
     IReadOnlyList<string?>? NamedViewsByDetail = null,
     IReadOnlyList<Guid?>? DetailDisplayModesByDetail = null,
-    Guid? DetailLayerId = null);
+    Guid? DetailLayerId = null,
+    Guid? LayerStateTemplateRegistrationId = null,
+    Guid? ObjectDisplayTemplateRegistrationId = null);
 
 public sealed record BatchCreateSheetsRequest(
     uint DocumentRuntimeSerialNumber,
@@ -336,6 +338,19 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
                 : spec.DetailDisplayModeId ?? slot.DisplayModeId,
         }).ToArray();
 
+        details = ApplyAppearanceCapability(
+            details,
+            spec.LayerStateTemplateRegistrationId,
+            TemplateCapability.LayerStates,
+            snapshot,
+            diagnostics);
+        details = ApplyAppearanceCapability(
+            details,
+            spec.ObjectDisplayTemplateRegistrationId,
+            TemplateCapability.ObjectDisplayModes,
+            snapshot,
+            diagnostics);
+
         var namedViewAssignments = new Dictionary<Guid, string>();
         if (spec.NamedViewsByDetail is not null)
         {
@@ -423,6 +438,53 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
             TitleBlock = titleBlock,
         };
         return new ResolvedCreationSpec(template, namedViewAssignments);
+    }
+
+    private static DetailSlotRecipe[] ApplyAppearanceCapability(
+        DetailSlotRecipe[] details,
+        Guid? registrationId,
+        TemplateCapability capability,
+        DocumentSnapshot snapshot,
+        ICollection<Diagnostic> diagnostics)
+    {
+        if (registrationId is not { } id) return details;
+        var registration = snapshot.TemplateRegistrations.LastOrDefault(item => item.Id == id);
+        if (registration is null || !registration.Capabilities.HasFlag(capability))
+        {
+            diagnostics.Add(CaptureSheetTemplatePlanner.Error(
+                "template.capability_source_missing",
+                $"The selected {capability} template source is unavailable."));
+            return details;
+        }
+
+        var sourceTemplate = registration.Source.Kind switch
+        {
+            HierarchyScopeKind.Sheet => snapshot.Templates.FirstOrDefault(template =>
+                template.SourcePageViewId == registration.Source.Id),
+            HierarchyScopeKind.Detail => snapshot.Templates.FirstOrDefault(template =>
+                template.Id == registration.Id),
+            _ => null,
+        };
+        var local = snapshot.AppearanceRules.LastOrDefault(item => item.Scope == registration.Source);
+        return details.Select((detail, index) =>
+        {
+            var sourceSlot = sourceTemplate?.DetailSlots.Count > 0
+                ? sourceTemplate.DetailSlots[Math.Min(index, sourceTemplate.DetailSlots.Count - 1)]
+                : null;
+            return capability switch
+            {
+                TemplateCapability.LayerStates => detail with
+                {
+                    LayerRules = sourceSlot?.Layers.ToArray() ?? local?.LayerRules.ToArray() ?? [],
+                },
+                TemplateCapability.ObjectDisplayModes => detail with
+                {
+                    ObjectDisplayRules = sourceSlot?.Objects.ToArray() ??
+                                         local?.ObjectDisplayRules.ToArray() ?? [],
+                },
+                _ => detail,
+            };
+        }).ToArray();
     }
 
     private static double MapCoordinate(

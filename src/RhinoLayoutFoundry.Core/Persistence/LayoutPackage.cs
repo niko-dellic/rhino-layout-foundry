@@ -41,7 +41,7 @@ public sealed record LayoutPackageManifest(
     IReadOnlyDictionary<string, string> AssetChecksums,
     IReadOnlyList<LayoutPackageTitleBlockDefinition>? TitleBlockDefinitions = null)
 {
-    public const int CurrentPackageVersion = 1;
+    public const int CurrentPackageVersion = 2;
     public const string ManifestEntryName = "manifest.json";
     public const string LayoutAssetEntryName = "assets/layouts.3dm";
 
@@ -286,12 +286,19 @@ public static class LayoutPackageArchive
             manifest.NamedViews is null || manifest.NamedLayerStates is null ||
             manifest.DisplayModes is null || manifest.AssetChecksums is null)
             throw new InvalidDataException("The layout package manifest is incomplete.");
-        if (manifest.PackageVersion != LayoutPackageManifest.CurrentPackageVersion)
+        if (manifest.PackageVersion is < 1 or > LayoutPackageManifest.CurrentPackageVersion)
             throw new NotSupportedException(
-                $"Layout package version {manifest.PackageVersion} is not supported; expected {LayoutPackageManifest.CurrentPackageVersion}.");
+                $"Layout package version {manifest.PackageVersion} is not supported; expected version 1 through {LayoutPackageManifest.CurrentPackageVersion}.");
         if (manifest.FoundryState.SchemaVersion > DocumentState.CurrentSchemaVersion)
             throw new NotSupportedException(
                 $"Document state schema {manifest.FoundryState.SchemaVersion} is newer than this plug-in supports.");
+        var normalizedState = DocumentStateSerializer.Deserialize(
+            JsonSerializer.Serialize(manifest.FoundryState, JsonOptions));
+        manifest = manifest with
+        {
+            PackageVersion = LayoutPackageManifest.CurrentPackageVersion,
+            FoundryState = normalizedState,
+        };
 
         var assets = new Dictionary<string, byte[]>(StringComparer.Ordinal);
         foreach (var expected in manifest.AssetChecksums.OrderBy(pair => pair.Key, StringComparer.Ordinal))

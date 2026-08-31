@@ -16,7 +16,14 @@ public sealed record DocumentSnapshot(
     IReadOnlyDictionary<Guid, TitleBlockInstanceSnapshot>? TitleBlockInstanceChoices = null,
     ObserverCanvasState? ObserverCanvas = null,
     ProjectInformation? ProjectData = null,
-    IReadOnlyDictionary<Guid, string>? LayerNames = null)
+    IReadOnlyDictionary<Guid, string>? LayerNames = null,
+    IReadOnlyDictionary<Guid, LayerSnapshot>? LayerSettings = null,
+    IReadOnlyDictionary<Guid, ModelObjectSnapshot>? ModelObjectSettings = null,
+    IReadOnlyList<DetailLayerVisibilitySnapshot>? DetailLayerVisibilities = null,
+    IReadOnlyList<DetailObjectDisplayOverrideSnapshot>? DetailObjectDisplayOverrides = null,
+    IReadOnlyList<HierarchyViewportRuleSet>? ViewportRuleSets = null,
+    IReadOnlyList<CapabilityTemplateRegistration>? CapabilityTemplates = null,
+    IReadOnlyList<CapabilityTemplateLink>? CapabilityLinks = null)
 {
     public IReadOnlyList<SheetTemplateRecipe> Templates => SheetTemplates ?? [];
     public IReadOnlyDictionary<string, string> Metadata =>
@@ -31,6 +38,16 @@ public sealed record DocumentSnapshot(
     public ObserverCanvasState Canvas => ObserverCanvas ?? ObserverCanvasState.Empty;
     public ProjectInformation ProjectInfo => ProjectData ?? ProjectInformation.Empty;
     public IReadOnlyDictionary<Guid, string> Layers => LayerNames ?? new Dictionary<Guid, string>();
+    public IReadOnlyDictionary<Guid, LayerSnapshot> LayerSnapshots =>
+        LayerSettings ?? new Dictionary<Guid, LayerSnapshot>();
+    public IReadOnlyDictionary<Guid, ModelObjectSnapshot> ModelObjects =>
+        ModelObjectSettings ?? new Dictionary<Guid, ModelObjectSnapshot>();
+    public IReadOnlyList<DetailLayerVisibilitySnapshot> DetailLayers => DetailLayerVisibilities ?? [];
+    public IReadOnlyList<DetailObjectDisplayOverrideSnapshot> ObjectOverrides =>
+        DetailObjectDisplayOverrides ?? [];
+    public IReadOnlyList<HierarchyViewportRuleSet> AppearanceRules => ViewportRuleSets ?? [];
+    public IReadOnlyList<CapabilityTemplateRegistration> TemplateRegistrations => CapabilityTemplates ?? [];
+    public IReadOnlyList<CapabilityTemplateLink> TemplateLinks => CapabilityLinks ?? [];
 }
 
 public sealed record SheetSnapshot(

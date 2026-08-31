@@ -55,13 +55,12 @@ internal sealed partial class ObserverCanvasDrawable
             IsCanvasOverlay(canvasPoint))
             return nativeEvent;
 
-        // AppKit reports natural-scrolling trackpad deltas opposite to the
-        // physical finger motion. Match Rhino's grab-and-move canvas behavior
-        // while respecting the direction selected in macOS settings.
-        var direction = nativeEvent.IsDirectionInvertedFromDevice ? -1d : 1d;
+        // ScrollingDeltaX/Y already include the direction selected in macOS.
+        // ObserverCamera.PanScreen expects an on-screen content translation,
+        // which is the inverse of AppKit's system-mapped scroll delta.
         QueueCameraPan(
-            (double)nativeEvent.ScrollingDeltaX * direction,
-            (double)nativeEvent.ScrollingDeltaY * direction);
+            -(double)nativeEvent.ScrollingDeltaX,
+            -(double)nativeEvent.ScrollingDeltaY);
         return null!;
     }
 

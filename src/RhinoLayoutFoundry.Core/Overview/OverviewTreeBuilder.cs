@@ -36,6 +36,7 @@ public sealed record OverviewTreeNode(
     string Label,
     string SecondaryText,
     IReadOnlyList<OverviewTreeNode> Children,
+    FolderOverview? Folder = null,
     SheetOverview? Sheet = null,
     DetailOverview? Detail = null,
     OverviewNavigationTarget? NavigationTarget = null,
@@ -103,6 +104,7 @@ public static class OverviewTreeBuilder
             return [];
         }
 
+        var rootFolder = overview.Folders.FirstOrDefault(folder => folder.Id == rootId);
         return
         [
             new OverviewTreeNode(
@@ -110,6 +112,7 @@ public static class OverviewTreeBuilder
                 DocumentRootLabel(overview.DocumentName),
                 Pluralize(CountSheets(rootChildren), "sheet"),
                 rootChildren,
+                Folder: rootFolder,
                 IsDocumentRoot: true),
         ];
     }
@@ -199,7 +202,8 @@ public static class OverviewTreeBuilder
             new OverviewNodeKey(OverviewNodeKind.Folder, folder.Id),
             folder.Name,
             Pluralize(sheetCount, "sheet"),
-            children);
+            children,
+            Folder: folder);
     }
 
     private static OverviewTreeNode? BuildSheet(

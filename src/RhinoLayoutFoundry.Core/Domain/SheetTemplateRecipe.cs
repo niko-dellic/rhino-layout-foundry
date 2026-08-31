@@ -35,7 +35,13 @@ public sealed record DetailSlotRecipe(
     string? DefaultNamedView,
     IReadOnlyList<double>? CameraLocation = null,
     IReadOnlyList<double>? CameraTarget = null,
-    IReadOnlyList<double>? CameraUp = null);
+    IReadOnlyList<double>? CameraUp = null,
+    IReadOnlyList<LayerVisibilityRule>? LayerRules = null,
+    IReadOnlyList<ObjectDisplayRule>? ObjectDisplayRules = null)
+{
+    public IReadOnlyList<LayerVisibilityRule> Layers => LayerRules ?? [];
+    public IReadOnlyList<ObjectDisplayRule> Objects => ObjectDisplayRules ?? [];
+}
 
 public sealed record TitleBlockTemplateRecipe(
     Guid InstanceDefinitionId,

@@ -7,6 +7,13 @@ using RhinoLayoutFoundry.Core.Overview;
 
 namespace RhinoLayoutFoundry.UI;
 
+internal enum SelectionInspectorContent
+{
+    All,
+    Layers,
+    ObjectModes,
+}
+
 internal sealed class SelectionInspectorPanel : Panel
 {
     internal const int OverlayWidth = 344;
@@ -30,7 +37,9 @@ internal sealed class SelectionInspectorPanel : Panel
     private readonly Label _paperMixed = FoundryTheme.MutedLabel("Mixed — enter a complete size to apply to all affected layouts.");
     private readonly FilteredPicker _titleBlock = new([], "Search title blocks");
     private readonly FoundryTextSegmentedControl _titleBlockMode = new(["None", "Right", "Bottom"], 0, 72);
-    private readonly FoundryCheckBox _template = new("Registered layout template");
+    private readonly TemplateCapabilityPicker _templateCapabilities = new();
+    private readonly Label _templateError = ErrorLabel();
+    private readonly Panel _templateSection;
     private readonly TextArea _revisions = new() { Height = 82, Wrap = false };
     private readonly FoundryDialogButton _revisionAction = new("Save", FoundryDialogButtonStyle.Secondary, 92);
     private readonly Label _layoutError = ErrorLabel();
@@ -38,6 +47,30 @@ internal sealed class SelectionInspectorPanel : Panel
     private readonly FilteredPicker _displayMode = new([], "Search display modes");
     private readonly Label _detailError = ErrorLabel();
     private readonly Panel _detailSection;
+    private readonly TextBox _layerSearch = new() { PlaceholderText = "Search layers" };
+    private readonly FilteredPicker _layerTemplate = new([], "Search layer-state templates");
+    private readonly FoundryDialogButton _linkLayerTemplate = new("Link source", FoundryDialogButtonStyle.Secondary, 96);
+    private readonly FoundryDialogButton _detachLayerTemplate = new("Detach", FoundryDialogButtonStyle.Secondary, 76);
+    private readonly GridView _layers;
+    private readonly FoundryDialogButton _layersInherit = new("Inherit", FoundryDialogButtonStyle.Secondary, 82);
+    private readonly FoundryDialogButton _layersOn = new("On", FoundryDialogButtonStyle.Secondary, 64);
+    private readonly FoundryDialogButton _layersOff = new("Off", FoundryDialogButtonStyle.Secondary, 64);
+    private readonly FoundryDialogButton _clearLayerOverrides = new("Clear local overrides", FoundryDialogButtonStyle.Secondary, 150);
+    private readonly Label _layersError = ErrorLabel();
+    private readonly Panel _layersSection;
+    private readonly GridView _objectRules;
+    private readonly FilteredPicker _objectTemplate = new([], "Search object-mode templates");
+    private readonly FoundryDialogButton _linkObjectTemplate = new("Link source", FoundryDialogButtonStyle.Secondary, 96);
+    private readonly FoundryDialogButton _detachObjectTemplate = new("Detach", FoundryDialogButtonStyle.Secondary, 76);
+    private readonly FilteredPicker _objectTarget = new([], "Search model objects");
+    private readonly FilteredPicker _objectLayer = new([], "Search layers");
+    private readonly FilteredPicker _objectMode = new([], "Search display modes");
+    private readonly FoundryCheckBox _includeChildLayers = new("Include child layers");
+    private readonly FoundryDialogButton _addObjectRule = new("Add object", FoundryDialogButtonStyle.Secondary, 104);
+    private readonly FoundryDialogButton _addLayerRule = new("Add layer", FoundryDialogButtonStyle.Secondary, 96);
+    private readonly FoundryDialogButton _removeObjectRule = new("Remove selected", FoundryDialogButtonStyle.Secondary, 126);
+    private readonly Label _objectsError = ErrorLabel();
+    private readonly Panel _objectsSection;
     private readonly FoundryToolbarIconButton _namedViewListMode;
     private readonly FoundryToolbarIconButton _namedViewThumbnailMode;
     private readonly FoundryToolbarButtonGroup _namedViewModeGroup;
@@ -59,14 +92,20 @@ internal sealed class SelectionInspectorPanel : Panel
     private readonly Dictionary<string, Bitmap> _namedViewPreviews = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<Control> _busySections = [];
     private NamedViewRow[] _namedViewRows = [];
+    private LayerRuleRow[] _layerRows = [];
+    private ObjectRuleRow[] _objectRuleRows = [];
+    private Dictionary<string, Guid> _objectIdByLabel = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, Guid> _layerIdByLabel = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, Guid> _layerTemplateByLabel = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, Guid> _objectTemplateByLabel = new(StringComparer.OrdinalIgnoreCase);
     private ObserverPoint _namedViewPress;
     private bool _updating;
     private bool _paperCommitInProgress;
     private string? _selectedNamedView;
 
-    internal SelectionInspectorPanel()
+    internal SelectionInspectorPanel(SelectionInspectorContent contentMode = SelectionInspectorContent.All)
     {
-        Width = OverlayWidth;
+        Width = contentMode == SelectionInspectorContent.All ? OverlayWidth : 720;
         BackgroundColor = FoundryTheme.CanvasOverlayBackground;
         Padding = new Padding(FoundryTheme.Space3);
 
@@ -79,6 +118,18 @@ internal sealed class SelectionInspectorPanel : Panel
                 _selectionSummary,
                 Field("Name", InspectorField(_name)),
                 _selectionError,
+            },
+        });
+
+        _templateSection = Section("Template roles", new StackLayout
+        {
+            Spacing = FoundryTheme.Space2,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            Items =
+            {
+                _templateCapabilities,
+                FoundryTheme.MutedLabel("Register this hierarchy item as a live capability source."),
+                _templateError,
             },
         });
 
@@ -112,7 +163,6 @@ internal sealed class SelectionInspectorPanel : Panel
                 },
                 Field("Units", InspectorField(_paperUnit)),
                 Field("Title block", _titleBlockMode),
-                _template,
                 _layoutError,
             },
         });
@@ -125,6 +175,103 @@ internal sealed class SelectionInspectorPanel : Panel
             {
                 Field("Display mode", _displayMode),
                 _detailError,
+            },
+        });
+
+        _layers = new GridView
+        {
+            ShowHeader = true,
+            AllowMultipleSelection = true,
+            AllowEmptySelection = true,
+            Height = 196,
+            RowHeight = 26,
+            GridLines = GridLines.None,
+            BackgroundColor = FoundryTheme.CanvasOverlayBackground,
+        };
+        _layers.Columns.Add(new GridColumn
+        {
+            HeaderText = "Layer",
+            DataCell = new TextBoxCell(nameof(LayerRuleRow.Name)),
+            AutoSize = true,
+        });
+        _layers.Columns.Add(new GridColumn
+        {
+            HeaderText = "State",
+            DataCell = new TextBoxCell(nameof(LayerRuleRow.State)),
+            Width = 72,
+        });
+        _layersSection = Section("Detail layers", new StackLayout
+        {
+            Spacing = FoundryTheme.Space2,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            Items =
+            {
+                Field("Live template source", _layerTemplate),
+                new StackLayout
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = FoundryTheme.Space1,
+                    Items = { _linkLayerTemplate, _detachLayerTemplate },
+                },
+                InspectorField(_layerSearch),
+                _layers,
+                new StackLayout
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = FoundryTheme.Space1,
+                    Items = { _layersInherit, _layersOn, _layersOff },
+                },
+                _clearLayerOverrides,
+                FoundryTheme.MutedLabel("Folder and layout rules apply to descendant detail viewports. Child overrides are preserved."),
+                _layersError,
+            },
+        });
+
+        _objectRules = new GridView
+        {
+            ShowHeader = true,
+            AllowMultipleSelection = true,
+            AllowEmptySelection = true,
+            Height = 156,
+            RowHeight = 26,
+            GridLines = GridLines.None,
+            BackgroundColor = FoundryTheme.CanvasOverlayBackground,
+        };
+        _objectRules.Columns.Add(new GridColumn
+        {
+            HeaderText = "Target",
+            DataCell = new TextBoxCell(nameof(ObjectRuleRow.Target)),
+            AutoSize = true,
+        });
+        _objectRules.Columns.Add(new GridColumn
+        {
+            HeaderText = "Mode",
+            DataCell = new TextBoxCell(nameof(ObjectRuleRow.Mode)),
+            Width = 104,
+        });
+        _objectsSection = Section("Custom object display modes", new StackLayout
+        {
+            Spacing = FoundryTheme.Space2,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            Items =
+            {
+                Field("Live template source", _objectTemplate),
+                new StackLayout
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = FoundryTheme.Space1,
+                    Items = { _linkObjectTemplate, _detachObjectTemplate },
+                },
+                Field("Display mode", _objectMode),
+                Field("Exact model object", _objectTarget),
+                _addObjectRule,
+                Field("Objects on layer", _objectLayer),
+                _includeChildLayers,
+                _addLayerRule,
+                _objectRules,
+                _removeObjectRule,
+                FoundryTheme.MutedLabel("Exact objects override layer selectors. Missing imported object IDs remain visible as unresolved rules."),
+                _objectsError,
             },
         });
 
@@ -208,7 +355,16 @@ internal sealed class SelectionInspectorPanel : Panel
             Padding = new Padding(0, 0, FoundryTheme.Space1, FoundryTheme.Space4),
             Spacing = FoundryTheme.Space4,
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
-            Items = { _selectionSection, _layoutSection, _detailSection, _namedViewSection },
+            Items =
+            {
+                _selectionSection,
+                _templateSection,
+                _layoutSection,
+                _detailSection,
+                _layersSection,
+                _objectsSection,
+                _namedViewSection,
+            },
         };
         Content = new Scrollable
         {
@@ -217,6 +373,17 @@ internal sealed class SelectionInspectorPanel : Panel
             ExpandContentHeight = false,
             Content = content,
         };
+
+        if (contentMode != SelectionInspectorContent.All)
+        {
+            _selectionSection.Visible = false;
+            _templateSection.Visible = false;
+            _layoutSection.Visible = false;
+            _detailSection.Visible = false;
+            _layersSection.Visible = contentMode == SelectionInspectorContent.Layers;
+            _objectsSection.Visible = contentMode == SelectionInspectorContent.ObjectModes;
+            _namedViewSection.Visible = false;
+        }
 
         _name.KeyDown += (_, eventArgs) =>
         {
@@ -255,9 +422,9 @@ internal sealed class SelectionInspectorPanel : Panel
         {
             if (!_updating) _ = CommitTitleBlockAsync();
         };
-        _template.CheckedChanged += (_, _) =>
+        _templateCapabilities.ValueChanged += (_, _) =>
         {
-            if (!_updating && _template.Checked is not null) _ = CommitTemplateAsync();
+            if (!_updating) _ = CommitTemplateCapabilitiesAsync();
         };
         _displayMode.ValueChanged += (_, _) =>
         {
@@ -300,6 +467,24 @@ internal sealed class SelectionInspectorPanel : Panel
             _namedViews.DoDragDrop(data, DragEffects.Copy);
         };
         _assignNamedView.Click += (_, _) => _ = CommitNamedViewAsync();
+        _layerSearch.TextChanged += (_, _) => ReloadLayers();
+        _linkLayerTemplate.Click += (_, _) => _ = LinkTemplateAsync(
+            _layerTemplate, _layerTemplateByLabel, TemplateCapability.LayerStates,
+            _layersSection, _layersError);
+        _detachLayerTemplate.Click += (_, _) => _ = DetachTemplateAsync(
+            TemplateCapability.LayerStates, _layersSection, _layersError);
+        _layersInherit.Click += (_, _) => _ = CommitLayerVisibilityAsync(null);
+        _layersOn.Click += (_, _) => _ = CommitLayerVisibilityAsync(LayerVisibilityOverride.Visible);
+        _layersOff.Click += (_, _) => _ = CommitLayerVisibilityAsync(LayerVisibilityOverride.Hidden);
+        _clearLayerOverrides.Click += (_, _) => _ = ClearLayerOverridesAsync();
+        _addObjectRule.Click += (_, _) => _ = AddExactObjectRuleAsync();
+        _linkObjectTemplate.Click += (_, _) => _ = LinkTemplateAsync(
+            _objectTemplate, _objectTemplateByLabel, TemplateCapability.ObjectDisplayModes,
+            _objectsSection, _objectsError);
+        _detachObjectTemplate.Click += (_, _) => _ = DetachTemplateAsync(
+            TemplateCapability.ObjectDisplayModes, _objectsSection, _objectsError);
+        _addLayerRule.Click += (_, _) => _ = AddLayerObjectRuleAsync();
+        _removeObjectRule.Click += (_, _) => _ = RemoveObjectRulesAsync();
         SetContext(null, []);
     }
 
@@ -371,8 +556,22 @@ internal sealed class SelectionInspectorPanel : Panel
         _titleBlockMode.ToolTip = titleBlockModes.Contains(-1)
             ? "A legacy custom title block is present. Choosing a mode replaces it."
             : titleBlockModes.Length > 1 ? "The selected layouts use mixed title-block modes." : null;
-        _template.Visible = model?.TemplateRegistered is not null;
-        _template.Checked = model?.TemplateRegistered;
+        var selectedScopes = SelectedScopes().ToArray();
+        var allowedCapabilities = selectedScopes.Length == 0
+            ? TemplateCapability.None
+            : selectedScopes.Select(scope => TemplateCapabilityPolicy.AllowedFor(scope.Kind))
+                .Aggregate((left, right) => left & right);
+        var capabilityValues = selectedScopes.Select(scope => snapshot?.TemplateRegistrations
+                .LastOrDefault(item => item.Source == scope)?.Capabilities ?? TemplateCapability.None)
+            .Distinct().ToArray();
+        _templateSection.Enabled = selectedScopes.Length > 0;
+        _templateCapabilities.Allowed = allowedCapabilities;
+        _templateCapabilities.Value = capabilityValues.Length == 1
+            ? capabilityValues[0]
+            : capabilityValues.Aggregate(allowedCapabilities, (current, value) => current & value);
+        _templateCapabilities.ToolTip = capabilityValues.Length > 1
+            ? "Mixed template roles. Checked roles are common to the full selection."
+            : null;
         var layouts = model?.AffectedLayoutIds.Select(id => snapshot?.Sheets.GetValueOrDefault(id))
             .Where(sheet => sheet is not null).Cast<SheetSnapshot>().ToArray() ?? [];
         _revisions.Text = layouts.Length == 1
@@ -393,6 +592,35 @@ internal sealed class SelectionInspectorPanel : Panel
             : model?.DisplayModeId is { } modeId && snapshot?.DisplayModes.TryGetValue(modeId, out var modeName) == true
                 ? modeName
                 : string.Empty;
+
+        _layerIdByLabel = snapshot?.LayerSnapshots.Values
+            .OrderBy(layer => layer.FullPath, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(layer => layer.FullPath, layer => layer.Id, StringComparer.OrdinalIgnoreCase) ?? [];
+        _objectIdByLabel = snapshot?.ModelObjects.Values
+            .OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(item => item.LayerFullPath, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(ObjectLabel, item => item.Id, StringComparer.OrdinalIgnoreCase) ?? [];
+        _objectTarget.SetChoices(_objectIdByLabel.Keys);
+        _objectLayer.SetChoices(_layerIdByLabel.Keys);
+        _objectMode.SetChoices(_displayModeByLabel.Keys);
+        if (!_objectMode.ContainsChoice(_objectMode.Text))
+            _objectMode.Text = _displayModeByLabel.Keys.FirstOrDefault() ?? string.Empty;
+        _layersSection.Enabled = selectedScopes.Length > 0 && model?.AffectedDetailCount > 0;
+        _objectsSection.Enabled = selectedScopes.Length > 0 && model?.AffectedDetailCount > 0;
+        _layerTemplateByLabel = BuildTemplateChoices(snapshot, TemplateCapability.LayerStates);
+        _objectTemplateByLabel = BuildTemplateChoices(snapshot, TemplateCapability.ObjectDisplayModes);
+        _layerTemplate.SetChoices(_layerTemplateByLabel.Keys);
+        _objectTemplate.SetChoices(_objectTemplateByLabel.Keys);
+        _layerTemplate.Text = LinkedTemplateLabel(
+            selectedScopes, TemplateCapability.LayerStates, _layerTemplateByLabel);
+        _objectTemplate.Text = LinkedTemplateLabel(
+            selectedScopes, TemplateCapability.ObjectDisplayModes, _objectTemplateByLabel);
+        _detachLayerTemplate.Enabled = selectedScopes.Any(scope => snapshot?.TemplateLinks.Any(link =>
+            link.Target == scope && link.Capability == TemplateCapability.LayerStates) == true);
+        _detachObjectTemplate.Enabled = selectedScopes.Any(scope => snapshot?.TemplateLinks.Any(link =>
+            link.Target == scope && link.Capability == TemplateCapability.ObjectDisplayModes) == true);
+        ReloadLayers();
+        ReloadObjectRules();
 
         var namedViewBrowsingEnabled = snapshot is not null;
         _namedViewSection.Enabled = namedViewBrowsingEnabled;
@@ -470,14 +698,295 @@ internal sealed class SelectionInspectorPanel : Panel
             builtIn is null ? "Title blocks removed." : "Title-block mode updated.");
     }
 
-    private async Task CommitTemplateAsync()
+    private async Task CommitTemplateCapabilitiesAsync()
     {
-        if (_model?.TemplateRegistered is null || _model.AffectedLayoutIds.Count != 1 ||
-            _template.Checked is not { } registered) return;
-        var sheetId = _model.AffectedLayoutIds[0];
-        await RunAsync(_layoutSection, _layoutError,
-            () => LayoutFoundryUiHost.SetSheetTemplateRegistrationAsync(sheetId, registered),
-            registered ? "Layout template registered." : "Layout template unregistered.");
+        var targets = _selection.Where(key => key.Kind is
+            OverviewNodeKind.Folder or OverviewNodeKind.Sheet or OverviewNodeKind.Detail).ToArray();
+        if (_updating || targets.Length == 0) return;
+        await RunAsync(_templateSection, _templateError,
+            () => LayoutFoundryUiHost.SetTemplateCapabilitiesAsync(targets, _templateCapabilities.Value),
+            _templateCapabilities.Value == TemplateCapability.None
+                ? "Template roles cleared."
+                : "Template roles updated.");
+    }
+
+    private IEnumerable<HierarchyScope> SelectedScopes()
+    {
+        foreach (var key in _selection)
+        {
+            var kind = key.Kind switch
+            {
+                OverviewNodeKind.Folder => HierarchyScopeKind.Folder,
+                OverviewNodeKind.Sheet => HierarchyScopeKind.Sheet,
+                OverviewNodeKind.Detail => HierarchyScopeKind.Detail,
+                _ => (HierarchyScopeKind?)null,
+            };
+            if (kind is { } value) yield return new HierarchyScope(value, key.Id);
+        }
+    }
+
+    private async Task LinkTemplateAsync(
+        FilteredPicker picker,
+        IReadOnlyDictionary<string, Guid> sourceByLabel,
+        TemplateCapability capability,
+        Control section,
+        Label error)
+    {
+        if (!sourceByLabel.TryGetValue(picker.Text.Trim(), out var registrationId))
+        {
+            ShowError(error, "Choose a registered template source.");
+            return;
+        }
+        await RunAsync(section, error,
+            () => LayoutFoundryUiHost.LinkTemplateCapabilityAsync(
+                _selection, registrationId, capability),
+            $"{CapabilityLabel(capability)} template linked.");
+    }
+
+    private async Task DetachTemplateAsync(
+        TemplateCapability capability,
+        Control section,
+        Label error)
+    {
+        await RunAsync(section, error,
+            () => LayoutFoundryUiHost.DetachTemplateCapabilityAsync(_selection, capability),
+            $"{CapabilityLabel(capability)} template detached; the last resolved values were retained.");
+    }
+
+    private Dictionary<string, Guid> BuildTemplateChoices(
+        DocumentSnapshot? snapshot,
+        TemplateCapability capability)
+    {
+        var result = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
+        if (snapshot is null) return result;
+        foreach (var registration in snapshot.TemplateRegistrations.Where(item =>
+                     item.Capabilities.HasFlag(capability)))
+        {
+            var label = ScopeLabel(snapshot, registration.Source);
+            if (result.ContainsKey(label)) label += $" · {registration.Id.ToString()[..8]}";
+            result[label] = registration.Id;
+        }
+        return result;
+    }
+
+    private string LinkedTemplateLabel(
+        IReadOnlyList<HierarchyScope> scopes,
+        TemplateCapability capability,
+        IReadOnlyDictionary<string, Guid> sources)
+    {
+        if (_snapshot is null || scopes.Count == 0) return string.Empty;
+        var sourceIds = scopes.Select(scope => _snapshot.TemplateLinks.LastOrDefault(link =>
+                link.Target == scope && link.Capability == capability)?.SourceRegistrationId)
+            .Distinct().ToArray();
+        if (sourceIds.Length != 1 || sourceIds[0] is not { } id)
+            return sourceIds.Length > 1 ? Mixed : string.Empty;
+        return sources.FirstOrDefault(pair => pair.Value == id).Key ?? string.Empty;
+    }
+
+    private static string ScopeLabel(DocumentSnapshot snapshot, HierarchyScope scope)
+    {
+        var kind = scope.Kind switch
+        {
+            HierarchyScopeKind.Folder => "Folder",
+            HierarchyScopeKind.Sheet => "Layout",
+            HierarchyScopeKind.Detail => "Detail",
+            _ => "Source",
+        };
+        var name = scope.Kind switch
+        {
+            HierarchyScopeKind.Folder => snapshot.Folders.GetValueOrDefault(scope.Id)?.Name,
+            HierarchyScopeKind.Sheet => snapshot.Sheets.GetValueOrDefault(scope.Id)?.Name,
+            HierarchyScopeKind.Detail => snapshot.Sheets.Values.SelectMany(sheet => sheet.Details)
+                .FirstOrDefault(detail => detail.DetailViewportId == scope.Id)?.Name,
+            _ => null,
+        };
+        return $"{kind}: {name ?? "Missing source"}";
+    }
+
+    private static string CapabilityLabel(TemplateCapability capability) => capability switch
+    {
+        TemplateCapability.LayerStates => "Layer-state",
+        TemplateCapability.ObjectDisplayModes => "Object-display",
+        TemplateCapability.Layout => "Layout",
+        TemplateCapability.TitleBlock => "Title-block",
+        _ => "Capability",
+    };
+
+    private void ReloadLayers()
+    {
+        var snapshot = _snapshot;
+        if (snapshot is null)
+        {
+            _layerRows = [];
+            _layers.DataStore = _layerRows;
+            return;
+        }
+
+        var scopes = SelectedScopes().ToArray();
+        var localRules = scopes.Select(scope => snapshot.AppearanceRules
+            .LastOrDefault(item => item.Scope == scope)?.LayerRules ?? []).ToArray();
+        var query = _layerSearch.Text.Trim();
+        _layerRows = snapshot.LayerSnapshots.Values
+            .Where(layer => query.Length == 0 ||
+                            layer.FullPath.Contains(query, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(layer => layer.FullPath, StringComparer.OrdinalIgnoreCase)
+            .Select(layer =>
+            {
+                var values = localRules.Select(rules => rules
+                        .LastOrDefault(rule => rule.Layer.LayerId == layer.Id)?.Visibility)
+                    .Distinct().ToArray();
+                var state = values.Length != 1 ? Mixed : values[0] switch
+                {
+                    LayerVisibilityOverride.Visible => "On",
+                    LayerVisibilityOverride.Hidden => "Off",
+                    _ => "Inherit",
+                };
+                return new LayerRuleRow(layer.Id, layer.FullPath, state);
+            })
+            .ToArray();
+        _layers.DataStore = _layerRows;
+    }
+
+    private async Task CommitLayerVisibilityAsync(LayerVisibilityOverride? visibility)
+    {
+        var indices = _layers.SelectedRows.OrderBy(index => index).ToArray();
+        var layerIds = indices.Where(index => index >= 0 && index < _layerRows.Length)
+            .Select(index => _layerRows[index].Id).Distinct().ToArray();
+        if (layerIds.Length == 0)
+        {
+            ShowError(_layersError, "Select one or more layers first.");
+            return;
+        }
+        await RunAsync(_layersSection, _layersError,
+            () => LayoutFoundryUiHost.SetLayerVisibilityRulesAsync(_selection, layerIds, visibility),
+            visibility switch
+            {
+                LayerVisibilityOverride.Visible => "Selected layers set on.",
+                LayerVisibilityOverride.Hidden => "Selected layers set off.",
+                _ => "Selected layers returned to inherited state.",
+            });
+    }
+
+    private async Task ClearLayerOverridesAsync()
+    {
+        if (_snapshot is null) return;
+        var scopes = SelectedScopes().ToHashSet();
+        var layerIds = _snapshot.AppearanceRules
+            .Where(item => scopes.Contains(item.Scope))
+            .SelectMany(item => item.LayerRules)
+            .Select(rule => rule.Layer.LayerId)
+            .Distinct().ToArray();
+        if (layerIds.Length == 0) return;
+        await RunAsync(_layersSection, _layersError,
+            () => LayoutFoundryUiHost.SetLayerVisibilityRulesAsync(_selection, layerIds, null),
+            "Local layer overrides cleared.");
+    }
+
+    private void ReloadObjectRules()
+    {
+        if (_snapshot is null)
+        {
+            _objectRuleRows = [];
+            _objectRules.DataStore = _objectRuleRows;
+            return;
+        }
+        var ruleSets = SelectedScopes().Select(scope => _snapshot.AppearanceRules
+            .LastOrDefault(item => item.Scope == scope)?.ObjectDisplayRules.ToArray() ?? []).ToArray();
+        var mixed = ruleSets.Length > 1 && ruleSets.Skip(1).Any(rules => !rules.SequenceEqual(ruleSets[0]));
+        ShowError(_objectsError, mixed
+            ? "The selected items have different local object rules. Adding a rule will replace them with one shared set."
+            : string.Empty);
+        var rulesToShow = ruleSets.FirstOrDefault() ?? [];
+        _objectRuleRows = rulesToShow.Select(rule => new ObjectRuleRow(
+            rule,
+            ObjectRuleTarget(rule),
+            rule.DisplayModeName)).ToArray();
+        _objectRules.DataStore = _objectRuleRows;
+    }
+
+    private IReadOnlyList<ObjectDisplayRule> CurrentObjectRules() =>
+        _objectRuleRows.Select(row => row.Rule).ToArray();
+
+    private async Task AddExactObjectRuleAsync()
+    {
+        if (!_objectIdByLabel.TryGetValue(_objectTarget.Text.Trim(), out var objectId))
+        {
+            ShowError(_objectsError, "Choose an exact model object.");
+            return;
+        }
+        if (!TrySelectedObjectMode(out var modeId, out var modeName)) return;
+        var selector = new ObjectDisplaySelector(ObjectDisplaySelectorKind.ExactObject, ObjectId: objectId);
+        await SaveObjectRuleAsync(selector, modeId, modeName, "Object display rule added.");
+    }
+
+    private async Task AddLayerObjectRuleAsync()
+    {
+        if (_snapshot is null || !_layerIdByLabel.TryGetValue(_objectLayer.Text.Trim(), out var layerId) ||
+            !_snapshot.LayerSnapshots.TryGetValue(layerId, out var layer))
+        {
+            ShowError(_objectsError, "Choose an object layer.");
+            return;
+        }
+        if (!TrySelectedObjectMode(out var modeId, out var modeName)) return;
+        var selector = new ObjectDisplaySelector(
+            ObjectDisplaySelectorKind.Layer,
+            LayerId: layerId,
+            LayerFullPath: layer.FullPath,
+            IncludeChildLayers: _includeChildLayers.Checked == true);
+        await SaveObjectRuleAsync(selector, modeId, modeName, "Layer display rule added.");
+    }
+
+    private bool TrySelectedObjectMode(out Guid modeId, out string modeName)
+    {
+        modeName = _objectMode.Text.Trim();
+        if (_displayModeByLabel.TryGetValue(modeName, out modeId)) return true;
+        ShowError(_objectsError, "Choose a Rhino display mode.");
+        return false;
+    }
+
+    private async Task SaveObjectRuleAsync(
+        ObjectDisplaySelector selector,
+        Guid modeId,
+        string modeName,
+        string success)
+    {
+        var rules = CurrentObjectRules().Where(rule => rule.Selector != selector)
+            .Append(new ObjectDisplayRule(selector, modeId, modeName)).ToArray();
+        await RunAsync(_objectsSection, _objectsError,
+            () => LayoutFoundryUiHost.SetObjectDisplayRulesAsync(_selection, rules), success);
+    }
+
+    private async Task RemoveObjectRulesAsync()
+    {
+        var selected = _objectRules.SelectedRows.ToHashSet();
+        if (selected.Count == 0)
+        {
+            ShowError(_objectsError, "Select one or more object rules first.");
+            return;
+        }
+        var rules = _objectRuleRows.Where((_, index) => !selected.Contains(index))
+            .Select(row => row.Rule).ToArray();
+        await RunAsync(_objectsSection, _objectsError,
+            () => LayoutFoundryUiHost.SetObjectDisplayRulesAsync(_selection, rules),
+            "Selected object rules removed.");
+    }
+
+    private string ObjectRuleTarget(ObjectDisplayRule rule)
+    {
+        if (rule.Selector.Kind == ObjectDisplaySelectorKind.ExactObject &&
+            rule.Selector.ObjectId is { } objectId &&
+            _snapshot?.ModelObjects.TryGetValue(objectId, out var modelObject) == true)
+            return ObjectLabel(modelObject);
+        if (rule.Selector.Kind == ObjectDisplaySelectorKind.Layer)
+            return $"Layer: {rule.Selector.LayerFullPath ?? "Missing layer"}" +
+                   (rule.Selector.IncludeChildLayers ? " + children" : string.Empty);
+        return "Missing object";
+    }
+
+    private static string ObjectLabel(ModelObjectSnapshot item)
+    {
+        var name = string.IsNullOrWhiteSpace(item.Name) ? "Unnamed object" : item.Name;
+        return $"{name} · {item.LayerFullPath} · {item.Id.ToString()[..8]}";
     }
 
     private async Task CommitRevisionsAsync()
@@ -690,8 +1199,11 @@ internal sealed class SelectionInspectorPanel : Panel
     private void ClearErrors()
     {
         ShowError(_selectionError, string.Empty);
+        ShowError(_templateError, string.Empty);
         ShowError(_layoutError, string.Empty);
         ShowError(_detailError, string.Empty);
+        ShowError(_layersError, string.Empty);
+        ShowError(_objectsError, string.Empty);
         ShowError(_namedViewError, string.Empty);
     }
 
@@ -796,6 +1308,8 @@ internal sealed class SelectionInspectorPanel : Panel
 
     private sealed record PaperSizeChoice(string Label, double Width, double Height, string UnitSystem);
     private sealed record NamedViewRow(string Name, Image? Image);
+    private sealed record LayerRuleRow(Guid Id, string Name, string State);
+    private sealed record ObjectRuleRow(ObjectDisplayRule Rule, string Target, string Mode);
 }
 
 internal sealed class SelectionInspectorOperationEventArgs : EventArgs

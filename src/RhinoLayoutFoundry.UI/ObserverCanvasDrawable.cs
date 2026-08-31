@@ -680,8 +680,23 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
             : emphasized
                 ? FoundryTheme.CanvasBorder
                 : FoundryTheme.WithAlpha(FoundryTheme.CanvasBorder, 90);
+        var crossColor = emphasized
+            ? FoundryTheme.WithAlpha(FoundryTheme.CanvasBorder, 150)
+            : FoundryTheme.WithAlpha(FoundryTheme.CanvasBorder, 80);
+        graphics.DrawLine(
+            new Pen(crossColor, 1),
+            bounds.Left + 1,
+            bounds.Top + 1,
+            bounds.Right - 1,
+            bounds.Bottom - 1);
+        graphics.DrawLine(
+            new Pen(crossColor, 1),
+            bounds.Right - 1,
+            bounds.Top + 1,
+            bounds.Left + 1,
+            bounds.Bottom - 1);
         graphics.DrawRectangle(new Pen(border, selected ? 3 : hasSelectedDetail ? 2 : 1), bounds);
-        DrawSheetNameScrim(graphics, bounds, card.Sheet.Name, emphasized);
+        DrawCenteredSheetNameScrim(graphics, bounds, card.Sheet.Name, emphasized);
 
         var selectedDetailCount = card.Sheet.Details.Count(detail =>
             _selection.Contains(new OverviewNodeKey(OverviewNodeKind.Detail, detail.DetailViewportId)));
@@ -714,6 +729,34 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
             _sheetFont,
             emphasized ? FoundryTheme.PrimaryText : FoundryTheme.SecondaryText,
             scrim.Left + 5,
+            scrim.Top + Math.Max(1, (scrim.Height - measured.Height) / 2),
+            fitted);
+    }
+
+    private void DrawCenteredSheetNameScrim(
+        Graphics graphics,
+        RectangleF bounds,
+        string name,
+        bool emphasized)
+    {
+        if (bounds.Width < 16 || bounds.Height < 12) return;
+        var maximumWidth = Math.Max(8, bounds.Width - 10);
+        var fitted = FitText(graphics, _sheetFont, name, maximumWidth - 10);
+        var measured = graphics.MeasureString(_sheetFont, fitted);
+        var scrimWidth = Math.Min(maximumWidth, Math.Max(30, measured.Width + 10));
+        var scrimHeight = Math.Min(22, bounds.Height);
+        var scrim = new RectangleF(
+            bounds.Left + Math.Max(0, (bounds.Width - scrimWidth) / 2),
+            bounds.Top + Math.Max(0, (bounds.Height - scrimHeight) / 2),
+            scrimWidth,
+            scrimHeight);
+        graphics.FillRectangle(
+            FoundryTheme.WithAlpha(FoundryTheme.CanvasOverlayBackground, emphasized ? 235 : 205),
+            scrim);
+        graphics.DrawText(
+            _sheetFont,
+            emphasized ? FoundryTheme.PrimaryText : FoundryTheme.SecondaryText,
+            scrim.Left + Math.Max(5, (scrim.Width - measured.Width) / 2),
             scrim.Top + Math.Max(1, (scrim.Height - measured.Height) / 2),
             fitted);
     }

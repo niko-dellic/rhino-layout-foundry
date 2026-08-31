@@ -267,6 +267,45 @@ public sealed class DocumentStateSerializerTests
     }
 
     [Fact]
+    public void VersionEightTemplatesMigrateToCapabilityRegistrations()
+    {
+        var sheetId = Guid.NewGuid();
+        var template = new SheetTemplateRecipe(
+            Guid.NewGuid(),
+            SheetTemplateRecipe.CurrentRecipeVersion,
+            "Existing sheet",
+            new PaperRecipe(420, 297, "Millimeters"),
+            [],
+            new TitleBlockTemplateRecipe(Guid.NewGuid(), "Border", IdentityTransform(),
+                "Bottom right", new Dictionary<string, string>()),
+            [],
+            new Dictionary<string, string>(),
+            "{index}")
+        {
+            SourcePageViewId = sheetId,
+        };
+        var payload = DocumentStateSerializer.Serialize(DocumentState.Empty() with
+            {
+                SheetTemplates = [template],
+            })
+            .Replace($"\"SchemaVersion\":{DocumentState.CurrentSchemaVersion}", "\"SchemaVersion\":8",
+                StringComparison.Ordinal)
+            .Replace(",\"ViewportRuleSets\":null", string.Empty, StringComparison.Ordinal)
+            .Replace(",\"CapabilityTemplates\":null", string.Empty, StringComparison.Ordinal)
+            .Replace(",\"CapabilityLinks\":null", string.Empty, StringComparison.Ordinal);
+
+        var restored = DocumentStateSerializer.Deserialize(payload);
+
+        var registration = Assert.Single(restored.TemplateRegistrations);
+        Assert.Equal(template.Id, registration.Id);
+        Assert.Equal(new HierarchyScope(HierarchyScopeKind.Sheet, sheetId), registration.Source);
+        Assert.True(registration.Capabilities.HasFlag(TemplateCapability.Layout));
+        Assert.True(registration.Capabilities.HasFlag(TemplateCapability.TitleBlock));
+        Assert.Empty(restored.AppearanceRules);
+        Assert.Empty(restored.TemplateLinks);
+    }
+
+    [Fact]
     public void ObserverPayloadNeverContainsCameraOrTransientInteractionState()
     {
         var payload = DocumentStateSerializer.Serialize(DocumentState.Empty() with
@@ -297,4 +336,12 @@ public sealed class DocumentStateSerializerTests
     {
         Assert.Throws<JsonException>(() => DocumentStateSerializer.Deserialize("{not-json}"));
     }
+
+    private static IReadOnlyList<double> IdentityTransform() =>
+    [
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 0, 1,
+    ];
 }

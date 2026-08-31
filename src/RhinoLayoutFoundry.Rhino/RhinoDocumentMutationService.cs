@@ -93,6 +93,13 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
             [AssignNamedViewToDetailsChange assignNamedView] => ApplyNamedView(document, plan, assignNamedView),
             [CaptureSheetTemplateChange capture] => ApplyCaptureTemplate(document, plan, capture),
             [UpdateProjectInformationChange project] => ApplyProjectInformation(document, plan, project),
+            [SetHierarchyViewportRulesChange appearance] =>
+                ApplyViewportAppearanceRules(document, plan, appearance),
+            [SetCapabilityTemplateLinkChange link] when link.Capability is
+                TemplateCapability.LayerStates or TemplateCapability.ObjectDisplayModes =>
+                ApplyViewportTemplateLink(document, plan, link),
+            [SetTemplateCapabilitiesChange capabilities] =>
+                ApplyViewportTemplateCapabilities(document, plan, capabilities),
             _ when plan.Changes.Count > 0 && plan.Changes.All(change => change is DeleteSheetTemplateChange) =>
                 ApplyDeleteTemplates(document, plan, plan.Changes.Cast<DeleteSheetTemplateChange>().ToArray()),
             _ when plan.Changes.All(change => change is DeleteFolderChange or DeleteSheetChange) =>
@@ -169,7 +176,8 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
         return change is AddFolderChange or RenameFolderChange or
             MoveSheetChange or MoveFolderChange or SetPrintInclusionChange or
             SetObserverCanvasStateChange or ReorderSheetsChange or
-            ReorganizeHierarchyChange;
+            ReorganizeHierarchyChange or SetTemplateCapabilitiesChange or
+            SetCapabilityTemplateLinkChange;
     }
 
     private OperationResult ApplyRename(
@@ -251,6 +259,8 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
         var pageIds = document.Views.GetPageViews()
             .Select(page => page.MainViewport.Id)
             .ToHashSet();
+        var templateRegistrations = beforeState.TemplateRegistrations.ToList();
+        var templateLinks = beforeState.TemplateLinks.ToList();
 
         foreach (var change in plan.Changes)
         {
@@ -274,6 +284,9 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
                 ReorderSheetsChange reorder => ApplyReorderSheets(sheets, reorder),
                 ReorganizeHierarchyChange reorganize => ApplyReorganizeHierarchy(
                     beforeState.RootFolderId, folders, sheets, reorganize),
+                SetTemplateCapabilitiesChange templates => ApplyTemplateCapabilities(
+                    templateRegistrations, templateLinks, templates),
+                SetCapabilityTemplateLinkChange link => ApplyTemplateLink(templateLinks, link),
                 _ => Failure("operation.unsupported_plan", "The hierarchy operation is not supported."),
             };
             if (failure is not null)
@@ -290,6 +303,8 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
                 .OfType<SetObserverCanvasStateChange>()
                 .Select(change => change.NewState)
                 .LastOrDefault() ?? beforeState.Canvas,
+            CapabilityTemplates = templateRegistrations.ToArray(),
+            CapabilityLinks = templateLinks.ToArray(),
         };
         var undoRecord = document.BeginUndoRecord(plan.UndoDescription);
         if (undoRecord == 0)
@@ -328,6 +343,344 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
         {
             document.EndUndoRecord(undoRecord);
         }
+    }
+
+    private OperationResult ApplyViewportAppearanceRules(
+        RhinoDoc document,
+        OperationPlan plan,
+        SetHierarchyViewportRulesChange change,
+        IReadOnlyList<CapabilityTemplateLink>? afterLinksOverride = null,
+        IReadOnlyList<CapabilityTemplateRegistration>? afterRegistrationsOverride = null)
+    {
+        var storedBeforeState = _stateStore.Get(document);
+        var beforeState = WithCurrentPageRecords(document, storedBeforeState);
+        var existing = beforeState.AppearanceRules.LastOrDefault(item => item.Scope == change.Scope);
+        if (!RuleSetEquals(existing, change.ExpectedRules))
+            return Failure("appearance.before_value_changed",
+                "Viewport appearance rules changed before this edit was applied.");
+
+        var afterRules = beforeState.AppearanceRules
+            .Where(item => item.Scope != change.Scope)
+            .Concat(change.NewRules is null ? [] : [change.NewRules])
+            .ToArray();
+        var sourceRegistrationId = beforeState.TemplateRegistrations
+            .LastOrDefault(item => item.Source == change.Scope)?.Id;
+        var afterLinks = afterLinksOverride?.ToArray() ?? beforeState.TemplateLinks.Select(link =>
+        {
+            if (link.SourceRegistrationId != sourceRegistrationId) return link;
+            return link.Capability switch
+            {
+                TemplateCapability.LayerStates => link with
+                {
+                    LastResolved = link.LastResolved with
+                    {
+                        LayerRules = change.NewRules?.LayerRules.ToArray() ?? [],
+                    },
+                },
+                TemplateCapability.ObjectDisplayModes => link with
+                {
+                    LastResolved = link.LastResolved with
+                    {
+                        ObjectDisplayRules = change.NewRules?.ObjectDisplayRules.ToArray() ?? [],
+                    },
+                },
+                _ => link,
+            };
+        }).ToArray();
+        var afterState = beforeState with
+        {
+            SchemaVersion = DocumentState.CurrentSchemaVersion,
+            ViewportRuleSets = afterRules,
+            CapabilityLinks = afterLinks,
+            CapabilityTemplates = afterRegistrationsOverride ?? beforeState.TemplateRegistrations,
+        };
+        var pages = document.Views.GetPageViews();
+        var linkedSource = beforeState.TemplateRegistrations
+            .FirstOrDefault(item => item.Source == change.Scope)?.Id;
+        var details = linkedSource is not null && beforeState.TemplateLinks.Any(link =>
+                link.SourceRegistrationId == linkedSource &&
+                link.Capability is TemplateCapability.LayerStates or TemplateCapability.ObjectDisplayModes)
+            ? pages.SelectMany(page => page.GetDetailViews()).ToArray()
+            : AffectedDetails(change.Scope, beforeState, pages).ToArray();
+        if (details.Length == 0)
+            return ApplyStateOnlyChange(document, plan, storedBeforeState, afterState);
+
+        var layerSnapshots = document.Layers
+            .Where(layer => !layer.IsDeleted && !layer.IsReference)
+            .ToDictionary(
+                layer => layer.Id,
+                layer => new LayerSnapshot(layer.Id,
+                    layer.ParentLayerId == Guid.Empty ? null : layer.ParentLayerId,
+                    layer.FullPath,
+                    layer.IsVisible));
+        var modelObjects = document.Objects
+            .Where(item => item is not DetailViewObject &&
+                           item.Attributes.Space == ActiveSpace.ModelSpace)
+            .Select(item =>
+            {
+                var layer = document.Layers[item.Attributes.LayerIndex];
+                return new ModelObjectSnapshot(item.Id,
+                    string.IsNullOrWhiteSpace(item.Attributes.Name)
+                        ? item.ObjectType.ToString()
+                        : item.Attributes.Name,
+                    layer.Id,
+                    layer.FullPath,
+                    item is InstanceObject);
+            })
+            .ToDictionary(item => item.Id);
+        var beforeByScope = beforeState.AppearanceRules
+            .GroupBy(item => item.Scope).ToDictionary(group => group.Key, group => group.Last());
+        var afterByScope = afterRules
+            .GroupBy(item => item.Scope).ToDictionary(group => group.Key, group => group.Last());
+        var beforeRegistrations = beforeState.TemplateRegistrations.ToDictionary(item => item.Id);
+        var afterRegistrations = afterState.TemplateRegistrations.ToDictionary(item => item.Id);
+        var layerBefore = new Dictionary<Guid, Layer>();
+        var objectBefore = new Dictionary<Guid, ObjectAttributes>();
+        var undoRecord = document.BeginUndoRecord(plan.UndoDescription);
+        if (undoRecord == 0)
+            return Failure("operation.undo_unavailable", "Rhino could not start a dedicated undo record.");
+        try
+        {
+            if (!document.AddCustomUndoEvent(plan.UndoDescription, OnUndoDocumentState,
+                    new DocumentStateUndoTag(plan.UndoDescription, storedBeforeState)))
+                throw new InvalidOperationException("Rhino could not register Foundry settings with Undo.");
+
+            foreach (var detail in details)
+            {
+                var scopes = ScopeChain(detail.Viewport.Id, beforeState, pages);
+                var before = ViewportAppearanceResolver.Resolve(
+                    scopes, beforeByScope, layerSnapshots, modelObjects,
+                    beforeState.TemplateLinks, beforeRegistrations);
+                var after = ViewportAppearanceResolver.Resolve(
+                    scopes, afterByScope, layerSnapshots, modelObjects,
+                    afterState.TemplateLinks, afterRegistrations);
+                foreach (var layerId in before.Layers.Keys.Concat(after.Layers.Keys).Distinct())
+                {
+                    var foundLayer = document.Layers.FindId(layerId);
+                    if (foundLayer is null) continue;
+                    var index = foundLayer.Index;
+                    if (!layerBefore.ContainsKey(layerId))
+                        layerBefore[layerId] = CopyLayer(document.Layers[index]);
+                    var layer = CopyLayer(document.Layers[index]);
+                    if (after.Layers.TryGetValue(layerId, out var visibility))
+                        layer.SetPerViewportVisible(detail.Viewport.Id,
+                            visibility == LayerVisibilityOverride.Visible);
+                    else
+                        layer.DeletePerViewportVisible(detail.Viewport.Id);
+                    if (!document.Layers.Modify(layer, index, quiet: true))
+                        throw new InvalidOperationException($"Rhino could not update layer '{layer.FullPath}'.");
+                }
+
+                foreach (var objectId in before.Objects.Keys.Concat(after.Objects.Keys).Distinct())
+                {
+                    var item = document.Objects.FindId(objectId);
+                    if (item is null) continue;
+                    if (!objectBefore.ContainsKey(objectId))
+                        objectBefore[objectId] = item.Attributes.Duplicate();
+                    var attributes = item.Attributes.Duplicate();
+                    if (after.Objects.TryGetValue(objectId, out var rule))
+                    {
+                        using var mode = DisplayModeDescription.GetDisplayMode(rule.DisplayModeId)
+                            ?? throw new InvalidOperationException(
+                                $"Display mode '{rule.DisplayModeName}' is unavailable.");
+                        if (!attributes.SetDisplayModeOverride(mode, detail.Viewport.Id))
+                            throw new InvalidOperationException(
+                                $"Rhino could not set an object display override on '{item.Id}'.");
+                    }
+                    else
+                    {
+                        attributes.RemoveDisplayModeOverride(detail.Viewport.Id);
+                    }
+                    if (!document.Objects.ModifyAttributes(item, attributes, quiet: true))
+                        throw new InvalidOperationException(
+                            $"Rhino could not update object display overrides on '{item.Id}'.");
+                }
+            }
+
+            _stateStore.Set(document, afterState);
+            document.Modified = true;
+            _revisionTracker.Bump(document);
+            document.Views.Redraw();
+            return new OperationResult(true, plan.Diagnostics);
+        }
+        catch (Exception exception)
+        {
+            foreach (var pair in layerBefore)
+            {
+                var foundLayer = document.Layers.FindId(pair.Key);
+                if (foundLayer is not null)
+                    document.Layers.Modify(pair.Value, foundLayer.Index, quiet: true);
+            }
+            foreach (var pair in objectBefore)
+            {
+                var item = document.Objects.FindId(pair.Key);
+                if (item is not null) document.Objects.ModifyAttributes(item, pair.Value, quiet: true);
+            }
+            _stateStore.Set(document, storedBeforeState);
+            return Failure("appearance.apply_failed",
+                $"Viewport appearance update failed and was rolled back: {exception.Message}");
+        }
+        finally
+        {
+            document.EndUndoRecord(undoRecord);
+        }
+    }
+
+    private OperationResult ApplyViewportTemplateLink(
+        RhinoDoc document,
+        OperationPlan plan,
+        SetCapabilityTemplateLinkChange change)
+    {
+        var state = WithCurrentPageRecords(document, _stateStore.Get(document));
+        var links = state.TemplateLinks.ToList();
+        var failure = ApplyTemplateLink(links, change);
+        if (failure is not null) return failure;
+        var current = state.AppearanceRules.LastOrDefault(item => item.Scope == change.Target);
+        var next = current;
+        if (change.NewLink is null && change.ExpectedLink is { } detached)
+        {
+            var source = state.TemplateRegistrations
+                .LastOrDefault(item => item.Id == detached.SourceRegistrationId)?.Source;
+            var sourceRules = source is { } sourceScope
+                ? state.AppearanceRules.LastOrDefault(item => item.Scope == sourceScope)
+                : null;
+            var frozenLayers = detached.Capability == TemplateCapability.LayerStates
+                ? (sourceRules?.LayerRules ?? detached.LastResolved.Layers)
+                    .Concat(current?.LayerRules ?? [])
+                    .GroupBy(rule => rule.Layer.LayerId)
+                    .Select(group => group.Last()).ToArray()
+                : current?.LayerRules.ToArray() ?? [];
+            var frozenObjects = detached.Capability == TemplateCapability.ObjectDisplayModes
+                ? (sourceRules?.ObjectDisplayRules ?? detached.LastResolved.Objects)
+                    .Concat(current?.ObjectDisplayRules ?? [])
+                    .GroupBy(rule => rule.Selector)
+                    .Select(group => group.Last()).ToArray()
+                : current?.ObjectDisplayRules.ToArray() ?? [];
+            next = frozenLayers.Length == 0 && frozenObjects.Length == 0
+                ? null
+                : new HierarchyViewportRuleSet(change.Target, frozenLayers, frozenObjects);
+        }
+        return ApplyViewportAppearanceRules(
+            document,
+            plan,
+            new SetHierarchyViewportRulesChange(change.Target, current, next),
+            links);
+    }
+
+    private OperationResult ApplyViewportTemplateCapabilities(
+        RhinoDoc document,
+        OperationPlan plan,
+        SetTemplateCapabilitiesChange change)
+    {
+        var state = WithCurrentPageRecords(document, _stateStore.Get(document));
+        var registrations = state.TemplateRegistrations.ToList();
+        var links = state.TemplateLinks.ToList();
+        var failure = ApplyTemplateCapabilities(registrations, links, change);
+        if (failure is not null) return failure;
+        var current = state.AppearanceRules.LastOrDefault(item => item.Scope == change.Source);
+        return ApplyViewportAppearanceRules(
+            document,
+            plan,
+            new SetHierarchyViewportRulesChange(change.Source, current, current),
+            links,
+            registrations);
+    }
+
+    private static OperationResult? ApplyTemplateCapabilities(
+        IList<CapabilityTemplateRegistration> registrations,
+        IList<CapabilityTemplateLink> links,
+        SetTemplateCapabilitiesChange change)
+    {
+        var existing = registrations.LastOrDefault(item => item.Source == change.Source);
+        if (existing != change.ExpectedRegistration)
+            return Failure("template.before_value_changed",
+                "Template roles changed before this edit was applied.");
+        if (existing is not null) registrations.Remove(existing);
+        if (change.NewRegistration is not null) registrations.Add(change.NewRegistration);
+
+        var retainedCapabilities = change.NewRegistration?.Capabilities ?? TemplateCapability.None;
+        var registrationId = existing?.Id ?? change.NewRegistration?.Id;
+        if (registrationId is { } id)
+        {
+            foreach (var link in links.Where(link => link.SourceRegistrationId == id &&
+                         !retainedCapabilities.HasFlag(link.Capability)).ToArray())
+                links.Remove(link);
+        }
+        return null;
+    }
+
+    private static OperationResult? ApplyTemplateLink(
+        IList<CapabilityTemplateLink> links,
+        SetCapabilityTemplateLinkChange change)
+    {
+        var existing = links.LastOrDefault(link =>
+            link.Target == change.Target && link.Capability == change.Capability);
+        if (existing != change.ExpectedLink)
+            return Failure("template.link_before_value_changed",
+                "The capability link changed before this edit was applied.");
+        if (existing is not null) links.Remove(existing);
+        if (change.NewLink is not null) links.Add(change.NewLink);
+        return null;
+    }
+
+    private static bool RuleSetEquals(
+        HierarchyViewportRuleSet? first,
+        HierarchyViewportRuleSet? second) =>
+        first?.Scope == second?.Scope &&
+        (first?.LayerRules ?? []).SequenceEqual(second?.LayerRules ?? []) &&
+        (first?.ObjectDisplayRules ?? []).SequenceEqual(second?.ObjectDisplayRules ?? []);
+
+    private static Layer CopyLayer(Layer source)
+    {
+        var copy = new Layer();
+        copy.CopyAttributesFrom(source);
+        return copy;
+    }
+
+    private static IEnumerable<DetailViewObject> AffectedDetails(
+        HierarchyScope scope,
+        DocumentState state,
+        IReadOnlyList<RhinoPageView> pages)
+    {
+        if (scope.Kind == HierarchyScopeKind.Detail)
+            return pages.SelectMany(page => page.GetDetailViews())
+                .Where(detail => detail.Viewport.Id == scope.Id);
+        if (scope.Kind == HierarchyScopeKind.Sheet)
+            return pages.Where(page => page.MainViewport.Id == scope.Id)
+                .SelectMany(page => page.GetDetailViews());
+
+        var folderIds = FolderDescendants(scope.Id, state.Folders);
+        var pageIds = state.Sheets.Values
+            .Where(sheet => folderIds.Contains(sheet.FolderId))
+            .Select(sheet => sheet.PageViewId)
+            .ToHashSet();
+        return pages.Where(page => pageIds.Contains(page.MainViewport.Id))
+            .SelectMany(page => page.GetDetailViews());
+    }
+
+    private static IReadOnlyList<HierarchyScope> ScopeChain(
+        Guid detailViewportId,
+        DocumentState state,
+        IReadOnlyList<RhinoPageView> pages)
+    {
+        var page = pages.First(page => page.GetDetailViews()
+            .Any(detail => detail.Viewport.Id == detailViewportId));
+        var sheetId = page.MainViewport.Id;
+        var folderId = state.Sheets.GetValueOrDefault(sheetId)?.FolderId ?? state.RootFolderId;
+        var folders = state.Folders.ToDictionary(folder => folder.Id);
+        var folderChain = new List<Guid>();
+        var visited = new HashSet<Guid>();
+        while (visited.Add(folderId) && folders.TryGetValue(folderId, out var folder))
+        {
+            folderChain.Add(folder.Id);
+            if (folder.ParentId is not { } parentId) break;
+            folderId = parentId;
+        }
+        folderChain.Reverse();
+        return folderChain.Select(id => new HierarchyScope(HierarchyScopeKind.Folder, id))
+            .Append(new HierarchyScope(HierarchyScopeKind.Sheet, sheetId))
+            .Append(new HierarchyScope(HierarchyScopeKind.Detail, detailViewportId))
+            .ToArray();
     }
 
     private static OperationResult? ApplyObserverCanvasState(
@@ -718,12 +1071,14 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
         if (pages.Length != sheetIds.Count)
             return Failure("folder.sheet_missing", "A layout inside this folder no longer exists.");
 
-        var afterState = beforeState with
+        var deletedDetailIds = pages.SelectMany(page => page.GetDetailViews())
+            .Select(detail => detail.Viewport.Id).ToHashSet();
+        var afterState = FreezeCapabilitiesForDeletedScopes(beforeState, beforeState with
         {
             Folders = beforeState.Folders.Where(folder => !folderIds.Contains(folder.Id)).ToArray(),
             Sheets = beforeState.Sheets.Where(pair => !sheetIds.Contains(pair.Key))
                 .ToDictionary(pair => pair.Key, pair => pair.Value),
-        };
+        }, folderIds, sheetIds, deletedDetailIds);
         if (pages.Length == 0)
             return ApplyStateOnlyChange(document, plan, beforeState, afterState);
 
@@ -738,6 +1093,58 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
         _revisionTracker.Bump(document);
         document.Views.Redraw();
         return new OperationResult(true, plan.Diagnostics);
+    }
+
+    private static DocumentState FreezeCapabilitiesForDeletedScopes(
+        DocumentState before,
+        DocumentState after,
+        IReadOnlySet<Guid> deletedFolderIds,
+        IReadOnlySet<Guid> deletedSheetIds,
+        IReadOnlySet<Guid> deletedDetailIds)
+    {
+        bool Deleted(HierarchyScope scope) => scope.Kind switch
+        {
+            HierarchyScopeKind.Folder => deletedFolderIds.Contains(scope.Id),
+            HierarchyScopeKind.Sheet => deletedSheetIds.Contains(scope.Id),
+            HierarchyScopeKind.Detail => deletedDetailIds.Contains(scope.Id),
+            _ => false,
+        };
+
+        var rules = before.AppearanceRules.Where(item => !Deleted(item.Scope)).ToList();
+        var registrationsById = before.TemplateRegistrations.ToDictionary(item => item.Id);
+        foreach (var link in before.TemplateLinks)
+        {
+            if (Deleted(link.Target) ||
+                !registrationsById.TryGetValue(link.SourceRegistrationId, out var registration) ||
+                !Deleted(registration.Source))
+                continue;
+            var current = rules.LastOrDefault(item => item.Scope == link.Target);
+            var sourceRules = before.AppearanceRules.LastOrDefault(item => item.Scope == registration.Source);
+            var layers = link.Capability == TemplateCapability.LayerStates
+                ? (sourceRules?.LayerRules ?? link.LastResolved.Layers)
+                    .Concat(current?.LayerRules ?? [])
+                    .GroupBy(rule => rule.Layer.LayerId).Select(group => group.Last()).ToArray()
+                : current?.LayerRules.ToArray() ?? [];
+            var objects = link.Capability == TemplateCapability.ObjectDisplayModes
+                ? (sourceRules?.ObjectDisplayRules ?? link.LastResolved.Objects)
+                    .Concat(current?.ObjectDisplayRules ?? [])
+                    .GroupBy(rule => rule.Selector).Select(group => group.Last()).ToArray()
+                : current?.ObjectDisplayRules.ToArray() ?? [];
+            rules.RemoveAll(item => item.Scope == link.Target);
+            if (layers.Length > 0 || objects.Length > 0)
+                rules.Add(new HierarchyViewportRuleSet(link.Target, layers, objects));
+        }
+        var registrations = before.TemplateRegistrations.Where(item => !Deleted(item.Source)).ToArray();
+        var registrationIds = registrations.Select(item => item.Id).ToHashSet();
+        return after with
+        {
+            SheetTemplates = before.Templates.Where(template =>
+                template.SourcePageViewId is not { } source || !deletedSheetIds.Contains(source)).ToArray(),
+            ViewportRuleSets = rules,
+            CapabilityTemplates = registrations,
+            CapabilityLinks = before.TemplateLinks.Where(link =>
+                !Deleted(link.Target) && registrationIds.Contains(link.SourceRegistrationId)).ToArray(),
+        };
     }
 
     private OperationResult ApplyDeleteHierarchySelection(
@@ -792,12 +1199,14 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
             pages.Add(page);
         }
 
-        var afterState = beforeState with
+        var deletedDetailIds = pages.SelectMany(page => page.GetDetailViews())
+            .Select(detail => detail.Viewport.Id).ToHashSet();
+        var afterState = FreezeCapabilitiesForDeletedScopes(beforeState, beforeState with
         {
             Folders = beforeState.Folders.Where(folder => !folderIds.Contains(folder.Id)).ToArray(),
             Sheets = beforeState.Sheets.Where(pair => !sheetIds.Contains(pair.Key))
                 .ToDictionary(pair => pair.Key, pair => pair.Value),
-        };
+        }, folderIds, sheetIds, deletedDetailIds);
         if (pages.Count == 0)
             return ApplyStateOnlyChange(document, plan, beforeState, afterState);
 
@@ -1246,7 +1655,7 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
             return;
         var attributes = instance.Attributes.Duplicate();
         var data = record.TitleBlockData ?? new SheetTitleBlockData(string.Empty, []);
-        var details = page.GetDetailViews().Select(CaptureDetail).ToArray();
+        var details = page.GetDetailViews().Select(detail => CaptureDetail(document, detail)).ToArray();
         foreach (var pair in TitleBlockValues(state.ProjectInfo, page.PageName, data, details))
             SetBlockAttributeValue(attributes, pair.Key, pair.Value);
         if (!document.Objects.ModifyAttributes(instance.Id, attributes, quiet: true))
@@ -1334,7 +1743,8 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
                 var sheet = sheets[page.MainViewport.Id];
                 var sheetData = sheet.TitleBlockData ?? new SheetTitleBlockData(string.Empty, []);
                 var instanceId = CreateManagedTitleBlock(document, page, paper, managedKind,
-                    stateBefore.ProjectInfo, sheetData, page.GetDetailViews().Select(CaptureDetail).ToArray());
+                    stateBefore.ProjectInfo, sheetData,
+                    page.GetDetailViews().Select(detail => CaptureDetail(document, detail)).ToArray());
                 createdTitleBlockIds.Add(instanceId);
                 var instance = document.Objects.FindId(instanceId) as InstanceObject
                     ?? throw new InvalidOperationException("Rhino could not resolve the generated title block.");
@@ -1397,7 +1807,8 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
             var paper = new PaperRecipe(page.PageWidth, page.PageHeight, document.PageUnitSystem.ToString());
             var sheetData = record.TitleBlockData ?? new SheetTitleBlockData(string.Empty, []);
             var replacementId = CreateManagedTitleBlock(document, page, paper, kind,
-                stateBefore.ProjectInfo, sheetData, page.GetDetailViews().Select(CaptureDetail).ToArray());
+                stateBefore.ProjectInfo, sheetData,
+                page.GetDetailViews().Select(detail => CaptureDetail(document, detail)).ToArray());
             createdTitleBlockIds.Add(replacementId);
             var replacement = document.Objects.FindId(replacementId) as InstanceObject
                 ?? throw new InvalidOperationException("Rhino could not resolve the resized title block.");
@@ -1484,7 +1895,7 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
 
         try
         {
-            var details = page.GetDetailViews().Select(detail => CaptureDetail(detail)).ToArray();
+            var details = page.GetDetailViews().Select(detail => CaptureDetail(document, detail)).ToArray();
             TitleBlockTemplateRecipe? titleBlock = null;
             if (capture.TitleBlockInstanceObjectId is { } blockId)
             {
@@ -1522,6 +1933,11 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
             {
                 SchemaVersion = DocumentState.CurrentSchemaVersion,
                 SheetTemplates = beforeState.Templates.Append(recipe).ToArray(),
+                CapabilityTemplates = UpsertCapturedTemplateRegistration(
+                    beforeState.TemplateRegistrations,
+                    capture.SourcePageViewId,
+                    TemplateCapability.Layout |
+                    (titleBlock is null ? TemplateCapability.None : TemplateCapability.TitleBlock)),
             };
             return ApplyStateOnlyChange(document, plan, beforeState, afterState);
         }
@@ -1545,11 +1961,45 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
         }
 
         var deletedIds = deletes.Select(delete => delete.TemplateId).ToHashSet();
+        var deletedSourceIds = beforeState.Templates
+            .Where(item => deletedIds.Contains(item.Id))
+            .Select(item => item.SourcePageViewId)
+            .OfType<Guid>()
+            .ToHashSet();
+        var registrations = beforeState.TemplateRegistrations.Select(item =>
+        {
+            if (item.Source.Kind != HierarchyScopeKind.Sheet || !deletedSourceIds.Contains(item.Source.Id))
+                return item;
+            return item with
+            {
+                Capabilities = item.Capabilities &
+                               ~(TemplateCapability.Layout | TemplateCapability.TitleBlock),
+            };
+        }).Where(item => item.Capabilities != TemplateCapability.None).ToArray();
         var afterState = beforeState with
         {
             SheetTemplates = beforeState.Templates.Where(item => !deletedIds.Contains(item.Id)).ToArray(),
+            CapabilityTemplates = registrations,
+            CapabilityLinks = beforeState.TemplateLinks.Where(link =>
+                registrations.Any(registration => registration.Id == link.SourceRegistrationId &&
+                                                  registration.Capabilities.HasFlag(link.Capability))).ToArray(),
         };
         return ApplyStateOnlyChange(document, plan, beforeState, afterState);
+    }
+
+    private static IReadOnlyList<CapabilityTemplateRegistration> UpsertCapturedTemplateRegistration(
+        IReadOnlyList<CapabilityTemplateRegistration> registrations,
+        Guid sourcePageViewId,
+        TemplateCapability capabilities)
+    {
+        var scope = new HierarchyScope(HierarchyScopeKind.Sheet, sourcePageViewId);
+        var existing = registrations.LastOrDefault(item => item.Source == scope);
+        return registrations.Where(item => item.Source != scope)
+            .Append(new CapabilityTemplateRegistration(
+                existing?.Id ?? Guid.NewGuid(),
+                scope,
+                (existing?.Capabilities ?? TemplateCapability.None) | capabilities))
+            .ToArray();
     }
 
     private OperationResult ApplyTemplateBatch(
@@ -1689,7 +2139,7 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
         return new DetailLayerResolution(created.Index, created.Id, true);
     }
 
-    private static DetailSlotRecipe CaptureDetail(DetailViewObject detail)
+    private static DetailSlotRecipe CaptureDetail(RhinoDoc document, DetailViewObject detail)
     {
         var bounds = detail.DetailGeometry.GetBoundingBox(true);
         var viewport = detail.Viewport;
@@ -1707,7 +2157,30 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
             null,
             [viewport.CameraLocation.X, viewport.CameraLocation.Y, viewport.CameraLocation.Z],
             [viewport.CameraTarget.X, viewport.CameraTarget.Y, viewport.CameraTarget.Z],
-            [viewport.CameraUp.X, viewport.CameraUp.Y, viewport.CameraUp.Z]);
+            [viewport.CameraUp.X, viewport.CameraUp.Y, viewport.CameraUp.Z],
+            document.Layers
+                .Where(layer => !layer.IsDeleted && !layer.IsReference &&
+                                layer.HasPerViewportSettings(viewport.Id))
+                .Select(layer => new LayerVisibilityRule(
+                    new LayerReference(layer.Id, layer.FullPath),
+                    layer.PerViewportIsVisible(viewport.Id)
+                        ? LayerVisibilityOverride.Visible
+                        : LayerVisibilityOverride.Hidden))
+                .ToArray(),
+            document.Objects
+                .Where(item => item is not DetailViewObject &&
+                               item.Attributes.Space == ActiveSpace.ModelSpace &&
+                               item.Attributes.HasDisplayModeOverride(viewport.Id))
+                .Select(item =>
+                {
+                    var modeId = item.Attributes.GetDisplayModeOverride(viewport.Id);
+                    using var mode = DisplayModeDescription.GetDisplayMode(modeId);
+                    return new ObjectDisplayRule(
+                        new ObjectDisplaySelector(ObjectDisplaySelectorKind.ExactObject, ObjectId: item.Id),
+                        modeId,
+                        mode?.LocalName ?? "Missing display mode");
+                })
+                .ToArray());
     }
 
     private static void CreateDetail(
@@ -1783,6 +2256,82 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
         }
         if (viewportChanged && !detail.CommitViewportChanges())
             throw new InvalidOperationException($"Rhino did not commit viewport settings for detail '{slot.Name}'.");
+        ApplyDetailAppearanceRecipe(document, detail.Viewport.Id, slot);
+    }
+
+    private static void ApplyDetailAppearanceRecipe(
+        RhinoDoc document,
+        Guid detailViewportId,
+        DetailSlotRecipe slot)
+    {
+        foreach (var sourceRule in slot.Layers)
+        {
+            var layer = document.Layers.FindId(sourceRule.Layer.LayerId);
+            if (layer is null && !string.IsNullOrWhiteSpace(sourceRule.Layer.FullPath))
+            {
+                var indexByPath = document.Layers.FindByFullPath(sourceRule.Layer.FullPath, -1);
+                if (indexByPath >= 0) layer = document.Layers[indexByPath];
+            }
+            if (layer is null) continue;
+            var copy = CopyLayer(layer);
+            copy.SetPerViewportVisible(
+                detailViewportId,
+                sourceRule.Visibility == LayerVisibilityOverride.Visible);
+            if (!document.Layers.Modify(copy, layer.Index, quiet: true))
+                throw new InvalidOperationException(
+                    $"Rhino did not apply layer visibility for '{layer.FullPath}'.");
+        }
+
+        var layers = document.Layers.Where(layer => !layer.IsDeleted && !layer.IsReference)
+            .Select(layer => new LayerSnapshot(
+                layer.Id,
+                layer.ParentLayerId == Guid.Empty ? null : layer.ParentLayerId,
+                layer.FullPath,
+                layer.IsVisible))
+            .ToDictionary(layer => layer.Id);
+        var objects = document.Objects.Where(item => item is not DetailViewObject &&
+                                                      item.Attributes.Space == ActiveSpace.ModelSpace)
+            .Select(item =>
+            {
+                var layer = document.Layers[item.Attributes.LayerIndex];
+                return new ModelObjectSnapshot(
+                    item.Id,
+                    item.Attributes.Name,
+                    layer.Id,
+                    layer.FullPath,
+                    item is InstanceObject);
+            })
+            .ToDictionary(item => item.Id);
+        var normalizedRules = slot.Objects.Select(rule =>
+        {
+            if (rule.Selector.Kind != ObjectDisplaySelectorKind.Layer ||
+                string.IsNullOrWhiteSpace(rule.Selector.LayerFullPath)) return rule;
+            var index = document.Layers.FindByFullPath(rule.Selector.LayerFullPath, -1);
+            return index < 0
+                ? rule
+                : rule with { Selector = rule.Selector with { LayerId = document.Layers[index].Id } };
+        }).ToArray();
+        var scope = new HierarchyScope(HierarchyScopeKind.Detail, detailViewportId);
+        var resolved = ViewportAppearanceResolver.Resolve(
+            [scope],
+            new Dictionary<HierarchyScope, HierarchyViewportRuleSet>
+            {
+                [scope] = new HierarchyViewportRuleSet(scope, [], normalizedRules),
+            },
+            layers,
+            objects);
+        foreach (var pair in resolved.Objects)
+        {
+            var item = document.Objects.FindId(pair.Key);
+            if (item is null) continue;
+            using var mode = DisplayModeDescription.GetDisplayMode(pair.Value.DisplayModeId);
+            if (mode is null) continue;
+            var attributes = item.Attributes.Duplicate();
+            if (!attributes.SetDisplayModeOverride(mode, detailViewportId) ||
+                !document.Objects.ModifyAttributes(item, attributes, quiet: true))
+                throw new InvalidOperationException(
+                    $"Rhino did not apply an object display override to '{item.Id}'.");
+        }
     }
 
     private static Guid? CreateTitleBlock(
@@ -1842,7 +2391,8 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
                 if (page is null || document.Objects.FindId(role.InstanceObjectId) is not InstanceObject oldInstance)
                     continue;
 
-                var details = page.GetDetailViews().Select(CaptureDetail).ToArray();
+                var details = page.GetDetailViews()
+                    .Select(detail => CaptureDetail(document, detail)).ToArray();
                 var paper = new PaperRecipe(page.PageWidth, page.PageHeight, document.PageUnitSystem.ToString());
                 var sheetData = pair.Value.TitleBlockData ?? new SheetTitleBlockData(string.Empty, []);
                 var replacementId = CreateManagedTitleBlock(
