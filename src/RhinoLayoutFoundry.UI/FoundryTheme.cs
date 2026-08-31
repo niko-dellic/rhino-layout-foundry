@@ -84,7 +84,7 @@ internal static class FoundryTheme
         ? Color.FromArgb(39, 39, 42, 255)
         : Color.FromArgb(244, 244, 245, 255);
 
-    internal const double DefaultCanvasGridOpacity = 0.22;
+    internal const double DefaultCanvasGridOpacity = 0.80;
 
     internal static Color CanvasGridColor => IsDarkMode
         ? Color.FromArgb(161, 161, 170, 255)
@@ -101,6 +101,10 @@ internal static class FoundryTheme
     internal static Color DangerAccent => IsDarkMode
         ? Color.FromArgb(239, 68, 68, 255)
         : Color.FromArgb(220, 38, 38, 255);
+
+    internal static Color WarningAccent => IsDarkMode
+        ? Color.FromArgb(251, 191, 36, 255)
+        : Color.FromArgb(180, 83, 9, 255);
 
     internal static Color SelectionWindowStroke(bool crossing) => RhinoColor(
         () => crossing

@@ -20,7 +20,7 @@ public sealed record DocumentState(
     Guid? DedicatedDetailLayerId = null,
     ProjectInformation? ProjectData = null)
 {
-    public const int CurrentSchemaVersion = 7;
+    public const int CurrentSchemaVersion = 8;
 
     [JsonIgnore]
     public IReadOnlyList<SheetTemplateRecipe> Templates => SheetTemplates ?? [];

@@ -82,6 +82,21 @@ public sealed class BatchUpdateSheetsPlannerTests
     }
 
     [Fact]
+    public void BuiltInModeCanBeAssignedDirectly()
+    {
+        var snapshot = EnrichedSnapshot();
+        var plan = new BatchUpdateSheetsPlanner().Plan(new BatchUpdateSheetsRequest(
+            42, 1, [TestSnapshots.SheetOneId], null, 1, 1,
+            null, null, null, null, ChangeTitleBlock: true,
+            BuiltInTitleBlock: BuiltInTitleBlockKind.RightSidebar), snapshot);
+
+        Assert.True(plan.CanApply);
+        var change = Assert.IsType<BatchUpdateSheetsChange>(Assert.Single(plan.Changes));
+        Assert.Equal(BuiltInTitleBlockKind.RightSidebar, change.BuiltInTitleBlock);
+        Assert.Null(change.TitleBlockSourceInstanceObjectId);
+    }
+
+    [Fact]
     public void RevisionCanBeAppendedAcrossIncludedSheets()
     {
         var snapshot = EnrichedSnapshot();

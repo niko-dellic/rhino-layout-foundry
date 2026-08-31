@@ -69,6 +69,8 @@ public sealed class DocumentStateSerializerTests
                 ProjectName = "Civic Library",
                 FirmName = "Foundry Architects",
                 DefaultRevision = new SheetRevisionRecord("P01", "2026-08-28", "Permit", "ND", "QA"),
+                TitleBlockOptions = new TitleBlockContentOptions(
+                    [TitleBlockContentField.ProjectName], [], true),
             });
 
         var restored = DocumentStateSerializer.Deserialize(DocumentStateSerializer.Serialize(state));
@@ -90,6 +92,8 @@ public sealed class DocumentStateSerializerTests
         Assert.Equal(detailLayerId, restored.DedicatedDetailLayerId);
         Assert.Equal("Civic Library", restored.ProjectInfo.ProjectName);
         Assert.Equal("P01", restored.ProjectInfo.DefaultRevision!.Code);
+        Assert.True(restored.ProjectInfo.ContentOptions.ReserveRevisionArea);
+        Assert.True(restored.ProjectInfo.ContentOptions.Includes(TitleBlockContentField.ProjectName));
     }
 
     [Fact]
@@ -196,12 +200,42 @@ public sealed class DocumentStateSerializerTests
                 ProjectData = ProjectInformation.Empty with { ProjectName = "Not in schema six" },
             })
             .Replace($"\"SchemaVersion\":{DocumentState.CurrentSchemaVersion}", "\"SchemaVersion\":6", StringComparison.Ordinal)
-            .Replace(",\"ProjectData\":{\"ProjectName\":\"Not in schema six\",\"ProjectNumber\":\"\",\"ClientName\":\"\",\"SiteAddress\":\"\",\"ProjectPhase\":\"\",\"ProjectStatus\":\"\",\"FirmName\":\"\",\"FirmAddress\":\"\",\"FirmPhone\":\"\",\"FirmEmail\":\"\",\"FirmWebsite\":\"\",\"FirmRegistration\":\"\",\"IssueDate\":\"\",\"IssuePurpose\":\"\",\"DrawnBy\":\"\",\"CheckedBy\":\"\",\"ApprovedBy\":\"\",\"CustomFields\":{},\"Logo\":null,\"DefaultRevision\":null}", string.Empty, StringComparison.Ordinal);
+            .Replace(",\"ProjectData\":{\"ProjectName\":\"Not in schema six\",\"ProjectNumber\":\"\",\"ClientName\":\"\",\"SiteAddress\":\"\",\"ProjectPhase\":\"\",\"ProjectStatus\":\"\",\"FirmName\":\"\",\"FirmAddress\":\"\",\"FirmPhone\":\"\",\"FirmEmail\":\"\",\"FirmWebsite\":\"\",\"FirmRegistration\":\"\",\"IssueDate\":\"\",\"IssuePurpose\":\"\",\"DrawnBy\":\"\",\"CheckedBy\":\"\",\"ApprovedBy\":\"\",\"CustomFields\":{},\"Logo\":null,\"DefaultRevision\":null,\"TitleBlockOptions\":null}", string.Empty, StringComparison.Ordinal);
 
         var restored = DocumentStateSerializer.Deserialize(payload);
 
         Assert.Equal(detailLayerId, restored.DedicatedDetailLayerId);
         Assert.Equal(string.Empty, restored.ProjectInfo.ProjectName);
+    }
+
+    [Fact]
+    public void VersionSevenProjectInformationGainsConventionalOptionsAndOrderedCustomFields()
+    {
+        var state = DocumentState.Empty() with
+        {
+            ProjectData = ProjectInformation.Empty with
+            {
+                ProjectName = "Existing project",
+                CustomFields = new Dictionary<string, string>
+                {
+                    ["Consultant"] = "Acme",
+                    ["Owner"] = "City",
+                },
+            },
+        };
+        var payload = DocumentStateSerializer.Serialize(state)
+            .Replace($"\"SchemaVersion\":{DocumentState.CurrentSchemaVersion}", "\"SchemaVersion\":7",
+                StringComparison.Ordinal)
+            .Replace(",\"TitleBlockOptions\":null", string.Empty, StringComparison.Ordinal);
+
+        var restored = DocumentStateSerializer.Deserialize(payload);
+
+        Assert.Equal(DocumentState.CurrentSchemaVersion, restored.SchemaVersion);
+        Assert.Equal("Existing project", restored.ProjectInfo.ProjectName);
+        Assert.True(restored.ProjectInfo.ContentOptions.Includes(TitleBlockContentField.ProjectName));
+        Assert.Equal(["Consultant", "Owner"],
+            restored.ProjectInfo.ContentOptions.CustomFields.Select(field => field.Label).ToArray());
+        Assert.All(restored.ProjectInfo.ContentOptions.CustomFields, field => Assert.True(field.IsIncluded));
     }
 
     [Fact]

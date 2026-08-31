@@ -24,6 +24,10 @@ public sealed class LayoutPackageProjectInformationPolicyTests
         {
             ProjectName = "Destination",
             CustomFields = new Dictionary<string, string> { ["Existing"] = "Keep" },
+            TitleBlockOptions = new TitleBlockContentOptions(
+                [TitleBlockContentField.ProjectName],
+                [new CustomTitleBlockFieldOption("Existing", false)],
+                true),
         };
         var source = ProjectInformation.Empty with
         {
@@ -34,6 +38,12 @@ public sealed class LayoutPackageProjectInformationPolicyTests
                 ["Existing"] = "Replace",
                 ["Imported"] = "Add",
             },
+            TitleBlockOptions = new TitleBlockContentOptions(
+                [TitleBlockContentField.FirmName],
+                [
+                    new CustomTitleBlockFieldOption("Existing"),
+                    new CustomTitleBlockFieldOption("Imported"),
+                ]),
         };
 
         var result = LayoutPackageProjectInformationPolicy.Resolve(
@@ -43,6 +53,10 @@ public sealed class LayoutPackageProjectInformationPolicyTests
         Assert.Equal("P-204", result.ProjectNumber);
         Assert.Equal("Keep", result.CustomFields["Existing"]);
         Assert.Equal("Add", result.CustomFields["Imported"]);
+        Assert.True(result.ContentOptions.ReserveRevisionArea);
+        Assert.True(result.ContentOptions.Includes(TitleBlockContentField.ProjectName));
+        Assert.False(result.ContentOptions.CustomFields[0].IsIncluded);
+        Assert.Equal("Imported", result.ContentOptions.CustomFields[1].Label);
     }
 
     [Fact]

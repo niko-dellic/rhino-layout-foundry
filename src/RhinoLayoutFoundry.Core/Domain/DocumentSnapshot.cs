@@ -45,7 +45,8 @@ public sealed record SheetSnapshot(
     Guid? TitleBlockInstanceObjectId = null,
     string? TitleBlockDefinitionName = null,
     bool IncludeInPrintAll = true,
-    SheetTitleBlockData? TitleBlockData = null)
+    SheetTitleBlockData? TitleBlockData = null,
+    BuiltInTitleBlockKind? TitleBlockBuiltInKind = null)
 {
     public IReadOnlyList<DetailSnapshot> Details => DetailSettings ?? [];
 }

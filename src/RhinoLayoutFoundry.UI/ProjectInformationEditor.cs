@@ -9,31 +9,25 @@ internal sealed class ProjectInformationEditor : Panel
 {
     private const int MaximumLogoBytes = 5 * 1024 * 1024;
     private readonly Dictionary<string, TextBox> _fields = new(StringComparer.Ordinal);
+    private readonly Dictionary<TitleBlockContentField, FoundryCheckBox> _includeChecks = new();
+    private readonly List<CustomFieldRow> _customRows = [];
+    private readonly StackLayout _customRowsLayout = new()
+    {
+        Spacing = FoundryTheme.Space2,
+        HorizontalContentAlignment = HorizontalAlignment.Stretch,
+    };
     private readonly TextArea _siteAddress = Area(48);
     private readonly TextArea _firmAddress = Area(48);
-    private readonly TextArea _customFields = Area(72, wrap: false);
+    private readonly FoundryCheckBox _reserveRevisionArea = new("Reserve blank revision area");
     private readonly Label _logoLabel = FoundryTheme.MutedLabel();
+    private readonly ImageView _logoPreview = new() { Size = new Size(112, 54) };
+    private readonly SheetRevisionRecord? _legacyRevision;
     private BrandAsset? _logo;
 
     internal ProjectInformationEditor(ProjectInformation value)
     {
-        MinimumSize = new Size(700, 0);
-        var chooseLogo = new FoundryDialogButton(
-            "Choose image…",
-            FoundryDialogButtonStyle.Secondary,
-            116);
-        var clearLogo = new FoundryDialogButton(
-            "Clear",
-            FoundryDialogButtonStyle.Secondary,
-            62);
-        chooseLogo.Click += (_, _) => ChooseLogo();
-        clearLogo.Click += (_, _) =>
-        {
-            _logo = null;
-            UpdateLogoLabel();
-            Changed?.Invoke(this, EventArgs.Empty);
-        };
-
+        _legacyRevision = value.DefaultRevision;
+        MinimumSize = new Size(620, 0);
         Content = new StackLayout
         {
             Padding = new Padding(FoundryTheme.Space1, FoundryTheme.Space2),
@@ -43,93 +37,69 @@ internal sealed class ProjectInformationEditor : Panel
             Items =
             {
                 FoundryTheme.MutedLabel(
-                    "Project information is stored in this Rhino document and drives every Foundry-managed title block."),
+                    "Checked fields are included in every Foundry-managed title block. Values remain saved when hidden."),
                 Section("Project", new StackLayout
                 {
                     Spacing = FoundryTheme.Space3,
                     HorizontalContentAlignment = HorizontalAlignment.Stretch,
-                    VerticalContentAlignment = VerticalAlignment.Top,
                     Items =
                     {
                         Pair(
-                            Labeled("Project name", Field("projectName")),
-                            Labeled("Project number", Field("projectNumber"))),
+                            Included(TitleBlockContentField.ProjectName, "Project name", Field("projectName")),
+                            Included(TitleBlockContentField.ProjectNumber, "Project number", Field("projectNumber"))),
                         Pair(
-                            Labeled("Client", Field("clientName")),
-                            Labeled("Phase", Field("projectPhase"))),
+                            Included(TitleBlockContentField.ClientName, "Client", Field("clientName")),
+                            Included(TitleBlockContentField.ProjectPhase, "Phase", Field("projectPhase"))),
                         Pair(
-                            Labeled("Status", Field("projectStatus")),
-                            Labeled("Site address", _siteAddress)),
+                            Included(TitleBlockContentField.ProjectStatus, "Status", Field("projectStatus")),
+                            Included(TitleBlockContentField.SiteAddress, "Site address", _siteAddress)),
                     },
                 }),
                 Section("Firm", new StackLayout
                 {
                     Spacing = FoundryTheme.Space3,
                     HorizontalContentAlignment = HorizontalAlignment.Stretch,
-                    VerticalContentAlignment = VerticalAlignment.Top,
                     Items =
                     {
                         Pair(
-                            Labeled("Firm name", Field("firmName")),
-                            Labeled("Phone", Field("firmPhone"))),
+                            Included(TitleBlockContentField.FirmName, "Firm name", Field("firmName")),
+                            Included(TitleBlockContentField.FirmPhone, "Phone", Field("firmPhone"))),
                         Pair(
-                            Labeled("Email", Field("firmEmail")),
-                            Labeled("Website", Field("firmWebsite"))),
+                            Included(TitleBlockContentField.FirmEmail, "Email", Field("firmEmail")),
+                            Included(TitleBlockContentField.FirmWebsite, "Website", Field("firmWebsite"))),
                         Pair(
-                            Labeled("Firm address", _firmAddress),
-                            Labeled("Registration / license", Field("firmRegistration"))),
-                        FieldGroup("Logo", new StackLayout
-                        {
-                            Orientation = Orientation.Horizontal,
-                            Spacing = FoundryTheme.Space2,
-                            VerticalContentAlignment = VerticalAlignment.Center,
-                            Items = { chooseLogo, clearLogo, _logoLabel },
-                        }),
+                            Included(TitleBlockContentField.FirmAddress, "Firm address", _firmAddress),
+                            Included(TitleBlockContentField.FirmRegistration, "Registration / license",
+                                Field("firmRegistration"))),
+                        LogoEditor(),
                     },
                 }),
-                Section("Issue defaults", new StackLayout
+                Section("Issue information", new StackLayout
                 {
                     Spacing = FoundryTheme.Space3,
                     HorizontalContentAlignment = HorizontalAlignment.Stretch,
-                    VerticalContentAlignment = VerticalAlignment.Top,
                     Items =
                     {
                         Pair(
-                            Labeled("Issue date", Field("issueDate")),
-                            Labeled("Issue purpose", Field("issuePurpose"))),
+                            Included(TitleBlockContentField.IssueDate, "Issue date", Field("issueDate")),
+                            Included(TitleBlockContentField.IssuePurpose, "Issue purpose", Field("issuePurpose"))),
                         Pair(
-                            Labeled("Drawn by", Field("drawnBy")),
-                            Labeled("Checked by", Field("checkedBy"))),
+                            Included(TitleBlockContentField.DrawnBy, "Drawn by", Field("drawnBy")),
+                            Included(TitleBlockContentField.CheckedBy, "Checked by", Field("checkedBy"))),
                         Pair(
-                            Labeled("Approved by", Field("approvedBy")),
+                            Included(TitleBlockContentField.ApprovedBy, "Approved by", Field("approvedBy")),
                             new Panel()),
                     },
                 }),
-                Section("Default revision", new StackLayout
+                Section("Custom fields", CustomFieldsEditor()),
+                Section("Title-block options", new StackLayout
                 {
-                    Spacing = FoundryTheme.Space3,
-                    HorizontalContentAlignment = HorizontalAlignment.Stretch,
-                    VerticalContentAlignment = VerticalAlignment.Top,
+                    Spacing = FoundryTheme.Space1,
                     Items =
                     {
-                        Pair(
-                            Labeled("Code", Field("revisionCode")),
-                            Labeled("Date", Field("revisionDate"))),
-                        Labeled("Description", Field("revisionDescription")),
-                        Pair(
-                            Labeled("Issued by", Field("revisionIssuedBy")),
-                            Labeled("Checked by", Field("revisionCheckedBy"))),
-                    },
-                }),
-                Section("Custom fields", new StackLayout
-                {
-                    Spacing = FoundryTheme.Space2,
-                    HorizontalContentAlignment = HorizontalAlignment.Stretch,
-                    VerticalContentAlignment = VerticalAlignment.Top,
-                    Items =
-                    {
-                        FoundryTheme.MutedLabel("Enter one field per line as Label = Value."),
-                        new FoundryFormField(_customFields),
+                        _reserveRevisionArea,
+                        FoundryTheme.MutedLabel(
+                            "Adds an outlined REVISIONS bay without rows or revision data."),
                     },
                 }),
             },
@@ -138,7 +108,7 @@ internal sealed class ProjectInformationEditor : Panel
         foreach (var field in _fields.Values) field.TextChanged += OnChanged;
         _siteAddress.TextChanged += OnChanged;
         _firmAddress.TextChanged += OnChanged;
-        _customFields.TextChanged += OnChanged;
+        _reserveRevisionArea.CheckedChanged += OnChanged;
         LoadValues(value);
     }
 
@@ -148,19 +118,18 @@ internal sealed class ProjectInformationEditor : Panel
     {
         get
         {
-            var revision = new SheetRevisionRecord(
-                Text("revisionCode"), Text("revisionDate"), Text("revisionDescription"),
-                Text("revisionIssuedBy"), Text("revisionCheckedBy"));
-            var hasRevision = new[]
-            {
-                revision.Code, revision.Date, revision.Description, revision.IssuedBy, revision.CheckedBy,
-            }.Any(value => !string.IsNullOrWhiteSpace(value));
+            var custom = ParseCustomFields(out _);
+            var options = new TitleBlockContentOptions(
+                _includeChecks.Where(pair => pair.Value.Checked == true).Select(pair => pair.Key).ToArray(),
+                _customRows.Select(row => new CustomTitleBlockFieldOption(
+                    row.Label.Text.Trim(), row.Include.Checked == true)).ToArray(),
+                _reserveRevisionArea.Checked == true).Normalize(custom);
             return new ProjectInformation(
                 Text("projectName"), Text("projectNumber"), Text("clientName"), _siteAddress.Text.Trim(),
                 Text("projectPhase"), Text("projectStatus"), Text("firmName"), _firmAddress.Text.Trim(),
                 Text("firmPhone"), Text("firmEmail"), Text("firmWebsite"), Text("firmRegistration"),
                 Text("issueDate"), Text("issuePurpose"), Text("drawnBy"), Text("checkedBy"), Text("approvedBy"),
-                ParseCustomFields(out _), _logo, hasRevision ? revision : null);
+                custom, _logo, _legacyRevision, options);
         }
     }
 
@@ -192,27 +161,136 @@ internal sealed class ProjectInformationEditor : Panel
         Set("drawnBy", value.DrawnBy);
         Set("checkedBy", value.CheckedBy);
         Set("approvedBy", value.ApprovedBy);
-        Set("revisionCode", value.DefaultRevision?.Code ?? string.Empty);
-        Set("revisionDate", value.DefaultRevision?.Date ?? string.Empty);
-        Set("revisionDescription", value.DefaultRevision?.Description ?? string.Empty);
-        Set("revisionIssuedBy", value.DefaultRevision?.IssuedBy ?? string.Empty);
-        Set("revisionCheckedBy", value.DefaultRevision?.CheckedBy ?? string.Empty);
-        _customFields.Text = string.Join(Environment.NewLine,
-            value.CustomFields.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
-                .Select(pair => $"{pair.Key} = {pair.Value}"));
+        var options = value.ContentOptions;
+        foreach (var pair in _includeChecks) pair.Value.Checked = options.Includes(pair.Key);
+        _reserveRevisionArea.Checked = options.ReserveRevisionArea;
+        _customRows.Clear();
+        foreach (var option in options.CustomFields)
+            AddCustomRow(option.Label, value.CustomFields.GetValueOrDefault(option.Label) ?? string.Empty,
+                option.IsIncluded, rebuild: false);
+        RebuildCustomRows();
         _logo = value.Logo;
-        UpdateLogoLabel();
+        UpdateLogoPreview();
+    }
+
+    private Control LogoEditor()
+    {
+        var include = IncludeCheck(TitleBlockContentField.Logo, "Logo");
+        var chooseLogo = new FoundryDialogButton("Choose image…", FoundryDialogButtonStyle.Secondary, 116);
+        var clearLogo = new FoundryDialogButton("Clear", FoundryDialogButtonStyle.Secondary, 62);
+        chooseLogo.Click += (_, _) => ChooseLogo();
+        clearLogo.Click += (_, _) =>
+        {
+            _logo = null;
+            UpdateLogoPreview();
+            Changed?.Invoke(this, EventArgs.Empty);
+        };
+        return new StackLayout
+        {
+            Spacing = FoundryTheme.Space1,
+            Items =
+            {
+                include,
+                new StackLayout
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = FoundryTheme.Space2,
+                    VerticalContentAlignment = VerticalAlignment.Center,
+                    Items = { _logoPreview, chooseLogo, clearLogo, _logoLabel },
+                },
+            },
+        };
+    }
+
+    private Control CustomFieldsEditor()
+    {
+        var add = new FoundryDialogButton("Add field", FoundryDialogButtonStyle.Secondary, 92);
+        add.Click += (_, _) => AddCustomRow("", "", true);
+        return new StackLayout
+        {
+            Spacing = FoundryTheme.Space2,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            Items =
+            {
+                FoundryTheme.MutedLabel("Custom fields render in this order after the standard project fields."),
+                _customRowsLayout,
+                new StackLayout
+                {
+                    Orientation = Orientation.Horizontal,
+                    Items = { add, new StackLayoutItem(null, true) },
+                },
+            },
+        };
+    }
+
+    private void AddCustomRow(string label, string value, bool included, bool rebuild = true)
+    {
+        var row = new CustomFieldRow(label, value, included);
+        row.Include.CheckedChanged += OnChanged;
+        row.Label.TextChanged += OnChanged;
+        row.Value.TextChanged += OnChanged;
+        row.Up.Click += (_, _) => MoveCustomRow(row, -1);
+        row.Down.Click += (_, _) => MoveCustomRow(row, 1);
+        row.Remove.Click += (_, _) =>
+        {
+            _customRows.Remove(row);
+            RebuildCustomRows();
+            Changed?.Invoke(this, EventArgs.Empty);
+        };
+        _customRows.Add(row);
+        if (rebuild)
+        {
+            RebuildCustomRows();
+            row.Label.Focus();
+            Changed?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    private void MoveCustomRow(CustomFieldRow row, int offset)
+    {
+        var index = _customRows.IndexOf(row);
+        var target = Math.Clamp(index + offset, 0, _customRows.Count - 1);
+        if (target == index) return;
+        _customRows.RemoveAt(index);
+        _customRows.Insert(target, row);
+        RebuildCustomRows();
+        Changed?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void RebuildCustomRows()
+    {
+        _customRowsLayout.Items.Clear();
+        for (var index = 0; index < _customRows.Count; index++)
+        {
+            var row = _customRows[index];
+            row.Up.Enabled = index > 0;
+            row.Down.Enabled = index < _customRows.Count - 1;
+            _customRowsLayout.Items.Add(row.Control);
+        }
+        if (_customRows.Count == 0)
+            _customRowsLayout.Items.Add(FoundryTheme.MutedLabel("No custom fields."));
     }
 
     private TextBox Field(string key)
     {
-        var result = new TextBox
-        {
-            ShowBorder = false,
-            BackgroundColor = Colors.Transparent,
-        };
+        var result = Editor();
         _fields.Add(key, result);
         return result;
+    }
+
+    private Control Included(TitleBlockContentField field, string label, Control editor) => new StackLayout
+    {
+        Spacing = FoundryTheme.Space1,
+        HorizontalContentAlignment = HorizontalAlignment.Stretch,
+        Items = { IncludeCheck(field, label), new FoundryFormField(editor) },
+    };
+
+    private FoundryCheckBox IncludeCheck(TitleBlockContentField field, string label)
+    {
+        var check = new FoundryCheckBox(label);
+        check.CheckedChanged += OnChanged;
+        _includeChecks.Add(field, check);
+        return check;
     }
 
     private string Text(string key) => _fields[key].Text.Trim();
@@ -222,22 +300,17 @@ internal sealed class ProjectInformationEditor : Panel
     {
         error = null;
         var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var lineNumber = 0;
-        foreach (var rawLine in _customFields.Text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
+        foreach (var row in _customRows)
         {
-            lineNumber++;
-            var line = rawLine.Trim();
-            if (line.Length == 0) continue;
-            var separator = line.IndexOf('=');
-            if (separator <= 0)
+            var label = row.Label.Text.Trim();
+            if (label.Length == 0)
             {
-                error = $"Custom field line {lineNumber} must use Label = Value.";
+                error = "Custom field labels cannot be empty.";
                 return result;
             }
-            var key = line[..separator].Trim();
-            if (!result.TryAdd(key, line[(separator + 1)..].Trim()))
+            if (!result.TryAdd(label, row.Value.Text.Trim()))
             {
-                error = $"Custom field '{key}' is duplicated.";
+                error = $"Custom field '{label}' is duplicated.";
                 return result;
             }
         }
@@ -256,15 +329,12 @@ internal sealed class ProjectInformationEditor : Panel
             var bytes = File.ReadAllBytes(dialog.FileName);
             if (bytes.Length > MaximumLogoBytes)
                 throw new InvalidDataException("The logo exceeds the 5 MB limit.");
-            using var image = new Eto.Drawing.Bitmap(bytes);
+            using var image = new Bitmap(bytes);
             if (image.Width <= 0 || image.Height <= 0)
                 throw new InvalidDataException("The selected image has invalid dimensions.");
-            _logo = new BrandAsset(
-                Path.GetFileName(dialog.FileName),
-                mediaType,
-                Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant(),
-                bytes);
-            UpdateLogoLabel();
+            _logo = new BrandAsset(Path.GetFileName(dialog.FileName), mediaType,
+                Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant(), bytes);
+            UpdateLogoPreview();
             Changed?.Invoke(this, EventArgs.Empty);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
@@ -273,55 +343,36 @@ internal sealed class ProjectInformationEditor : Panel
         }
     }
 
-    private void UpdateLogoLabel() => _logoLabel.Text = _logo is null
-        ? "No logo selected"
-        : $"{_logo.FileName} · {_logo.Data.Length / 1024d:0.#} KB";
+    private void UpdateLogoPreview()
+    {
+        _logoPreview.Image?.Dispose();
+        _logoPreview.Image = _logo is null ? null : new Bitmap(_logo.Data);
+        _logoLabel.Text = _logo is null
+            ? "No logo selected"
+            : $"{_logo.FileName} · {_logo.Data.Length / 1024d:0.#} KB";
+    }
 
     private void OnChanged(object? sender, EventArgs eventArgs) => Changed?.Invoke(this, EventArgs.Empty);
 
-    private static TextArea Area(int height, bool wrap = true) => new()
+    private static TextBox Editor() => new() { ShowBorder = false, BackgroundColor = Colors.Transparent };
+
+    private static TextArea Area(int height) => new()
     {
         Height = height,
-        Wrap = wrap,
+        Wrap = true,
         BackgroundColor = Colors.Transparent,
-    };
-
-    private static Control Labeled(string label, Control editor) =>
-        FieldGroup(label, new FoundryFormField(editor));
-
-    private static Control FieldGroup(string label, Control content) => new StackLayout
-    {
-        Spacing = FoundryTheme.Space1,
-        HorizontalContentAlignment = HorizontalAlignment.Stretch,
-        Items =
-        {
-            new Label
-            {
-                Text = label,
-                Font = SystemFonts.Bold(9),
-                TextColor = FoundryTheme.SecondaryText,
-                TextAlignment = TextAlignment.Left,
-            },
-            content,
-        },
     };
 
     private static Control Pair(Control left, Control right) => new TableLayout
     {
         Spacing = new Size(FoundryTheme.Space4, 0),
-        Rows =
-        {
-            new TableRow(
-                new TableCell(left, scaleWidth: true),
-                new TableCell(right, scaleWidth: true)),
-        },
+        Rows = { new TableRow(new TableCell(left, true), new TableCell(right, true)) },
     };
 
     private static Control Section(string title, Control content) => new StackLayout
     {
         Spacing = FoundryTheme.Space2,
         HorizontalContentAlignment = HorizontalAlignment.Stretch,
-        VerticalContentAlignment = VerticalAlignment.Top,
         Items =
         {
             new Label
@@ -329,7 +380,6 @@ internal sealed class ProjectInformationEditor : Panel
                 Text = title,
                 Font = SystemFonts.Bold(11),
                 TextColor = FoundryTheme.PrimaryText,
-                TextAlignment = TextAlignment.Left,
             },
             new Panel
             {
@@ -339,4 +389,41 @@ internal sealed class ProjectInformationEditor : Panel
             content,
         },
     };
+
+    private sealed class CustomFieldRow
+    {
+        internal CustomFieldRow(string label, string value, bool included)
+        {
+            Include = new FoundryCheckBox("Include", included);
+            Label = Editor();
+            Label.Text = label;
+            Value = Editor();
+            Value.Text = value;
+            Up = new FoundryDialogButton("↑", FoundryDialogButtonStyle.Secondary, 36);
+            Down = new FoundryDialogButton("↓", FoundryDialogButtonStyle.Secondary, 36);
+            Remove = new FoundryDialogButton("Remove", FoundryDialogButtonStyle.Destructive, 64);
+            Control = new TableLayout
+            {
+                Spacing = new Size(FoundryTheme.Space2, 0),
+                Rows =
+                {
+                    new TableRow(
+                        Include,
+                        new TableCell(new FoundryFormField(Label), true),
+                        new TableCell(new FoundryFormField(Value), true),
+                        Up,
+                        Down,
+                        Remove),
+                },
+            };
+        }
+
+        internal FoundryCheckBox Include { get; }
+        internal TextBox Label { get; }
+        internal TextBox Value { get; }
+        internal FoundryDialogButton Up { get; }
+        internal FoundryDialogButton Down { get; }
+        internal FoundryDialogButton Remove { get; }
+        internal Control Control { get; }
+    }
 }

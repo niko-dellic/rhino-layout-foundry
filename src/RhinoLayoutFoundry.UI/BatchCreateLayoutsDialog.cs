@@ -43,6 +43,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
     private readonly TextArea _revisionEditor;
     private readonly TitleBlockPreviewTray _titleBlockPreviewTray;
     private readonly TitleBlockSelectionDrawable _titleBlockSelectorPreview;
+    private readonly FoundryTextSegmentedControl _titleBlockModeControl;
     private readonly NamedViewPreviewTray _namedViewPreviewTray;
     private readonly StackLayout _layoutGroupChips;
     private readonly Scrollable _layoutGroupChipScroll;
@@ -160,6 +161,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         };
         _titleBlockPreviewTray = new TitleBlockPreviewTray(_titleBlockChoices, selectedIndex: 0);
         _titleBlockSelectorPreview = new TitleBlockSelectionDrawable(_titleBlockChoices, selectedIndex: 0);
+        _titleBlockModeControl = new FoundryTextSegmentedControl(["None", "Right", "Bottom"], 0, 72);
         _namedViewPreviewTray = new NamedViewPreviewTray(_namedViewChoices, selectedIndex: 0);
         _layoutGroupChips = new StackLayout
         {
@@ -245,6 +247,10 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         _titleBlockSelectorPreview.Activated += (_, _) => ToggleTitleBlockGallery();
         _titleBlockPreviewTray.SelectedIndexChanged += OnTitleBlockSelectionChanged;
         _titleBlockPreviewTray.SelectionCommitted += (_, _) => HideTitleBlockGallery();
+        _titleBlockModeControl.SelectedIndexChanged += (_, _) =>
+        {
+            _titleBlockPreviewTray.SelectedIndex = _titleBlockModeControl.SelectedIndex;
+        };
         _previewGrid.SelectedRowsChanged += OnPreviewSelectionChanged;
         _displayModePicker.Opened += (_, _) =>
         {
@@ -310,7 +316,6 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                         FixedWidthCard("Batch", CreateBatchEditor(), 280),
                         FixedWidthCard("Page size", CreatePaperEditor(), 240),
                         FixedWidthCard("Layout && views", CreateLayoutEditor(), 420),
-                        FixedWidthCard("Revisions", CreateRevisionEditor(), 320),
                     },
                 },
             },
@@ -455,7 +460,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
         };
         if (_isEditMode) editor.Items.Add(_titleBlockChangeCheck);
-        editor.Items.Add(new Panel { Width = 320, Content = _titleBlockSelectorPreview });
+        editor.Items.Add(_titleBlockModeControl);
         return editor;
     }
 
@@ -535,7 +540,8 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                 : null,
             AppendRevision: _revisionChangeCheck.Checked == true && _editTargets.Length > 1
                 ? revisions.FirstOrDefault()
-                : null);
+                : null,
+            BuiltInTitleBlock: titleBlock.BuiltInKind);
     }
 
     private void RefreshPreview(bool refreshDetailAssignments = true)
@@ -772,6 +778,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         _unitDropDown.Enabled = paper;
         _displayModePicker.Enabled = _displayModeChangeCheck.Checked == true;
         _titleBlockSelectorPreview.Enabled = _titleBlockChangeCheck.Checked == true;
+        _titleBlockModeControl.Enabled = _titleBlockChangeCheck.Checked == true;
         _revisionEditor.Enabled = _revisionChangeCheck.Checked == true;
     }
 
@@ -847,8 +854,12 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         };
         var modes = sheet.Details.Select(detail => detail.DisplayModeId).Distinct().ToArray();
         var pageMode = modes.Length == 1 ? modes[0] : (Guid?)null;
-        var titleBlock = _titleBlockChoices.FirstOrDefault(choice =>
-            choice.SourceInstanceObjectId == sheet.TitleBlockInstanceObjectId) ?? _titleBlockChoices[0];
+        var titleBlock = sheet.TitleBlockBuiltInKind switch
+        {
+            BuiltInTitleBlockKind.FullWidthBottom => _titleBlockChoices[2],
+            not null => _titleBlockChoices[1],
+            _ => _titleBlockChoices[0],
+        };
         return new CreationDraft(
             Guid.NewGuid(),
             sheet.PageViewId,
@@ -1272,6 +1283,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
 
     private void OnTitleBlockSelectionChanged(object? sender, EventArgs eventArgs)
     {
+        _titleBlockModeControl.SelectedIndex = Math.Max(0, _titleBlockPreviewTray.SelectedIndex);
         UpdateTitleBlockSelector();
         ApplyTitleBlockToTargets();
     }
@@ -1587,6 +1599,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                 : InheritDisplayMode;
             _dedicatedDetailLayerCheck.Checked = draft.UseDedicatedDetailLayer;
             _titleBlockPreviewTray.SelectedIndex = Math.Max(0, Array.IndexOf(_titleBlockChoices, draft.TitleBlock));
+            _titleBlockModeControl.SelectedIndex = _titleBlockPreviewTray.SelectedIndex;
             UpdateTitleBlockSelector();
         }
         finally
@@ -1763,34 +1776,12 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                 $"Template — {template.Name}", BuiltInLayoutKind.Blank, template.Id, template)),
     ];
 
-    private static TitleBlockChoice[] TitleBlockChoices(DocumentSnapshot snapshot, bool editMode)
-    {
-        var choices = new List<TitleBlockChoice>();
-        if (!editMode)
-        {
-            choices.Add(new TitleBlockChoice(true, null, null, "Use layout template", null));
-            choices.Add(new TitleBlockChoice(false, null, BuiltInTitleBlockKind.CompactLowerRight,
-                "Built-in — Compact lower-right", null));
-            choices.Add(new TitleBlockChoice(false, null, BuiltInTitleBlockKind.FullWidthBottom,
-                "Built-in — Full-width bottom band", null));
-            choices.Add(new TitleBlockChoice(false, null, BuiltInTitleBlockKind.RightSidebar,
-                "Built-in — Right-side vertical", null));
-            choices.Add(new TitleBlockChoice(false, null, BuiltInTitleBlockKind.MinimalLowerRight,
-                "Built-in — Minimal lower-right", null));
-        }
-        choices.Add(new TitleBlockChoice(false, null, null, "No title block", null));
-        choices.AddRange(snapshot.TitleBlockInstances.Values
-            .Where(instance => instance.Transform is { Count: 16 })
-            .OrderBy(instance => instance.InstanceDefinitionName, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(instance => instance.SourcePageName, StringComparer.OrdinalIgnoreCase)
-            .Select(instance => new TitleBlockChoice(
-                false,
-                instance.InstanceObjectId,
-                null,
-                $"{instance.InstanceDefinitionName} — {instance.SourcePageName}",
-                instance)));
-        return choices.ToArray();
-    }
+    private static TitleBlockChoice[] TitleBlockChoices(DocumentSnapshot snapshot, bool editMode) =>
+    [
+        new TitleBlockChoice(false, null, null, "None", null),
+        new TitleBlockChoice(false, null, BuiltInTitleBlockKind.RightSidebar, "Right", null),
+        new TitleBlockChoice(false, null, BuiltInTitleBlockKind.FullWidthBottom, "Bottom", null),
+    ];
 
     private static NamedViewChoice[] NamedViewChoices(DocumentSnapshot snapshot) =>
     [
@@ -1928,8 +1919,9 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         private readonly bool _mixedNamedViews;
         private readonly bool _mixedDisplayModes;
         private readonly DetailNamedViewTray _namedViewTray;
-        private readonly DropDown _displayModeDropDown;
-        private readonly Guid?[] _displayModeIds;
+        private readonly FilteredPicker _displayModePicker;
+        private readonly DetailDisplayModeChoice[] _displayModeChoices;
+        private readonly Label _displayModeError;
         private readonly NamedViewPreviewTray _previewSource;
 
         internal DetailAssignmentDialog(
@@ -1958,28 +1950,36 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             var orderedDisplayModes = displayModes
                 .OrderBy(pair => pair.Value, StringComparer.OrdinalIgnoreCase)
                 .ToArray();
-            var displayModeLabels = new List<string>();
-            var displayModeIds = new List<Guid?>();
+            var displayModeChoices = new List<DetailDisplayModeChoice>();
             if (mixedDisplayModes)
             {
-                displayModeLabels.Add(MixedDisplayMode);
-                displayModeIds.Add(null);
+                displayModeChoices.Add(new DetailDisplayModeChoice(MixedDisplayMode, null));
             }
-            displayModeLabels.Add(InheritPageDisplayMode);
-            displayModeIds.Add(null);
+            displayModeChoices.Add(new DetailDisplayModeChoice(InheritPageDisplayMode, null));
             foreach (var mode in orderedDisplayModes)
             {
-                displayModeLabels.Add(mode.Value);
-                displayModeIds.Add(mode.Key);
+                displayModeChoices.Add(new DetailDisplayModeChoice(mode.Value, mode.Key));
             }
-            _displayModeIds = displayModeIds.ToArray();
-            _displayModeDropDown = new DropDown
+            _displayModeChoices = displayModeChoices.ToArray();
+            var initialDisplayMode = mixedDisplayModes
+                ? _displayModeChoices[0]
+                : _displayModeChoices.FirstOrDefault(choice => choice.Id == displayModeId) ??
+                  _displayModeChoices.First(choice => choice.Label == InheritPageDisplayMode);
+            _displayModePicker = new FilteredPicker(
+                _displayModeChoices.Select(choice => choice.Label),
+                "Search display modes");
+            _displayModePicker.Width = 280;
+            _displayModePicker.Text = initialDisplayMode.Label;
+            _displayModeError = new Label
             {
-                Width = 280,
-                DataStore = displayModeLabels,
-                SelectedIndex = mixedDisplayModes
-                    ? 0
-                    : Math.Max(0, Array.FindIndex(_displayModeIds, id => id == displayModeId)),
+                TextColor = FoundryTheme.DangerAccent,
+                Wrap = WrapMode.Word,
+                Visible = false,
+            };
+            _displayModePicker.ValueChanged += (_, _) =>
+            {
+                _displayModeError.Text = string.Empty;
+                _displayModeError.Visible = false;
             };
 
             Title = $"{detailLabel} settings";
@@ -1992,6 +1992,14 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             var cancel = new FoundryDialogButton("Cancel", FoundryDialogButtonStyle.Secondary);
             apply.Click += (_, _) =>
             {
+                if (!_displayModePicker.ContainsChoice(_displayModePicker.Text))
+                {
+                    _displayModeError.Text = "Choose an available display mode or use the page setting.";
+                    _displayModeError.Visible = true;
+                    _displayModePicker.Focus();
+                    return;
+                }
+
                 Succeeded = true;
                 Close();
             };
@@ -2047,7 +2055,8 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                         TextColor = FoundryTheme.PrimaryText,
                     },
                     FoundryTheme.MutedLabel("Use the sheet display mode or override it for this detail."),
-                    new Panel { Width = 300, Content = new FoundryFormField(_displayModeDropDown) },
+                    new Panel { Width = 300, Content = _displayModePicker },
+                    _displayModeError,
                     new TableLayout
                     {
                         Rows = { new TableRow(new TableCell(null, true), cancel, apply) },
@@ -2069,13 +2078,20 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                     : null;
             }
         }
-        internal bool ChangeDisplayMode => !_mixedDisplayModes || _displayModeDropDown.SelectedIndex > 0;
-        internal Guid? DisplayModeId => _displayModeDropDown.SelectedIndex >= 0 &&
-                                        _displayModeDropDown.SelectedIndex < _displayModeIds.Length
-            ? _displayModeIds[_displayModeDropDown.SelectedIndex]
-            : null;
+        internal bool ChangeDisplayMode => !_mixedDisplayModes ||
+                                           !string.Equals(
+                                               _displayModePicker.Text.Trim(),
+                                               MixedDisplayMode,
+                                               StringComparison.OrdinalIgnoreCase);
+        internal Guid? DisplayModeId => _displayModeChoices.FirstOrDefault(choice =>
+            string.Equals(
+                choice.Label,
+                _displayModePicker.Text.Trim(),
+                StringComparison.OrdinalIgnoreCase))?.Id;
 
         private void OnPreviewsChanged(object? sender, EventArgs eventArgs) => _namedViewTray.Invalidate();
+
+        private sealed record DetailDisplayModeChoice(string Label, Guid? Id);
     }
 
     private sealed class DetailNamedViewTray : Drawable

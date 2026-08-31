@@ -147,7 +147,8 @@ public sealed record BatchUpdateSheetsChange(
     bool ChangeTitleBlock = false,
     Guid? TitleBlockSourceInstanceObjectId = null,
     IReadOnlyList<SheetRevisionRecord>? ReplaceRevisionSchedule = null,
-    SheetRevisionRecord? AppendRevision = null) : OperationChange;
+    SheetRevisionRecord? AppendRevision = null,
+    BuiltInTitleBlockKind? BuiltInTitleBlock = null) : OperationChange;
 
 public sealed record UpdateDetailDisplayModesChange(
     IReadOnlyList<Guid> DetailViewportIds,

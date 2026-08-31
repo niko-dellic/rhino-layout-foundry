@@ -481,11 +481,10 @@ public sealed class LayoutFoundryPanel : Panel
         treeGrid.Columns.Add(new GridColumn
         {
             HeaderText = "Status",
-            DataCell = new TextBoxCell
-            {
-                Binding = Binding.Property<HierarchyTreeItem, string>(item => item.StatusText),
-            },
-            Width = 82,
+            DataCell = new FoundryBadgeCell<HierarchyTreeItem>(
+                item => item.StatusText,
+                item => item.StatusTone),
+            Width = 96,
             Sortable = true,
         });
 
@@ -3104,6 +3103,15 @@ public sealed class LayoutFoundryPanel : Panel
         public string SecondaryText => Presentation.SecondaryText;
 
         public string StatusText => Presentation.StatusText;
+
+        public FoundryBadgeTone StatusTone => Node.Issues.Count == 0
+            ? FoundryBadgeTone.Neutral
+            : Node.Issues.Max(issue => issue.Severity) switch
+            {
+                OverviewIssueSeverity.Error => FoundryBadgeTone.Error,
+                OverviewIssueSeverity.Warning => FoundryBadgeTone.Warning,
+                _ => FoundryBadgeTone.Neutral,
+            };
 
         public bool HasSheetTargets => DescendantSheets(Node).Any();
 

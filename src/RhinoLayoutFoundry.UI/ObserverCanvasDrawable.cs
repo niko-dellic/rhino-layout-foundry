@@ -514,13 +514,24 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
         graphics.FillRectangle(
             FoundryTheme.WithAlpha(FoundryTheme.CanvasSurface, emphasized ? 118 : 30),
             bounds);
-        graphics.DrawRectangle(new Pen(outline, selected ? 2 : 1), bounds);
         var headerHeight = Math.Max(22, ObserverPlacementPlanner.FolderHeaderHeight * _camera.Zoom);
+        var renderedHeaderHeight = (float)Math.Min(bounds.Height, headerHeight);
         graphics.FillRectangle(
             emphasized
                 ? FoundryTheme.CanvasFolderBackground
                 : FoundryTheme.WithAlpha(FoundryTheme.CanvasFolderBackground, 55),
-            bounds.X, bounds.Y, bounds.Width, (float)Math.Min(bounds.Height, headerHeight));
+            bounds.X, bounds.Y, bounds.Width, renderedHeaderHeight);
+        graphics.DrawLine(
+            new Pen(
+                FoundryTheme.WithAlpha(FoundryTheme.CanvasBorder, emphasized ? 180 : 55),
+                1),
+            bounds.Left,
+            bounds.Top + renderedHeaderHeight,
+            bounds.Right,
+            bounds.Top + renderedHeaderHeight);
+        // Keep the outline above every fill. Drawing it before the opaque folder
+        // header causes the top and upper side edges to disappear.
+        graphics.DrawRectangle(new Pen(outline, selected ? 2 : 1), bounds);
         var headerColor = emphasized
             ? FoundryTheme.PrimaryText
             : FoundryTheme.WithAlpha(FoundryTheme.PrimaryText, 64);

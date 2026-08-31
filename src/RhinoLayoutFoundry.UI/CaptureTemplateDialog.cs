@@ -60,7 +60,6 @@ internal sealed class CaptureTemplateDialog : Dialog
                 Header("Capture template", $"Use '{sourceName}' as a reusable sheet recipe."),
                 Field("Template name", _nameBox),
                 Field("Default naming pattern", _patternBox),
-                Field("Title block on this layout", _titleBlockDropDown),
                 _statusLabel,
                 new TableLayout
                 {
@@ -78,11 +77,8 @@ internal sealed class CaptureTemplateDialog : Dialog
     {
         _captureButton.Enabled = false;
         _statusLabel.Text = "Capturing layout recipe…";
-        var blockId = _titleBlockDropDown.SelectedIndex > 0
-            ? _blocks[_titleBlockDropDown.SelectedIndex - 1].InstanceObjectId
-            : (Guid?)null;
         var result = await LayoutFoundryUiHost.CaptureSheetTemplateAsync(
-            _sourcePageViewId, _nameBox.Text, _patternBox.Text, blockId);
+            _sourcePageViewId, _nameBox.Text, _patternBox.Text, null);
         if (!result.Succeeded)
         {
             _statusLabel.Text = string.Join(" ", result.Diagnostics.Select(item => item.Message));

@@ -5,16 +5,23 @@ namespace RhinoLayoutFoundry.UI;
 
 internal sealed class FilteredPicker : Panel
 {
+    private const int DefaultPopupHeight = 196;
     private string[] _allLabels;
     private readonly TextBox _textBox;
     private readonly FoundryToolbarIconButton _toggleButton;
     private readonly ListBox _results;
+    private readonly int _popupHeight;
+    private int _visibleResultCount;
     private Form? _resultsPopup;
     private bool _settingValue;
 
-    internal FilteredPicker(IEnumerable<string> labels, string placeholder)
+    internal FilteredPicker(
+        IEnumerable<string> labels,
+        string placeholder,
+        int popupHeight = DefaultPopupHeight)
     {
         MinimumSize = new Size(0, 32);
+        _popupHeight = Math.Max(86, popupHeight);
         _allLabels = labels.Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(label => label, StringComparer.OrdinalIgnoreCase)
             .ToArray();
@@ -22,7 +29,8 @@ internal sealed class FilteredPicker : Panel
         _toggleButton = new FoundryToolbarIconButton(
             FoundryViewIcons.ChevronDown(),
             "Show matching choices");
-        _results = new ListBox { DataStore = _allLabels, Height = 112 };
+        _visibleResultCount = _allLabels.Length;
+        _results = new ListBox { DataStore = _allLabels, Height = _popupHeight - 2 };
         _textBox.TextChanged += (_, _) =>
         {
             if (_settingValue) return;
@@ -97,6 +105,10 @@ internal sealed class FilteredPicker : Panel
         Filter(showResults: false);
     }
 
+    internal bool ContainsChoice(string? label) =>
+        !string.IsNullOrWhiteSpace(label) &&
+        _allLabels.Contains(label.Trim(), StringComparer.OrdinalIgnoreCase);
+
     public new bool Enabled
     {
         get => base.Enabled;
@@ -126,6 +138,7 @@ internal sealed class FilteredPicker : Panel
             .OrderBy(label => query.Length > 0 && label.StartsWith(query, StringComparison.OrdinalIgnoreCase) ? 0 : 1)
             .ThenBy(label => label, StringComparer.OrdinalIgnoreCase)
             .ToArray();
+        _visibleResultCount = matches.Length;
         _results.DataStore = matches;
         if (showResults && Enabled && matches.Length > 0)
             ShowResults();
@@ -191,7 +204,7 @@ internal sealed class FilteredPicker : Panel
                      Screen.PrimaryScreen;
         var work = screen.WorkingArea;
         var width = Math.Max(240, Width);
-        var height = 114;
+        var height = Math.Min(_popupHeight, Math.Max(86, _visibleResultCount * 28 + 2));
         var left = (int)Math.Ceiling(work.Left);
         var top = (int)Math.Ceiling(work.Top);
         var right = (int)Math.Floor(work.Right);

@@ -45,6 +45,17 @@ public sealed class UpdateProjectInformationPlanner : IOperationPlanner<UpdatePr
             else if (!seen.Add(pair.Key.Trim()))
                 diagnostics.Add(Error("project.custom_duplicate", $"Custom project field '{pair.Key}' is duplicated."));
         }
+
+        var configured = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var option in information.TitleBlockOptions?.CustomFields ?? [])
+        {
+            if (string.IsNullOrWhiteSpace(option.Label) || !information.CustomFields.ContainsKey(option.Label))
+                diagnostics.Add(Error("project.custom_option_missing",
+                    "Every configured custom title-block field must have a matching project value."));
+            else if (!configured.Add(option.Label.Trim()))
+                diagnostics.Add(Error("project.custom_option_duplicate",
+                    $"Custom title-block field '{option.Label}' is configured more than once."));
+        }
     }
 
     private static Diagnostic Error(string code, string message) =>

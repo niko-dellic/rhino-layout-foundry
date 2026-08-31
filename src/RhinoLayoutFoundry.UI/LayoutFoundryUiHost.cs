@@ -748,7 +748,7 @@ public static class LayoutFoundryUiHost
                     sourcePageViewId,
                     name,
                     "{folder}-{index:00}",
-                    titleBlocks.Length == 1 ? titleBlocks[0].InstanceObjectId : null), snapshot);
+                    null), snapshot);
             }
             else
             {

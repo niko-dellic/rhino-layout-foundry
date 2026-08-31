@@ -134,7 +134,8 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
                 }
 
                 var resolved = ResolveTemplate(
-                    spec, templates, snapshot, request.NamedViewAssignments, diagnostics);
+                    spec, templates, snapshot, request.ProjectData ?? snapshot.ProjectInfo,
+                    request.NamedViewAssignments, diagnostics);
                 if (resolved is null)
                 {
                     continue;
@@ -216,6 +217,7 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
         LayoutCreationSpec spec,
         IReadOnlyDictionary<Guid, SheetTemplateRecipe> templates,
         DocumentSnapshot snapshot,
+        ProjectInformation projectInformation,
         IReadOnlyDictionary<Guid, string>? legacyNamedViewAssignments,
         ICollection<Diagnostic> diagnostics)
     {
@@ -296,7 +298,8 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
         {
             try
             {
-                adaptiveTitleBlock = AdaptiveTitleBlockLayoutSolver.Solve(builtInKind, spec.Paper);
+                adaptiveTitleBlock = AdaptiveTitleBlockLayoutSolver.Solve(
+                    builtInKind, spec.Paper, projectInformation);
                 titleBlock = new TitleBlockTemplateRecipe(
                     Guid.Empty,
                     $"Foundry — {AdaptiveTitleBlockLayoutSolver.Label(builtInKind)}",

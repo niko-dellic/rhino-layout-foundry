@@ -148,6 +148,12 @@ public static class LayoutPackageProjectInformationPolicy
         var custom = destination.CustomFields
             .Concat(source.CustomFields.Where(pair => !destination.CustomFields.ContainsKey(pair.Key)))
             .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
+        var destinationOptions = destination.ContentOptions;
+        var sourceOptions = source.ContentOptions;
+        var customOptions = destinationOptions.CustomFields.ToList();
+        var configuredCustomFields = customOptions.Select(item => item.Label)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        customOptions.AddRange(sourceOptions.CustomFields.Where(item => configuredCustomFields.Add(item.Label)));
         return destination with
         {
             ProjectName = Prefer(destination.ProjectName, source.ProjectName),
@@ -170,6 +176,7 @@ public static class LayoutPackageProjectInformationPolicy
             CustomFields = custom,
             Logo = destination.Logo ?? source.Logo,
             DefaultRevision = destination.DefaultRevision ?? source.DefaultRevision,
+            TitleBlockOptions = destinationOptions with { CustomFields = customOptions },
         };
     }
 }

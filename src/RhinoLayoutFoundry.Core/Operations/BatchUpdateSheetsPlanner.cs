@@ -18,7 +18,8 @@ public sealed record BatchUpdateSheetsRequest(
     bool ChangeTitleBlock = false,
     Guid? TitleBlockSourceInstanceObjectId = null,
     IReadOnlyList<SheetRevisionRecord>? ReplaceRevisionSchedule = null,
-    SheetRevisionRecord? AppendRevision = null);
+    SheetRevisionRecord? AppendRevision = null,
+    BuiltInTitleBlockKind? BuiltInTitleBlock = null);
 
 public sealed class BatchUpdateSheetsPlanner : IOperationPlanner<BatchUpdateSheetsRequest>
 {
@@ -59,6 +60,28 @@ public sealed class BatchUpdateSheetsPlanner : IOperationPlanner<BatchUpdateShee
         if (request.ChangeTitleBlock && request.TitleBlockSourceInstanceObjectId is { } sourceId &&
             !snapshot.TitleBlockInstances.ContainsKey(sourceId))
             diagnostics.Add(Error("batch.title_block_missing", "The selected title-block instance is no longer available."));
+        if (request.TitleBlockSourceInstanceObjectId is not null && request.BuiltInTitleBlock is not null)
+            diagnostics.Add(Error("batch.title_block_mode", "Choose either a built-in title block or a source instance."));
+        foreach (var id in ids.Where(snapshot.Sheets.ContainsKey))
+        {
+            var sheet = snapshot.Sheets[id];
+            var managedKind = request.ChangeTitleBlock
+                ? request.BuiltInTitleBlock
+                : changesPaper ? sheet.TitleBlockBuiltInKind : null;
+            if (managedKind is null) continue;
+            try
+            {
+                AdaptiveTitleBlockLayoutSolver.Solve(managedKind.Value, new PaperRecipe(
+                    request.PaperWidth ?? sheet.PageWidth,
+                    request.PaperHeight ?? sheet.PageHeight,
+                    request.PaperUnitSystem ?? sheet.PageUnitSystem), snapshot.ProjectInfo);
+            }
+            catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
+            {
+                diagnostics.Add(new Diagnostic("title_block.paper_too_small", DiagnosticSeverity.Error,
+                    exception.Message, id));
+            }
+        }
         if (request.ReplaceRevisionSchedule is not null && request.AppendRevision is not null)
             diagnostics.Add(Error("batch.revision_mode", "Choose either replacement or append revision editing."));
         if (request.AppendRevision is { } revision && RevisionIsEmpty(revision))
@@ -110,7 +133,8 @@ public sealed class BatchUpdateSheetsPlanner : IOperationPlanner<BatchUpdateShee
                 request.ChangeTitleBlock,
                 request.TitleBlockSourceInstanceObjectId,
                 request.ReplaceRevisionSchedule,
-                request.AppendRevision)];
+                request.AppendRevision,
+                request.BuiltInTitleBlock)];
         if (changes.Count > 0)
             diagnostics.Add(new Diagnostic("batch.undo_unavailable", DiagnosticSeverity.Warning,
                 "Rhino does not expose native Undo for these layout properties. Foundry restores every before-value if Apply fails."));

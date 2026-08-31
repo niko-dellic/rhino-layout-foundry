@@ -29,6 +29,7 @@ internal sealed class SelectionInspectorPanel : Panel
     private readonly DropDown _paperUnit = new();
     private readonly Label _paperMixed = FoundryTheme.MutedLabel("Mixed — enter a complete size to apply to all affected layouts.");
     private readonly FilteredPicker _titleBlock = new([], "Search title blocks");
+    private readonly FoundryTextSegmentedControl _titleBlockMode = new(["None", "Right", "Bottom"], 0, 72);
     private readonly FoundryCheckBox _template = new("Registered layout template");
     private readonly TextArea _revisions = new() { Height = 82, Wrap = false };
     private readonly FoundryDialogButton _revisionAction = new("Save", FoundryDialogButtonStyle.Secondary, 92);
@@ -110,10 +111,8 @@ internal sealed class SelectionInspectorPanel : Panel
                     },
                 },
                 Field("Units", InspectorField(_paperUnit)),
-                Field("Title block", _titleBlock),
+                Field("Title block", _titleBlockMode),
                 _template,
-                Field("Revisions", InspectorField(_revisions, minimumHeight: 90)),
-                _revisionAction,
                 _layoutError,
             },
         });
@@ -252,16 +251,14 @@ internal sealed class SelectionInspectorPanel : Panel
         {
             if (!_updating) _ = CommitPaperAsync();
         };
-        _titleBlock.ValueChanged += (_, _) =>
+        _titleBlockMode.SelectedIndexChanged += (_, _) =>
         {
-            if (!_updating && _titleBlockByLabel.ContainsKey(_titleBlock.Text.Trim()))
-                _ = CommitTitleBlockAsync();
+            if (!_updating) _ = CommitTitleBlockAsync();
         };
         _template.CheckedChanged += (_, _) =>
         {
             if (!_updating && _template.Checked is not null) _ = CommitTemplateAsync();
         };
-        _revisionAction.Click += (_, _) => _ = CommitRevisionsAsync();
         _displayMode.ValueChanged += (_, _) =>
         {
             if (!_updating && _displayModeByLabel.ContainsKey(_displayMode.Text.Trim()))
@@ -361,9 +358,19 @@ internal sealed class SelectionInspectorPanel : Panel
             unit => string.Equals(unit, model?.PaperUnitSystem, StringComparison.OrdinalIgnoreCase));
         _paperPreset.SelectedIndex = FindPaperPreset(model);
 
-        _titleBlockByLabel = BuildTitleBlockChoices(snapshot);
-        _titleBlock.SetChoices(_titleBlockByLabel.Keys);
-        _titleBlock.Text = TitleBlockText(model, snapshot);
+        var titleBlockModes = model?.AffectedLayoutIds
+            .Select(id => snapshot?.Sheets.GetValueOrDefault(id))
+            .Where(sheet => sheet is not null)
+            .Cast<SheetSnapshot>()
+            .Select(TitleBlockModeIndex)
+            .Distinct()
+            .ToArray() ?? [];
+        _titleBlockMode.SelectedIndex = titleBlockModes.Length == 1 && titleBlockModes[0] >= 0
+            ? titleBlockModes[0]
+            : 0;
+        _titleBlockMode.ToolTip = titleBlockModes.Contains(-1)
+            ? "A legacy custom title block is present. Choosing a mode replaces it."
+            : titleBlockModes.Length > 1 ? "The selected layouts use mixed title-block modes." : null;
         _template.Visible = model?.TemplateRegistered is not null;
         _template.Checked = model?.TemplateRegistered;
         var layouts = model?.AffectedLayoutIds.Select(id => snapshot?.Sheets.GetValueOrDefault(id))
@@ -446,16 +453,21 @@ internal sealed class SelectionInspectorPanel : Panel
 
     private async Task CommitTitleBlockAsync()
     {
-        if (_snapshot is null || _model is null ||
-            !_titleBlockByLabel.TryGetValue(_titleBlock.Text.Trim(), out var sourceId)) return;
+        if (_snapshot is null || _model is null) return;
         var ids = _model.AffectedLayoutIds.ToArray();
+        var builtIn = _titleBlockMode.SelectedIndex switch
+        {
+            1 => BuiltInTitleBlockKind.RightSidebar,
+            2 => BuiltInTitleBlockKind.FullWidthBottom,
+            _ => (BuiltInTitleBlockKind?)null,
+        };
         await RunAsync(_layoutSection, _layoutError,
             () => LayoutFoundryUiHost.BatchUpdateSheetsAsync(new BatchUpdateSheetsRequest(
                 _snapshot.DocumentRuntimeSerialNumber, _snapshot.Revision, ids,
                 null, 1, 1, null, null, null, null,
                 ChangeTitleBlock: true,
-                TitleBlockSourceInstanceObjectId: sourceId)),
-            sourceId is null ? "Title blocks removed." : "Title blocks assigned.");
+                BuiltInTitleBlock: builtIn)),
+            builtIn is null ? "Title blocks removed." : "Title-block mode updated.");
     }
 
     private async Task CommitTemplateAsync()
@@ -699,6 +711,17 @@ internal sealed class SelectionInspectorPanel : Panel
             Math.Abs(choice.Height - model.PaperHeight.GetValueOrDefault()) < 0.001 &&
             string.Equals(choice.UnitSystem, model.PaperUnitSystem, StringComparison.OrdinalIgnoreCase));
         return index >= 0 ? index + 1 : 0;
+    }
+
+    private static int TitleBlockModeIndex(SheetSnapshot sheet)
+    {
+        if (sheet.TitleBlockInstanceObjectId is null) return 0;
+        return sheet.TitleBlockBuiltInKind switch
+        {
+            BuiltInTitleBlockKind.FullWidthBottom => 2,
+            not null => 1,
+            _ => -1,
+        };
     }
 
     private static Dictionary<string, Guid?> BuildTitleBlockChoices(DocumentSnapshot? snapshot)
