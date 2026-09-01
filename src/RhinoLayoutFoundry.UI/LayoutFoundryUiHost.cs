@@ -15,12 +15,14 @@ public static class LayoutFoundryUiHost
     private static IDocumentMutationService? _mutationService;
     private static IDocumentOverviewNavigationService? _navigationService;
     private static ILayoutPdfExportService? _pdfExportService;
+    private static ILayoutPrintDialogService? _printDialogService;
     private static ILayoutPackageService? _layoutPackageService;
     private static IDocumentThumbnailProvider? _thumbnailProvider;
     private static INamedViewThumbnailProvider? _namedViewThumbnailProvider;
     private static IMutationCapabilityProvider? _capabilityProvider;
     private static ITemplateCaptureContextProvider? _templateCaptureContextProvider;
     private static IDocumentObserverSnapshotProvider? _observerSnapshotProvider;
+    private static IModelObjectSelectionService? _modelObjectSelectionService;
     private static Image? _projectIcon;
     private static EventHandler<OverviewInvalidationEventArgs>? _overviewChanged;
     private static readonly DocumentSelectionState SharedSelection = new();
@@ -37,12 +39,14 @@ public static class LayoutFoundryUiHost
         IDocumentMutationService mutationService,
         IDocumentOverviewNavigationService navigationService,
         ILayoutPdfExportService pdfExportService,
+        ILayoutPrintDialogService printDialogService,
         ILayoutPackageService layoutPackageService,
         IDocumentThumbnailProvider thumbnailProvider,
         INamedViewThumbnailProvider namedViewThumbnailProvider,
         IMutationCapabilityProvider capabilityProvider,
         ITemplateCaptureContextProvider templateCaptureContextProvider,
         IDocumentObserverSnapshotProvider observerSnapshotProvider,
+        IModelObjectSelectionService modelObjectSelectionService,
         Image? projectIcon = null)
     {
         _overviewProvider = overviewProvider ?? throw new ArgumentNullException(nameof(overviewProvider));
@@ -50,6 +54,7 @@ public static class LayoutFoundryUiHost
         _mutationService = mutationService ?? throw new ArgumentNullException(nameof(mutationService));
         _navigationService = navigationService ?? throw new ArgumentNullException(nameof(navigationService));
         _pdfExportService = pdfExportService ?? throw new ArgumentNullException(nameof(pdfExportService));
+        _printDialogService = printDialogService ?? throw new ArgumentNullException(nameof(printDialogService));
         _layoutPackageService = layoutPackageService ?? throw new ArgumentNullException(nameof(layoutPackageService));
         _thumbnailProvider = thumbnailProvider ?? throw new ArgumentNullException(nameof(thumbnailProvider));
         _namedViewThumbnailProvider = namedViewThumbnailProvider ??
@@ -59,6 +64,8 @@ public static class LayoutFoundryUiHost
             throw new ArgumentNullException(nameof(templateCaptureContextProvider));
         _observerSnapshotProvider = observerSnapshotProvider ??
             throw new ArgumentNullException(nameof(observerSnapshotProvider));
+        _modelObjectSelectionService = modelObjectSelectionService ??
+            throw new ArgumentNullException(nameof(modelObjectSelectionService));
         _projectIcon?.Dispose();
         _projectIcon = projectIcon;
         NotifyOverviewChanged(OverviewInvalidation.All);
@@ -197,6 +204,14 @@ public static class LayoutFoundryUiHost
                    false,
                    0,
                    "Foundry is not connected to a PDF export service."));
+    }
+
+    public static OverviewNavigationResult ShowPrintDialog(LayoutPrintDialogRequest request)
+    {
+        return _printDialogService?.Show(request) ??
+               new OverviewNavigationResult(
+                   false,
+                   "Foundry is not connected to Rhino's print dialog.");
     }
 
     public static Task<LayoutPackageExportResult> ExportLayoutPackageAsync(
@@ -898,6 +913,7 @@ public static class LayoutFoundryUiHost
         string name,
         IReadOnlyList<LayerVisibilityRule>? layerRules = null,
         IReadOnlyList<ObjectDisplayRule>? objectRules = null,
+        string notes = "",
         CancellationToken cancellationToken = default)
     {
         if (_snapshotProvider is null || _mutationService is null)
@@ -911,7 +927,8 @@ public static class LayoutFoundryUiHost
                 folderId,
                 name,
                 layerRules,
-                objectRules), snapshot);
+                objectRules,
+                notes), snapshot);
             var result = plan.CanApply
                 ? await _mutationService.ApplyAsync(plan, cancellationToken)
                 : new OperationResult(false, plan.Diagnostics);
@@ -929,6 +946,7 @@ public static class LayoutFoundryUiHost
         string? name = null,
         IReadOnlyList<LayerVisibilityRule>? layerRules = null,
         IReadOnlyList<ObjectDisplayRule>? objectRules = null,
+        string? notes = null,
         CancellationToken cancellationToken = default)
     {
         if (_snapshotProvider is null || _mutationService is null)
@@ -938,7 +956,7 @@ public static class LayoutFoundryUiHost
             var snapshot = _snapshotProvider.Capture();
             var plan = new UpdateAppearanceStatePlanner().Plan(new UpdateAppearanceStateRequest(
                 snapshot.DocumentRuntimeSerialNumber, snapshot.Revision, stateId,
-                Name: name, LayerRules: layerRules, ObjectDisplayRules: objectRules), snapshot);
+                Name: name, LayerRules: layerRules, ObjectDisplayRules: objectRules, Notes: notes), snapshot);
             var result = plan.CanApply
                 ? await _mutationService.ApplyAsync(plan, cancellationToken)
                 : new OperationResult(false, plan.Diagnostics);
@@ -979,6 +997,20 @@ public static class LayoutFoundryUiHost
         catch (InvalidOperationException exception)
         {
             return UnavailableResult(exception.Message);
+        }
+    }
+
+    public static ModelObjectSelectionResult PickModelObjects()
+    {
+        try
+        {
+            return _modelObjectSelectionService?.PickObjects() ??
+                   new ModelObjectSelectionResult(
+                       false, false, [], "Foundry is not connected to Rhino object selection.");
+        }
+        catch (Exception exception)
+        {
+            return new ModelObjectSelectionResult(false, false, [], exception.Message);
         }
     }
 
@@ -1461,12 +1493,14 @@ public static class LayoutFoundryUiHost
         _mutationService = null;
         _navigationService = null;
         _pdfExportService = null;
+        _printDialogService = null;
         _layoutPackageService = null;
         _thumbnailProvider = null;
         _namedViewThumbnailProvider = null;
         _capabilityProvider = null;
         _templateCaptureContextProvider = null;
         _observerSnapshotProvider = null;
+        _modelObjectSelectionService = null;
         _projectIcon?.Dispose();
         _projectIcon = null;
         _overviewChanged = null;

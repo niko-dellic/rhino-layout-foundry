@@ -376,6 +376,25 @@ public sealed class DocumentStateSerializerTests
     }
 
     [Fact]
+    public void VersionTwelveAppearanceStatesGainEmptyNotes()
+    {
+        var appearanceState = new AppearanceStateRecord(
+            Guid.NewGuid(), WellKnownIds.UnorganizedFolderId, 0, "Existing state", [], []);
+        var payload = DocumentStateSerializer.Serialize(DocumentState.Empty() with
+            {
+                AppearanceStateResources = [appearanceState],
+            })
+            .Replace($"\"SchemaVersion\":{DocumentState.CurrentSchemaVersion}", "\"SchemaVersion\":12",
+                StringComparison.Ordinal)
+            .Replace(",\"Notes\":\"\"", string.Empty, StringComparison.Ordinal);
+
+        var restored = DocumentStateSerializer.Deserialize(payload);
+
+        Assert.Equal(DocumentState.CurrentSchemaVersion, restored.SchemaVersion);
+        Assert.Equal(string.Empty, Assert.Single(restored.AppearanceStates).Notes);
+    }
+
+    [Fact]
     public void InvalidJsonIsRejected()
     {
         Assert.Throws<JsonException>(() => DocumentStateSerializer.Deserialize("{not-json}"));

@@ -24,8 +24,11 @@ internal sealed class AppearanceRulesTable : Panel
     private RuleTarget? _editingTarget;
     private FilteredPicker? _activePicker;
     private RuleTarget? _armedPropertyTarget;
+    private RuleTarget? _handledPropertyTarget;
     private RuleTarget[] _propertyTargets = [];
     private RuleTarget[] _editingTargets = [];
+    private readonly HashSet<RuleTarget> _pickedTargets = [];
+    private readonly Dictionary<RuleTarget, AppearanceVisibilityCell> _visibilityCells = [];
 
     internal AppearanceRulesTable(
         DocumentSnapshot snapshot,
@@ -50,7 +53,7 @@ internal sealed class AppearanceRulesTable : Panel
             popupHeight: 280);
         _bulkDisplayMode.Text = Inherit;
         _bulkDisplayMode.SelectionCommitted += (_, _) =>
-            ApplyDisplayMode(SelectedRows().Select(row => row.Target), _bulkDisplayMode.Text);
+            ApplyDisplayMode(SelectedTargets(), _bulkDisplayMode.Text);
 
         _tree = new TreeGridView
         {
@@ -58,9 +61,9 @@ internal sealed class AppearanceRulesTable : Panel
             AllowEmptySelection = true,
             AllowColumnReordering = false,
             ShowHeader = true,
-            RowHeight = 27,
+            RowHeight = 24,
             GridLines = GridLines.None,
-            BackgroundColor = FoundryTheme.CanvasOverlayBackground,
+            BackgroundColor = FoundryTheme.ContentBackground,
         };
         _tree.Columns.Add(new GridColumn
         {
@@ -74,7 +77,7 @@ internal sealed class AppearanceRulesTable : Panel
         _visibilityColumn = new GridColumn
         {
             HeaderText = "Visibility",
-            DataCell = new TextBoxCell(nameof(AppearanceRow.VisibilityText)),
+            DataCell = CreateVisibilityCell(),
             Width = 96,
         };
         _tree.Columns.Add(_visibilityColumn);
@@ -85,23 +88,24 @@ internal sealed class AppearanceRulesTable : Panel
             Width = 190,
         };
         _tree.Columns.Add(_displayModeColumn);
-        _tree.Columns.Add(new GridColumn
-        {
-            HeaderText = "Status",
-            DataCell = new TextBoxCell(nameof(AppearanceRow.StatusText)),
-            Width = 180,
-        });
         _tree.CellFormatting += OnCellFormatting;
         _tree.MouseDown += OnMouseDown;
         _tree.CellClick += OnCellClick;
-        _search.TextChanged += (_, _) => Reload();
+        _search.TextChanged += (_, _) =>
+        {
+            _pickedTargets.Clear();
+            Reload();
+        };
 
-        var inherit = new FoundryDialogButton(Inherit, FoundryDialogButtonStyle.Secondary, 82);
-        var on = new FoundryDialogButton("On", FoundryDialogButtonStyle.Secondary, 60);
-        var off = new FoundryDialogButton("Off", FoundryDialogButtonStyle.Secondary, 60);
-        inherit.Click += (_, _) => ApplyVisibility(null);
+        var on = new FoundryToolbarIconButton(
+            FoundryViewIcons.VisibilityOn(), "Set selected layers On");
+        var off = new FoundryToolbarIconButton(
+            FoundryViewIcons.VisibilityOff(), "Set selected layers Off");
+        var pickObjects = new FoundryToolbarIconButton(
+            FoundryViewIcons.SceneCursor(), "Pick objects from the Rhino viewport");
         on.Click += (_, _) => ApplyVisibility(LayerVisibilityOverride.Visible);
         off.Click += (_, _) => ApplyVisibility(LayerVisibilityOverride.Hidden);
+        pickObjects.Click += (_, _) => PickObjectsRequested?.Invoke(this, EventArgs.Empty);
 
         Content = new StackLayout
         {
@@ -118,9 +122,10 @@ internal sealed class AppearanceRulesTable : Panel
                     VerticalContentAlignment = VerticalAlignment.Center,
                     Items =
                     {
-                        inherit,
                         on,
                         off,
+                        FoundryTheme.VerticalRule(),
+                        pickObjects,
                         FoundryTheme.VerticalRule(),
                         new StackLayoutItem(_bulkDisplayMode, true),
                     },
@@ -129,6 +134,28 @@ internal sealed class AppearanceRulesTable : Panel
         };
         Reload();
     }
+
+    private CustomCell CreateVisibilityCell() => new()
+    {
+        CreateCell = _ => new AppearanceVisibilityCell
+        {
+            Font = FoundryTheme.HierarchyTableFont,
+            TextAlignment = TextAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+        },
+        ConfigureCell = (args, control) =>
+        {
+            if (args.Item is not AppearanceRow row || control is not AppearanceVisibilityCell cell)
+                return;
+            cell.Target = row.Target;
+            cell.Text = row.VisibilityText;
+            var selected = _pickedTargets.Contains(row.Target) ||
+                           args.CellState.HasFlag(CellStates.Selected);
+            cell.BackgroundColor = RowBackground(args.Row, selected);
+            cell.TextColor = selected ? SystemColors.SelectionText : args.CellTextColor;
+            _visibilityCells[row.Target] = cell;
+        },
+    };
 
     internal IReadOnlyList<LayerVisibilityRule> LayerRules => _visibility
         .Where(pair => _snapshot.LayerSnapshots.ContainsKey(pair.Key))
@@ -142,6 +169,40 @@ internal sealed class AppearanceRulesTable : Panel
         .ThenBy(rule => rule.Selector.LayerFullPath, StringComparer.OrdinalIgnoreCase)
         .ThenBy(rule => rule.Selector.ObjectId)
         .ToArray();
+
+    internal event EventHandler? PickObjectsRequested;
+
+    internal void SelectObjects(IEnumerable<Guid> objectIds)
+    {
+        ArgumentNullException.ThrowIfNull(objectIds);
+        var targets = objectIds.Distinct()
+            .Select(id => new RuleTarget(RuleTargetKind.Object, id))
+            .Where(target => _snapshot.ModelObjects.ContainsKey(target.Id))
+            .ToHashSet();
+        if (targets.Count == 0) return;
+
+        if (_search.Text.Length > 0)
+        {
+            _search.Text = string.Empty;
+            Reload();
+        }
+        _pickedTargets.Clear();
+        _pickedTargets.UnionWith(targets);
+
+        bool ExpandToPicked(AppearanceRow row)
+        {
+            var contains = _pickedTargets.Contains(row.Target);
+            foreach (var child in row.Children.OfType<AppearanceRow>())
+                contains |= ExpandToPicked(child);
+            if (contains && row.IsLayer) row.Expanded = true;
+            return contains;
+        }
+
+        foreach (var root in _roots) ExpandToPicked(root);
+        _tree.ReloadData();
+        var first = Flatten(_roots).FirstOrDefault(row => _pickedTargets.Contains(row.Target));
+        if (first is not null) _tree.SelectedItem = first;
+    }
 
     private CustomCell CreateDisplayModeCell()
     {
@@ -173,7 +234,11 @@ internal sealed class AppearanceRulesTable : Panel
                     return picker;
                 }
 
-                return new Label { VerticalAlignment = VerticalAlignment.Center };
+                return new Label
+                {
+                    Font = FoundryTheme.HierarchyTableFont,
+                    VerticalAlignment = VerticalAlignment.Center,
+                };
             },
             ConfigureCell = (args, control) =>
             {
@@ -181,7 +246,10 @@ internal sealed class AppearanceRulesTable : Panel
                 if (control is Label label)
                 {
                     label.Text = row.DisplayModeText;
-                    label.TextColor = args.CellTextColor;
+                    var selected = _pickedTargets.Contains(row.Target) ||
+                                   args.CellState.HasFlag(CellStates.Selected);
+                    label.BackgroundColor = RowBackground(args.Row, selected);
+                    label.TextColor = selected ? SystemColors.SelectionText : args.CellTextColor;
                     return;
                 }
 
@@ -195,18 +263,24 @@ internal sealed class AppearanceRulesTable : Panel
     private void OnCellFormatting(object? sender, GridCellFormatEventArgs args)
     {
         if (args.Item is not AppearanceRow row) return;
+        args.Font = FoundryTheme.HierarchyTableFont;
         if (row.IsObject && ReferenceEquals(args.Column, _visibilityColumn))
             args.ForegroundColor = FoundryTheme.MutedText;
-        if (_tree.SelectedItems.OfType<AppearanceRow>().Any(item => item.Target == row.Target))
+        if (_pickedTargets.Contains(row.Target) ||
+            _tree.SelectedItems.OfType<AppearanceRow>().Any(item => item.Target == row.Target))
         {
             args.BackgroundColor = SystemColors.Selection;
             args.ForegroundColor = SystemColors.SelectionText;
         }
-        else if (row.IsLayer)
-        {
-            args.BackgroundColor = FoundryTheme.HierarchyFolderBackground;
-        }
+        else
+            args.BackgroundColor = RowBackground(args.Row, selected: false);
     }
+
+    private static Color RowBackground(int row, bool selected) => selected
+        ? SystemColors.Selection
+        : row % 2 == 0
+            ? FoundryTheme.ContentBackground
+            : FoundryTheme.HierarchyAlternateRowBackground;
 
     private void OnMouseDown(object? sender, MouseEventArgs args)
     {
@@ -216,14 +290,39 @@ internal sealed class AppearanceRulesTable : Panel
         if (cell.Item is not AppearanceRow row || cell.Column is null ||
             !ReferenceEquals(cell.Column, _visibilityColumn) &&
             !ReferenceEquals(cell.Column, _displayModeColumn)) return;
-        var selected = SelectedRows().Select(item => item.Target).ToArray();
+        var selected = _pickedTargets.Contains(row.Target)
+            ? _pickedTargets.ToArray()
+            : SelectedRows().Select(item => item.Target).ToArray();
         _propertyTargets = selected.Contains(row.Target) ? selected : [row.Target];
+        if (!selected.Contains(row.Target)) return;
+
+        // A native tree normally collapses a multi-selection to the clicked row
+        // on mouse-up. Property cells operate on the existing selection, so own
+        // this click before the native selection gesture can run.
+        args.Handled = true;
+        _handledPropertyTarget = row.Target;
+        var wasArmed = _armedPropertyTarget == row.Target;
+        _armedPropertyTarget = row.Target;
+        if (wasArmed) ActivateProperty(row, cell.Column, _propertyTargets);
+        Application.Instance.AsyncInvoke(() => _handledPropertyTarget = null);
     }
 
     private void OnCellClick(object? sender, GridCellMouseEventArgs args)
     {
         if ((args.Buttons & MouseButtons.Primary) == 0 || args.Item is not AppearanceRow row)
             return;
+
+        if (_handledPropertyTarget == row.Target)
+        {
+            _handledPropertyTarget = null;
+            return;
+        }
+
+        if (_pickedTargets.Count > 0 && !_pickedTargets.Contains(row.Target))
+        {
+            _pickedTargets.Clear();
+            _tree.ReloadData();
+        }
 
         if (args.Modifiers != Keys.None)
         {
@@ -243,39 +342,40 @@ internal sealed class AppearanceRulesTable : Panel
         _armedPropertyTarget = row.Target;
         if (!wasArmed) return;
 
-        if (ReferenceEquals(args.GridColumn, _visibilityColumn))
+        ActivateProperty(row, args.GridColumn, _propertyTargets);
+    }
+
+    private void ActivateProperty(
+        AppearanceRow row,
+        GridColumn column,
+        IEnumerable<RuleTarget> targets)
+    {
+        if (ReferenceEquals(column, _visibilityColumn))
         {
             if (row.IsObject) return;
-            var inherit = new ButtonMenuItem { Text = Inherit };
-            var on = new ButtonMenuItem { Text = "On" };
-            var off = new ButtonMenuItem { Text = "Off" };
-            var targets = _propertyTargets.ToArray();
-            inherit.Click += (_, _) => ApplyVisibility(null, targets);
-            on.Click += (_, _) => ApplyVisibility(LayerVisibilityOverride.Visible, targets);
-            off.Click += (_, _) => ApplyVisibility(LayerVisibilityOverride.Hidden, targets);
-            new ContextMenu(inherit, on, off).Show(_tree, args.Location);
+            var next = row.VisibilityText == "○"
+                ? LayerVisibilityOverride.Visible
+                : LayerVisibilityOverride.Hidden;
+            ApplyVisibility(next, targets);
             return;
         }
 
-        if (!ReferenceEquals(args.GridColumn, _displayModeColumn)) return;
+        if (!ReferenceEquals(column, _displayModeColumn)) return;
         _editingTarget = row.Target;
-        _editingTargets = _propertyTargets.ToArray();
+        _editingTargets = targets.ToArray();
         _activePicker = null;
         _tree.ReloadItem(row, reloadChildren: false);
         Application.Instance.AsyncInvoke(() => _activePicker?.OpenResults());
     }
 
-    private void ApplyVisibility(LayerVisibilityOverride? value, IEnumerable<RuleTarget>? targets = null)
+    private void ApplyVisibility(LayerVisibilityOverride value, IEnumerable<RuleTarget>? targets = null)
     {
-        var layerIds = (targets ?? SelectedRows().Select(row => row.Target))
+        var layerIds = (targets ?? SelectedTargets())
             .Where(target => target.Kind == RuleTargetKind.Layer)
             .Select(target => target.Id)
             .Distinct();
         foreach (var layerId in layerIds)
-        {
-            if (value is { } authored) _visibility[layerId] = authored;
-            else _visibility.Remove(layerId);
-        }
+            _visibility[layerId] = value;
         RefreshVisibleRows();
     }
 
@@ -319,6 +419,10 @@ internal sealed class AppearanceRulesTable : Panel
         .OfType<AppearanceRow>()
         .ToArray();
 
+    private IReadOnlyList<RuleTarget> SelectedTargets() => _pickedTargets.Count > 0
+        ? _pickedTargets.ToArray()
+        : SelectedRows().Select(row => row.Target).ToArray();
+
     private void Reload()
     {
         var expanded = Flatten(_roots).Where(row => row.Expanded)
@@ -340,8 +444,8 @@ internal sealed class AppearanceRulesTable : Panel
             var target = new RuleTarget(RuleTargetKind.Layer, layer.Id);
             var hiddenBy = hiddenAncestors.FirstOrDefault();
             var nextHidden = hiddenAncestors.ToList();
-            if (_visibility.TryGetValue(layer.Id, out var authoredVisibility) &&
-                authoredVisibility == LayerVisibilityOverride.Hidden)
+            var ownVisible = IsLayerOn(layer);
+            if (!ownVisible)
                 nextHidden.Add(layer.FullPath);
             var children = new List<AppearanceRow>();
             if (childrenByLayer.TryGetValue(layer.Id, out var childLayers))
@@ -361,8 +465,7 @@ internal sealed class AppearanceRulesTable : Panel
                         item.LayerFullPath,
                         isLayer: false,
                         "—",
-                        _displayRules.GetValueOrDefault(objectTarget)?.DisplayModeName ?? Inherit,
-                        nextHidden.Count == 0 ? string.Empty : $"Hidden by {nextHidden[0]}"));
+                        _displayRules.GetValueOrDefault(objectTarget)?.DisplayModeName ?? Inherit));
                 }
             var matches = query.Length == 0 ||
                 layer.FullPath.Contains(query, StringComparison.OrdinalIgnoreCase);
@@ -372,14 +475,8 @@ internal sealed class AppearanceRulesTable : Panel
                 LayerName(layer.FullPath),
                 layer.FullPath,
                 isLayer: true,
-                _visibility.TryGetValue(layer.Id, out authoredVisibility) ? authoredVisibility switch
-                {
-                    LayerVisibilityOverride.Visible => "On",
-                    LayerVisibilityOverride.Hidden => "Off",
-                    _ => Inherit,
-                } : Inherit,
-                _displayRules.GetValueOrDefault(target)?.DisplayModeName ?? Inherit,
-                hiddenBy is null ? string.Empty : $"Hidden by {hiddenBy}");
+                VisibilityGlyph(ownVisible, hiddenBy is not null),
+                _displayRules.GetValueOrDefault(target)?.DisplayModeName ?? Inherit);
             foreach (var child in children) row.Children.Add(child);
             row.Expanded = query.Length > 0 || expanded.Contains(target);
             return row;
@@ -396,32 +493,38 @@ internal sealed class AppearanceRulesTable : Panel
 
     private void RefreshVisibleRows()
     {
+        var changedDisplayRows = new List<AppearanceRow>();
+
         void Refresh(AppearanceRow row, IReadOnlyList<string> hiddenAncestors)
         {
+            var previousVisibility = row.VisibilityText;
+            var previousDisplayMode = row.DisplayModeText;
             if (row.IsLayer)
             {
-                row.VisibilityText = _visibility.TryGetValue(row.Target.Id, out var authoredVisibility)
-                    ? authoredVisibility switch
-                {
-                    LayerVisibilityOverride.Visible => "On",
-                    LayerVisibilityOverride.Hidden => "Off",
-                    _ => Inherit,
-                }
-                    : Inherit;
+                var layer = _snapshot.LayerSnapshots[row.Target.Id];
+                row.VisibilityText = VisibilityGlyph(IsLayerOn(layer), hiddenAncestors.Count > 0);
             }
             row.DisplayModeText = _displayRules.GetValueOrDefault(row.Target)?.DisplayModeName ?? Inherit;
-            row.StatusText = hiddenAncestors.Count == 0 ? string.Empty : $"Hidden by {hiddenAncestors[0]}";
+            if (!string.Equals(previousVisibility, row.VisibilityText, StringComparison.Ordinal) &&
+                _visibilityCells.GetValueOrDefault(row.Target) is { } visibilityCell &&
+                visibilityCell.Target == row.Target)
+            {
+                visibilityCell.Text = row.VisibilityText;
+                visibilityCell.Invalidate();
+            }
+            if (!string.Equals(previousDisplayMode, row.DisplayModeText, StringComparison.Ordinal))
+                changedDisplayRows.Add(row);
 
             var nextHidden = hiddenAncestors.ToList();
-            if (row.IsLayer && _visibility.TryGetValue(row.Target.Id, out var childVisibility) &&
-                childVisibility == LayerVisibilityOverride.Hidden)
+            if (row.IsLayer && !IsLayerOn(_snapshot.LayerSnapshots[row.Target.Id]))
                 nextHidden.Add(row.FullPath);
             foreach (var child in row.Children.OfType<AppearanceRow>())
                 Refresh(child, nextHidden);
         }
 
         foreach (var root in _roots) Refresh(root, []);
-        _tree.ReloadData();
+        foreach (var row in changedDisplayRows)
+            _tree.ReloadItem(row, reloadChildren: false);
     }
 
     private static string LayerName(string path)
@@ -429,6 +532,14 @@ internal sealed class AppearanceRulesTable : Panel
         var index = path.LastIndexOf("::", StringComparison.Ordinal);
         return index >= 0 ? path[(index + 2)..] : path;
     }
+
+    private bool IsLayerOn(LayerSnapshot layer) =>
+        _visibility.TryGetValue(layer.Id, out var authoredVisibility)
+            ? authoredVisibility == LayerVisibilityOverride.Visible
+            : layer.IsGloballyVisible;
+
+    private static string VisibilityGlyph(bool ownVisible, bool hiddenByAncestor) =>
+        !ownVisible ? "○" : hiddenByAncestor ? "◐" : "●";
 
     private static IEnumerable<AppearanceRow> Flatten(IEnumerable<AppearanceRow> roots)
     {
@@ -455,17 +566,20 @@ internal sealed class AppearanceRulesTable : Panel
         string fullPath,
         bool isLayer,
         string visibilityText,
-        string displayModeText,
-        string statusText) : TreeGridItem
+        string displayModeText) : TreeGridItem
     {
         internal RuleTarget Target { get; } = target;
         public string ItemText { get; } = itemText;
         internal string FullPath { get; } = fullPath;
-        public Image Icon => IsLayer ? FoundryHierarchyIcons.Folder : FoundryHierarchyIcons.Object;
+        public Image Icon => IsLayer ? FoundryHierarchyIcons.Layer : FoundryHierarchyIcons.Object;
         public bool IsLayer { get; } = isLayer;
         public bool IsObject => !IsLayer;
         public string VisibilityText { get; set; } = visibilityText;
         public string DisplayModeText { get; set; } = displayModeText;
-        public string StatusText { get; set; } = statusText;
+    }
+
+    private sealed class AppearanceVisibilityCell : Label
+    {
+        internal RuleTarget Target { get; set; }
     }
 }

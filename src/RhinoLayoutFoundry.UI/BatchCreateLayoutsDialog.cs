@@ -447,7 +447,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         {
             editor.Items.Add(SectionLabel("Detail layout"));
             editor.Items.Add(new Panel { Width = 280, Content = _layoutPickerTrigger });
-            editor.Items.Add(SectionLabel("Appearance state"));
+            editor.Items.Add(SectionLabel("Appearance State"));
             editor.Items.Add(new StackLayout
             {
                 Spacing = FoundryTheme.Space2,
@@ -561,7 +561,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         grid.Columns.Add(TextColumn("Detail layer", row => row.DetailLayer, 105));
         grid.Columns.Add(TextColumn("Display mode", row => row.DisplayMode, 150, true));
         grid.Columns.Add(TextColumn("Title block", row => row.TitleBlock, 160, true));
-        grid.Columns.Add(TextColumn("Appearance state", row => row.AppearanceState, 170, true));
+        grid.Columns.Add(TextColumn("Appearance State", row => row.AppearanceState, 170, true));
         grid.CellFormatting += (_, eventArgs) =>
         {
             if (grid.SelectedRows.Contains(eventArgs.Row))

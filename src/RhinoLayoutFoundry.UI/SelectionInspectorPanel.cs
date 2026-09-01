@@ -761,11 +761,11 @@ internal sealed class SelectionInspectorPanel : Panel
         }
 
         var first = _snapshot.AppearanceRules.LastOrDefault(item => item.Scope == scopes[0]);
-        var dialog = new LocalAppearanceRulesDialog(
+        var dialog = LocalAppearanceRulesDialog.ShowWithViewportPicking(
+            ParentWindow,
             _snapshot,
             first?.LayerRules ?? [],
             first?.ObjectDisplayRules ?? []);
-        dialog.ShowModal(ParentWindow);
         if (!dialog.Accepted) return;
         await RunAsync(
             _appearanceSection,

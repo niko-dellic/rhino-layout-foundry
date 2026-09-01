@@ -210,7 +210,8 @@ public sealed record CreateAppearanceStateRequest(
     Guid FolderId,
     string Name,
     IReadOnlyList<LayerVisibilityRule>? LayerRules = null,
-    IReadOnlyList<ObjectDisplayRule>? ObjectDisplayRules = null);
+    IReadOnlyList<ObjectDisplayRule>? ObjectDisplayRules = null,
+    string Notes = "");
 
 public sealed class CreateAppearanceStatePlanner : IOperationPlanner<CreateAppearanceStateRequest>
 {
@@ -262,7 +263,8 @@ public sealed class CreateAppearanceStatePlanner : IOperationPlanner<CreateAppea
             order,
             name,
             layerRules,
-            objectRules);
+            objectRules,
+            request.Notes.Trim());
         return new OperationPlan(snapshot.DocumentRuntimeSerialNumber, snapshot.Revision,
             $"Create {name}",
             diagnostics.Any(item => item.Severity == DiagnosticSeverity.Error)
@@ -279,7 +281,8 @@ public sealed record UpdateAppearanceStateRequest(
     string? Name = null,
     Guid? FolderId = null,
     IReadOnlyList<LayerVisibilityRule>? LayerRules = null,
-    IReadOnlyList<ObjectDisplayRule>? ObjectDisplayRules = null);
+    IReadOnlyList<ObjectDisplayRule>? ObjectDisplayRules = null,
+    string? Notes = null);
 
 public sealed class UpdateAppearanceStatePlanner : IOperationPlanner<UpdateAppearanceStateRequest>
 {
@@ -343,6 +346,7 @@ public sealed class UpdateAppearanceStatePlanner : IOperationPlanner<UpdateAppea
             Name = name,
             LayerRules = layerRules,
             ObjectDisplayRules = objectRules,
+            Notes = request.Notes?.Trim() ?? current.Notes,
         };
         return new OperationPlan(snapshot.DocumentRuntimeSerialNumber, snapshot.Revision,
             $"Update {current.Name}",

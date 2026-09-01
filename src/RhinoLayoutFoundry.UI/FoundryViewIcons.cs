@@ -145,12 +145,65 @@ internal static class FoundryViewIcons
         graphics.DrawEllipse(new Pen(color, Emphasis), 9.75f, 10.25f, 4, 4);
     });
 
+    internal static Icon SceneCursor() => NewIcon(graphics =>
+    {
+        var color = FoundryTheme.PrimaryText;
+        var pen = new Pen(color, Emphasis);
+        graphics.DrawLines(pen,
+        [
+            new PointF(2.25f, 5), new PointF(2.25f, 2.25f), new PointF(5, 2.25f),
+        ]);
+        graphics.DrawLines(pen,
+        [
+            new PointF(11, 2.25f), new PointF(13.75f, 2.25f), new PointF(13.75f, 5),
+        ]);
+        graphics.DrawLines(pen,
+        [
+            new PointF(13.75f, 11), new PointF(13.75f, 13.75f), new PointF(11, 13.75f),
+        ]);
+        graphics.DrawLines(pen,
+        [
+            new PointF(5, 13.75f), new PointF(2.25f, 13.75f), new PointF(2.25f, 11),
+        ]);
+        graphics.DrawPolygon(pen,
+        [
+            new PointF(6.1f, 5.15f),
+            new PointF(6.1f, 11.3f),
+            new PointF(7.7f, 9.75f),
+            new PointF(9.05f, 12.8f),
+            new PointF(10.35f, 12.2f),
+            new PointF(9.05f, 9.25f),
+            new PointF(11.25f, 9.25f),
+        ]);
+    });
+
+    internal static Icon VisibilityOn() => VisibilityCircle(fill: true, half: false);
+
+    internal static Icon VisibilityOff() => VisibilityCircle(fill: false, half: false);
+
     internal static Icon NewLayout() => NewIcon(graphics =>
     {
         var color = FoundryTheme.PrimaryText;
         graphics.DrawRectangle(new Pen(color, Emphasis), 1.5f, 3.5f, 9, 10.5f);
         graphics.DrawRectangle(new Pen(color, Hairline), 3.5f, 6, 5, 5.5f);
         DrawPlus(graphics, color, 12.5f, 3.5f);
+    });
+
+    private static Icon VisibilityCircle(bool fill, bool half) => NewIcon(graphics =>
+    {
+        var color = FoundryTheme.PrimaryText;
+        if (fill) graphics.FillEllipse(color, 3, 3, 10, 10);
+        else graphics.DrawEllipse(new Pen(color, Emphasis), 3, 3, 10, 10);
+        if (!half) return;
+        graphics.FillPolygon(color,
+        [
+            new PointF(8, 3),
+            new PointF(4.5f, 4.5f),
+            new PointF(3, 8),
+            new PointF(4.5f, 11.5f),
+            new PointF(8, 13),
+            new PointF(8, 3),
+        ]);
     });
 
     internal static Icon Properties() => NewIcon(graphics =>

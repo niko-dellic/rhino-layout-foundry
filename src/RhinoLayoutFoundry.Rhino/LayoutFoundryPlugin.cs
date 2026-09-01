@@ -34,6 +34,7 @@ public sealed class LayoutFoundryPlugin : PlugIn
             mutationService,
             new RhinoDocumentOverviewNavigationService(_stateStore, _revisionTracker),
             new RhinoLayoutPdfExportService(),
+            new RhinoLayoutPrintDialogService(),
             new RhinoLayoutPackageService(
                 _stateStore,
                 _revisionTracker,
@@ -43,6 +44,7 @@ public sealed class LayoutFoundryPlugin : PlugIn
             new RhinoMutationCapabilityProvider(),
             new RhinoTemplateCaptureContextProvider(),
             new RhinoDocumentObserverSnapshotProvider(_stateStore, _revisionTracker),
+            new RhinoModelObjectSelectionService(),
             RhinoProjectIconLoader.Load());
         _panelIcon = PanelIcon.Create();
         Panels.RegisterPanel(this, typeof(LayoutFoundryPanel), "Layout Foundry", _panelIcon);

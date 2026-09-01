@@ -68,7 +68,7 @@ internal sealed class CreateResourceMenuOverlay : PixelLayout
         [
             new(CreateResourceKind.Folder, "Folder", FoundryViewIcons.Folder()),
             new(CreateResourceKind.Layout, "Sheet", FoundryViewIcons.Layout()),
-            new(CreateResourceKind.AppearanceState, "Appearance state", FoundryViewIcons.AppearanceState()),
+            new(CreateResourceKind.AppearanceState, "Appearance State", FoundryViewIcons.AppearanceState()),
         ];
         private int _hovered = -1;
         private int _focused;

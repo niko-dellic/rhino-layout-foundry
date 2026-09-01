@@ -80,6 +80,10 @@ internal static class FoundryTheme
         ? Color.FromArgb(34, 34, 37, 255)
         : Color.FromArgb(250, 250, 250, 255);
 
+    internal static Color HierarchyAlternateRowBackground => IsDarkMode
+        ? Color.FromArgb(34, 34, 37, 255)
+        : Color.FromArgb(250, 250, 250, 255);
+
     internal static Color HierarchyDocumentBackground => IsDarkMode
         ? Color.FromArgb(39, 39, 42, 255)
         : Color.FromArgb(244, 244, 245, 255);
@@ -136,6 +140,8 @@ internal static class FoundryTheme
     internal static Font BrandFont => SystemFonts.Bold(9);
 
     internal static Font EmptyTitleFont => SystemFonts.Bold(13);
+
+    internal static Font HierarchyTableFont => SystemFonts.Default(9);
 
     internal static Label MutedLabel(string text = "")
     {

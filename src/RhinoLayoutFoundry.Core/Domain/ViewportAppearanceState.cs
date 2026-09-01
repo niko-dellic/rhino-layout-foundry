@@ -67,7 +67,8 @@ public sealed record AppearanceStateRecord(
     int Order,
     string Name,
     IReadOnlyList<LayerVisibilityRule> LayerRules,
-    IReadOnlyList<ObjectDisplayRule> ObjectDisplayRules);
+    IReadOnlyList<ObjectDisplayRule> ObjectDisplayRules,
+    string Notes = "");
 
 /// <summary>
 /// A target can own at most one appearance-state assignment.

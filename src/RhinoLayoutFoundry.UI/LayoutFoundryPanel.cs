@@ -377,7 +377,7 @@ public sealed partial class LayoutFoundryPanel : Panel
         _manageButton.Click += (_, _) => OpenSelectedProperties();
         _deleteButton.Click += (_, _) => RequestDeleteSelection(SelectedKeys());
         _projectInfoButton.Click += (_, _) => OpenProjectInformation();
-        _printButton.Click += async (_, _) => await PrintHierarchyScopeAsync(null);
+        _printButton.Click += (_, _) => PrintHierarchyScope(null);
         _importButton.Click += async (_, _) => await ImportLayoutPackageAsync();
         _exportButton.Click += async (_, _) => await ExportLayoutPackageAsync();
         _listViewButton.Click += (_, _) => ShowListView();
@@ -488,7 +488,7 @@ public sealed partial class LayoutFoundryPanel : Panel
         treeGrid.Columns.Add(displayModeColumn);
         var appearanceStateColumn = new GridColumn
         {
-            HeaderText = "Appearance state",
+            HeaderText = "Appearance State",
             DataCell = _appearanceStateCell,
             Width = 176,
             Sortable = false,
@@ -517,6 +517,8 @@ public sealed partial class LayoutFoundryPanel : Panel
         {
             return;
         }
+
+        eventArgs.Font = FoundryTheme.HierarchyTableFont;
 
         if (_treeDrop is { IsValid: true, HighlightFolderId: { } highlight } &&
             item.Node.Key.Kind == OverviewNodeKind.Folder && item.Node.Key.Id == highlight)
@@ -921,8 +923,8 @@ public sealed partial class LayoutFoundryPanel : Panel
         for (var suffix = 2; siblingNames.Contains(suggestedName); suffix++)
             suggestedName = $"{baseName} {suffix}";
 
-        var dialog = new AppearanceStateEditorDialog(snapshot, folderId, suggestedName);
-        dialog.ShowModal(this);
+        var dialog = AppearanceStateEditorDialog.ShowWithViewportPicking(
+            this, snapshot, folderId, suggestedName);
         if (!dialog.Changed) return;
 
         _overview = LayoutFoundryUiHost.CaptureOverview();
@@ -1156,8 +1158,7 @@ public sealed partial class LayoutFoundryPanel : Panel
         _renamePageMenuItem.Click += (_, _) => BeginInlineSheetRename();
         _newDetailMenuItem.Click += (_, _) => RunSelectedSheetCommand(LayoutSheetCommand.NewDetail);
         _printPageMenuItem.Click += (_, _) => RunSelectedSheetCommand(LayoutSheetCommand.Print);
-        _printScopeMenuItem.Click += async (_, _) =>
-            await PrintHierarchyScopeAsync(_contextPrintFolderId);
+        _printScopeMenuItem.Click += (_, _) => PrintHierarchyScope(_contextPrintFolderId);
         _propertiesPageMenuItem.Click += (_, _) => OpenSelectedProperties();
         _renameFolderMenuItem.Click += async (_, _) => await RenameSelectedFolderAsync();
 
@@ -1371,7 +1372,7 @@ public sealed partial class LayoutFoundryPanel : Panel
         _statusLabel.Text = result.Succeeded ? string.Empty : result.Message;
     }
 
-    private async Task PrintHierarchyScopeAsync(Guid? folderId)
+    private void PrintHierarchyScope(Guid? folderId)
     {
         var scope = LayoutPrintScopeResolver.Resolve(_overview, folderId);
         if (!scope.Exists)
@@ -1388,36 +1389,11 @@ public sealed partial class LayoutFoundryPanel : Panel
             return;
         }
 
-        var safeName = string.Concat(scope.Name.Select(character =>
-            Path.GetInvalidFileNameChars().Contains(character) ? '-' : character)).Trim();
-        if (safeName.Length == 0)
-        {
-            safeName = "Layouts";
-        }
-
-        var dialog = new SaveFileDialog
-        {
-            Title = folderId is null ? "Print Enabled Layouts" : $"Print {scope.Name}",
-            FileName = $"{safeName}.pdf",
-        };
-        dialog.Filters.Add(new FileFilter("PDF document", ".pdf"));
-        if (dialog.ShowDialog(this) != DialogResult.Ok)
-        {
-            return;
-        }
-
-        var filePath = dialog.FileName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase)
-            ? dialog.FileName
-            : $"{dialog.FileName}.pdf";
-        _statusLabel.Text = $"Creating {scope.SheetPageViewIds.Count}-page PDF…";
-        await Task.Yield();
-        var result = await LayoutFoundryUiHost.ExportPdfAsync(new LayoutPdfExportRequest(
+        var result = LayoutFoundryUiHost.ShowPrintDialog(new LayoutPrintDialogRequest(
             documentSerialNumber,
             scope.SheetPageViewIds,
-            filePath));
-        _statusLabel.Text = result.Succeeded
-            ? $"Printed {result.PageCount} layout{(result.PageCount == 1 ? string.Empty : "s")} to {Path.GetFileName(filePath)}."
-            : result.Message;
+            folderId is null ? "Print Enabled Layouts" : $"Print {scope.Name}"));
+        _statusLabel.Text = result.Succeeded ? string.Empty : result.Message;
     }
 
     private async Task RenameSelectedSheetAsync()
@@ -2073,7 +2049,7 @@ public sealed partial class LayoutFoundryPanel : Panel
         _paperColumn.HeaderText = SortHeader("Paper size", OverviewSortProperty.PaperSize);
         _detailsColumn.HeaderText = SortHeader("Details", OverviewSortProperty.DetailCount);
         _displayModeColumn.HeaderText = SortHeader("Display mode", OverviewSortProperty.DisplayMode);
-        _appearanceStateColumn.HeaderText = "Appearance state";
+        _appearanceStateColumn.HeaderText = "Appearance State";
         _statusColumn.HeaderText = SortHeader("Status", OverviewSortProperty.Status);
     }
 
@@ -3278,8 +3254,7 @@ public sealed partial class LayoutFoundryPanel : Panel
                 _statusLabel.Text = "The selected appearance state is no longer available.";
                 return;
             }
-            var stateDialog = new AppearanceStateEditorDialog(snapshot, state);
-            stateDialog.ShowModal(this);
+            var stateDialog = AppearanceStateEditorDialog.ShowWithViewportPicking(this, snapshot, state);
             if (stateDialog.Changed)
             {
                 _statusLabel.Text = $"Updated '{state.Name}'.";

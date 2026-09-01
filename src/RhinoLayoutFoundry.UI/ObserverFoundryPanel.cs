@@ -1008,7 +1008,7 @@ public sealed class ObserverFoundryPanel : Panel
         moveEarlier.Click += async (_, _) => await ReorderSelectionByStepAsync(-1);
         moveLater.Click += async (_, _) => await ReorderSelectionByStepAsync(1);
         tidy.Click += async (_, _) => await TidyAsync();
-        print.Click += async (_, _) => await PrintSelectionAsync();
+        print.Click += (_, _) => PrintSelection();
         var menu = new ContextMenu(
             open,
             properties,
@@ -1108,8 +1108,7 @@ public sealed class ObserverFoundryPanel : Panel
             var snapshot = LayoutFoundryUiHost.CaptureSnapshot();
             var state = snapshot?.AppearanceStates.FirstOrDefault(item => item.Id == selection[0].Id);
             if (snapshot is null || state is null) return;
-            var dialog = new AppearanceStateEditorDialog(snapshot, state);
-            dialog.ShowModal(this);
+            var dialog = AppearanceStateEditorDialog.ShowWithViewportPicking(this, snapshot, state);
             if (dialog.Changed) RefreshSnapshot(fit: false);
             return;
         }
@@ -1214,7 +1213,7 @@ public sealed class ObserverFoundryPanel : Panel
         if (result.Succeeded) RefreshSnapshot(fit: false);
     }
 
-    private async Task PrintSelectionAsync()
+    private void PrintSelection()
     {
         var overview = LayoutFoundryUiHost.CaptureOverview();
         var selection = LayoutFoundryUiHost.Selection.Selected.ToArray();
@@ -1243,21 +1242,11 @@ public sealed class ObserverFoundryPanel : Panel
             return;
         }
 
-        var save = new SaveFileDialog
-        {
-            Title = folderId is null ? "Print layouts to PDF" : "Print folder to PDF",
-            FileName = folderId is null ? "Layouts.pdf" : "Layout folder.pdf",
-            Filters = { new FileFilter("PDF document", ".pdf") },
-        };
-        if (save.ShowDialog(this) != DialogResult.Ok || string.IsNullOrWhiteSpace(save.FileName)) return;
-        _status.Text = $"Printing {sheetIds.Count} layouts…";
-        var result = await LayoutFoundryUiHost.ExportPdfAsync(new LayoutPdfExportRequest(
+        var result = LayoutFoundryUiHost.ShowPrintDialog(new LayoutPrintDialogRequest(
             serial,
             sheetIds,
-            save.FileName));
-        _status.Text = result.Succeeded
-            ? $"Printed {result.PageCount} layouts to {Path.GetFileName(save.FileName)}."
-            : result.Message;
+            folderId is null ? "Print Enabled Layouts" : "Print Enabled Folder Layouts"));
+        _status.Text = result.Succeeded ? string.Empty : result.Message;
     }
 
     private IReadOnlySet<Guid> ResolveAffectedSheetIds(IReadOnlySet<Guid>? entityIds)

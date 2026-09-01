@@ -18,6 +18,17 @@ public interface IDocumentMutationService
     Task<OperationResult> ApplyAsync(OperationPlan plan, CancellationToken cancellationToken);
 }
 
+public interface IModelObjectSelectionService
+{
+    ModelObjectSelectionResult PickObjects();
+}
+
+public sealed record ModelObjectSelectionResult(
+    bool Succeeded,
+    bool Cancelled,
+    IReadOnlyList<Guid> ObjectIds,
+    string Message);
+
 public sealed record OperationPlan(
     uint DocumentRuntimeSerialNumber,
     long SourceRevision,

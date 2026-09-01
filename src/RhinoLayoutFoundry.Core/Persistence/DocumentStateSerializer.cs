@@ -89,6 +89,17 @@ public static class DocumentStateSerializer
             });
         }
 
+        if (state.SchemaVersion == 12)
+        {
+            return NormalizeCurrent(state with
+            {
+                SchemaVersion = DocumentState.CurrentSchemaVersion,
+                AppearanceStateResources = state.AppearanceStates
+                    .Select(item => item with { Notes = item.Notes ?? string.Empty })
+                    .ToArray(),
+            });
+        }
+
         if (state.SchemaVersion != DocumentState.CurrentSchemaVersion)
         {
             throw new NotSupportedException(
@@ -106,7 +117,9 @@ public static class DocumentStateSerializer
             ViewportRuleSets = state.AppearanceRules,
             CapabilityTemplates = state.TemplateRegistrations,
             CapabilityLinks = state.TemplateLinks,
-            AppearanceStateResources = state.AppearanceStates,
+            AppearanceStateResources = state.AppearanceStates
+                .Select(item => item with { Notes = item.Notes ?? string.Empty })
+                .ToArray(),
             AppearanceStateAssignments = state.StateAssignments,
         };
 

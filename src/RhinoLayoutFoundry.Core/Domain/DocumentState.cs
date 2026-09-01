@@ -25,7 +25,7 @@ public sealed record DocumentState(
     IReadOnlyList<AppearanceStateRecord>? AppearanceStateResources = null,
     IReadOnlyList<AppearanceStateAssignment>? AppearanceStateAssignments = null)
 {
-    public const int CurrentSchemaVersion = 12;
+    public const int CurrentSchemaVersion = 13;
 
     [JsonIgnore]
     public IReadOnlyList<SheetTemplateRecipe> Templates => SheetTemplates ?? [];

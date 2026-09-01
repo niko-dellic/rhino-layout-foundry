@@ -176,7 +176,7 @@ public static class OverviewTreeBuilder
                 children.Add(new OverviewTreeNode(
                     new OverviewNodeKey(OverviewNodeKind.AppearanceState, state.Id),
                     state.Name,
-                    "Appearance state",
+                    "Appearance State",
                     [],
                     AppearanceState: state));
             }

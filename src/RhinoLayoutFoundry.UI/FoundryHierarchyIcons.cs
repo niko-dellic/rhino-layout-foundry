@@ -8,6 +8,7 @@ internal static class FoundryHierarchyIcons
     private static readonly float[] IconScales = [1f, 2f, 3f];
     private static readonly Icon RhinoIcon = NewIcon(DrawRhino);
     private static readonly Icon FolderIcon = NewIcon(DrawFolder);
+    private static readonly Icon LayerIcon = NewIcon(DrawLayer);
     private static readonly Icon LayoutIcon = NewIcon(DrawLayout);
     private static readonly Icon DetailIcon = NewIcon(DrawDetail);
     private static readonly Icon ObjectIcon = NewIcon(DrawObject);
@@ -16,6 +17,8 @@ internal static class FoundryHierarchyIcons
     internal static Image Rhino => RhinoIcon;
 
     internal static Image Folder => FolderIcon;
+
+    internal static Image Layer => LayerIcon;
 
     internal static Image Layout => LayoutIcon;
 
@@ -70,6 +73,19 @@ internal static class FoundryHierarchyIcons
         DrawLine(graphics, pen, bounds, 10.25f, 1.75f, 10.25f, 4.5f);
         DrawLine(graphics, pen, bounds, 10.25f, 4.5f, 13, 4.5f);
         DrawRectangle(graphics, pen, bounds, 5.25f, 7, 5.5f, 4.25f);
+    }
+
+    internal static void DrawLayer(Graphics graphics, Color color, RectangleF bounds)
+    {
+        using var pen = IconPen(color, bounds);
+        DrawLine(graphics, pen, bounds, 2, 4, 8, 1.75f);
+        DrawLine(graphics, pen, bounds, 8, 1.75f, 14, 4);
+        DrawLine(graphics, pen, bounds, 14, 4, 8, 6.25f);
+        DrawLine(graphics, pen, bounds, 8, 6.25f, 2, 4);
+        DrawLine(graphics, pen, bounds, 2, 7.75f, 8, 10);
+        DrawLine(graphics, pen, bounds, 8, 10, 14, 7.75f);
+        DrawLine(graphics, pen, bounds, 2, 11.5f, 8, 13.75f);
+        DrawLine(graphics, pen, bounds, 8, 13.75f, 14, 11.5f);
     }
 
     internal static void DrawDetail(Graphics graphics, Color color, RectangleF bounds)

@@ -128,7 +128,8 @@ public sealed class ViewportAppearanceTests
                 TestSnapshots.RootFolderId,
                 "Presentation appearance",
                 LayerRules: [rule],
-                ObjectDisplayRules: [objectRule]),
+                ObjectDisplayRules: [objectRule],
+                Notes: "Presentation-only overrides"),
             snapshot);
 
         Assert.True(plan.CanApply);
@@ -136,6 +137,7 @@ public sealed class ViewportAppearanceTests
         Assert.Equal("Presentation appearance", change.NewState!.Name);
         Assert.Equal(rule, Assert.Single(change.NewState.LayerRules));
         Assert.Equal(objectRule, Assert.Single(change.NewState.ObjectDisplayRules));
+        Assert.Equal("Presentation-only overrides", change.NewState.Notes);
     }
 
     [Fact]

@@ -39,3 +39,13 @@ public interface ILayoutPdfExportService
         LayoutPdfExportRequest request,
         CancellationToken cancellationToken = default);
 }
+
+public sealed record LayoutPrintDialogRequest(
+    uint DocumentRuntimeSerialNumber,
+    IReadOnlyList<Guid> SheetPageViewIds,
+    string DialogTitle);
+
+public interface ILayoutPrintDialogService
+{
+    OverviewNavigationResult Show(LayoutPrintDialogRequest request);
+}
