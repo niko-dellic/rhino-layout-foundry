@@ -1413,6 +1413,37 @@ public static class LayoutFoundryUiHost
         }
     }
 
+    public static async Task<OperationResult> UpdateHierarchyNotesAsync(
+        IReadOnlyList<OverviewNodeKey> targets,
+        string notes,
+        CancellationToken cancellationToken = default)
+    {
+        if (_snapshotProvider is null || _mutationService is null)
+            return UnavailableResult("Foundry is not connected to an active Rhino plug-in.");
+        try
+        {
+            var snapshot = _snapshotProvider.Capture();
+            var request = new UpdateHierarchyNotesRequest(
+                snapshot.DocumentRuntimeSerialNumber,
+                snapshot.Revision,
+                targets,
+                notes ?? string.Empty);
+            var plan = new UpdateHierarchyNotesPlanner().Plan(request, snapshot);
+            if (plan.Changes.Count == 0 && plan.Diagnostics.All(item =>
+                    item.Severity != DiagnosticSeverity.Error))
+                return new OperationResult(true, plan.Diagnostics);
+            return await ApplyHierarchyPlanAsync(
+                plan,
+                snapshot.DocumentRuntimeSerialNumber,
+                targets.Select(target => target.Id).ToHashSet(),
+                cancellationToken);
+        }
+        catch (InvalidOperationException exception)
+        {
+            return UnavailableResult(exception.Message);
+        }
+    }
+
     public static async Task<OperationResult> AssignNamedViewAsync(
         IReadOnlyList<Guid> detailViewportIds,
         string namedViewName,

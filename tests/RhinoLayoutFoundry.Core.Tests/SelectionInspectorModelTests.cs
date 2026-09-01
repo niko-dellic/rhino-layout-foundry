@@ -57,6 +57,30 @@ public sealed class SelectionInspectorModelTests
         Assert.Equal("Page 1", sheetModel.RenameValue);
     }
 
+    [Fact]
+    public void NotesUseOnlyDirectFolderAndLayoutSelectionsAndReportMixedValues()
+    {
+        var snapshot = Snapshot(out _, out var folder, out _, out var sheets, out var details);
+        snapshot = snapshot with
+        {
+            Folders = snapshot.Folders.ToDictionary(pair => pair.Key, pair =>
+                pair.Key == folder ? pair.Value with { Notes = "Folder note" } : pair.Value),
+            Sheets = snapshot.Sheets.ToDictionary(pair => pair.Key, pair =>
+                pair.Key == sheets[0] ? pair.Value with { Notes = "Sheet note" } : pair.Value),
+        };
+
+        var model = SelectionInspectorModel.Create(snapshot,
+        [
+            new(OverviewNodeKind.Folder, folder),
+            new(OverviewNodeKind.Sheet, sheets[0]),
+            new(OverviewNodeKind.Detail, details[0]),
+        ]);
+
+        Assert.True(model.NotesIsMixed);
+        Assert.Equal(2, model.EditableNotesTargets.Count);
+        Assert.DoesNotContain(model.EditableNotesTargets, target => target.Kind == OverviewNodeKind.Detail);
+    }
+
     private static DocumentSnapshot Snapshot(
         out Guid root,
         out Guid folder,

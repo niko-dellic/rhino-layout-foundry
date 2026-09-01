@@ -47,7 +47,8 @@ internal sealed class RhinoDocumentObserverSnapshotProvider : IDocumentObserverS
                 folder.Id,
                 folder.ParentId,
                 folder.Id == state.RootFolderId ? documentName : folder.Name,
-                folder.Order))
+                folder.Order,
+                folder.Notes ?? string.Empty))
             .ToArray();
         var sheets = document.Views.GetPageViews()
             .OrderBy(page => page.PageNumber)
@@ -97,7 +98,8 @@ internal sealed class RhinoDocumentObserverSnapshotProvider : IDocumentObserverS
                     document.PageUnitSystem.ToString(),
                     details,
                     record?.IncludeInPrintAll ?? true,
-                    revision);
+                    revision,
+                    Notes: record?.Notes ?? string.Empty);
             })
             .ToArray();
 

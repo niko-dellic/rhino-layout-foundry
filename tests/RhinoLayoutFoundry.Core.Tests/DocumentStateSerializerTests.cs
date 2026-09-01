@@ -37,7 +37,8 @@ public sealed class DocumentStateSerializerTests
     [Fact]
     public void PopulatedStateRoundTrips()
     {
-        var folder = new FolderRecord(Guid.NewGuid(), WellKnownIds.UnorganizedFolderId, "Plans", 1);
+        var folder = new FolderRecord(Guid.NewGuid(), WellKnownIds.UnorganizedFolderId, "Plans", 1,
+            "Issued plan set");
         var sheetId = Guid.NewGuid();
         var detailLayerId = Guid.NewGuid();
         var titleBlock = new TitleBlockRole(Guid.NewGuid(), Guid.NewGuid(), "LowerRight");
@@ -48,7 +49,8 @@ public sealed class DocumentStateSerializerTests
             ["Issue A", "Permit"],
             new Dictionary<string, string> { ["discipline"] = "A" },
             titleBlock,
-            IncludeInPrintAll: false);
+            IncludeInPrintAll: false,
+            Notes: "Coordinate with structural");
         var rule = new DisplayRule(
             Guid.NewGuid(),
             "Plans shaded",
@@ -107,10 +109,12 @@ public sealed class DocumentStateSerializerTests
         Assert.Equal(state.RootFolderId, restored.RootFolderId);
         Assert.Equal(2, restored.Folders.Count);
         Assert.Equal("Plans", restored.Folders.Single(item => item.Id == folder.Id).Name);
+        Assert.Equal("Issued plan set", restored.Folders.Single(item => item.Id == folder.Id).Notes);
         Assert.Equal("A", restored.Sheets[sheetId].Metadata["discipline"]);
         Assert.Contains("Permit", restored.Sheets[sheetId].Tags);
         Assert.Equal(titleBlock.InstanceObjectId, restored.Sheets[sheetId].TitleBlock!.InstanceObjectId);
         Assert.False(restored.Sheets[sheetId].IncludeInPrintAll);
+        Assert.Equal("Coordinate with structural", restored.Sheets[sheetId].Notes);
         Assert.Equal(rule.DisplayModeId, restored.DisplayRules.Single().DisplayModeId);
         Assert.Equal("Foundry", restored.Metadata["project"]);
         Assert.Equal("A3 plan", restored.Templates.Single().Name);
@@ -392,6 +396,30 @@ public sealed class DocumentStateSerializerTests
 
         Assert.Equal(DocumentState.CurrentSchemaVersion, restored.SchemaVersion);
         Assert.Equal(string.Empty, Assert.Single(restored.AppearanceStates).Notes);
+    }
+
+    [Fact]
+    public void VersionThirteenFoldersAndSheetsGainEmptyNotes()
+    {
+        var sheetId = Guid.NewGuid();
+        var state = DocumentState.Empty() with
+        {
+            Sheets = new Dictionary<Guid, SheetRecord>
+            {
+                [sheetId] = new(sheetId, WellKnownIds.UnorganizedFolderId, 0, [],
+                    new Dictionary<string, string>(), null),
+            },
+        };
+        var payload = DocumentStateSerializer.Serialize(state)
+            .Replace($"\"SchemaVersion\":{DocumentState.CurrentSchemaVersion}", "\"SchemaVersion\":13",
+                StringComparison.Ordinal)
+            .Replace(",\"Notes\":\"\"", string.Empty, StringComparison.Ordinal);
+
+        var restored = DocumentStateSerializer.Deserialize(payload);
+
+        Assert.Equal(DocumentState.CurrentSchemaVersion, restored.SchemaVersion);
+        Assert.Equal(string.Empty, Assert.Single(restored.Folders).Notes);
+        Assert.Equal(string.Empty, restored.Sheets[sheetId].Notes);
     }
 
     [Fact]

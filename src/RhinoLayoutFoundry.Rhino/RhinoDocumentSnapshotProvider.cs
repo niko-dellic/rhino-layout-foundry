@@ -95,7 +95,8 @@ internal sealed class RhinoDocumentSnapshotProvider : IDocumentSnapshotProvider
                     record?.TitleBlockData,
                     titleBlock?.BuiltInKind,
                     record?.Tags,
-                    record?.NamingBinding);
+                    record?.NamingBinding,
+                    record?.Notes ?? string.Empty);
             })
             .ToDictionary(sheet => sheet.PageViewId);
 

@@ -103,7 +103,8 @@ internal sealed class RhinoDocumentOverviewProvider : IDocumentOverviewProvider
                     AppearanceState: Binding(
                         folderChain.Append(new HierarchyScope(HierarchyScopeKind.Sheet, pageId)),
                         new HierarchyScope(HierarchyScopeKind.Sheet, pageId),
-                        assignments, appearanceStates));
+                        assignments, appearanceStates),
+                    Notes: record?.Notes ?? string.Empty);
                 return sheet with
                 {
                     Diagnostics = OverviewDiagnostics.ForSheet(
@@ -133,7 +134,8 @@ internal sealed class RhinoDocumentOverviewProvider : IDocumentOverviewProvider
                     appearance,
                     Binding(ScopeChain(folder.Id, state.Folders),
                         new HierarchyScope(HierarchyScopeKind.Folder, folder.Id),
-                        assignments, appearanceStates));
+                        assignments, appearanceStates),
+                    folder.Notes ?? string.Empty);
             })
             .ToArray();
 

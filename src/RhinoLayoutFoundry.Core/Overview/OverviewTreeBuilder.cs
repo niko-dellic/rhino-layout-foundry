@@ -103,6 +103,8 @@ public static class OverviewTreeBuilder
                     .ThenBy(state => state.Name, StringComparer.OrdinalIgnoreCase)
                     .ToArray());
 
+        var rootFolder = folders[rootId];
+        var rootNotesMatch = filter.Query is not null && Matches(rootFolder.Notes, filter.Query);
         var rootChildren = BuildFolderChildren(
             rootId,
             childFolders,
@@ -110,13 +112,12 @@ public static class OverviewTreeBuilder
             statesByFolder,
             filter,
             new HashSet<Guid> { rootId },
-            includeAllTextMatches: false);
+            includeAllTextMatches: rootNotesMatch);
         if (filter.IsActive && rootChildren.Count == 0)
         {
             return [];
         }
 
-        var rootFolder = overview.Folders.FirstOrDefault(folder => folder.Id == rootId);
         return
         [
             new OverviewTreeNode(
@@ -211,7 +212,9 @@ public static class OverviewTreeBuilder
             return null;
         }
 
-        var folderMatchesText = includeAllTextMatches || Matches(folder.Name, filter.Query);
+        var folderMatchesText = includeAllTextMatches ||
+                                Matches(folder.Name, filter.Query) ||
+                                Matches(folder.Notes, filter.Query);
         var children = BuildFolderChildren(
             folder.Id,
             childFolders,
@@ -247,7 +250,9 @@ public static class OverviewTreeBuilder
         }
 
         var showDetails = filter.Kind != OverviewFilterKind.Sheets;
-        var sheetMatchesText = includeAllTextMatches || Matches(sheet.Name, filter.Query);
+        var sheetMatchesText = includeAllTextMatches ||
+                               Matches(sheet.Name, filter.Query) ||
+                               Matches(sheet.Notes, filter.Query);
         var details = showDetails
             ? sheet.Details
                 .OrderBy(detail => detail.Order)

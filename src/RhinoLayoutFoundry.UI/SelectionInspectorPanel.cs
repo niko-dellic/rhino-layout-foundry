@@ -26,6 +26,9 @@ internal sealed class SelectionInspectorPanel : Panel
 
     private readonly Label _selectionSummary = FoundryTheme.MutedLabel();
     private readonly TextBox _name = new();
+    private readonly TextArea _notes = new() { Height = 72, Wrap = true };
+    private readonly FoundryDialogButton _saveNotes = new("Save notes", FoundryDialogButtonStyle.Secondary, 100);
+    private readonly Label _notesMixed = FoundryTheme.MutedLabel("Mixed notes — saving replaces all selected notes.");
     private readonly Label _selectionError = ErrorLabel();
     private readonly Panel _selectionSection;
     private readonly FoundryCheckBox _print = new("Include in Print all");
@@ -123,6 +126,9 @@ internal sealed class SelectionInspectorPanel : Panel
             {
                 _selectionSummary,
                 Field("Name", InspectorField(_name)),
+                Field("Notes", new FoundryFormField(_notes)),
+                _notesMixed,
+                _saveNotes,
                 _selectionError,
             },
         });
@@ -415,6 +421,7 @@ internal sealed class SelectionInspectorPanel : Panel
             eventArgs.Handled = true;
         };
         _name.LostFocus += (_, _) => _ = CommitRenameAsync();
+        _saveNotes.Click += (_, _) => _ = CommitNotesAsync();
         _print.CheckedChanged += (_, _) =>
         {
             if (!_updating) _ = CommitPrintAsync();
@@ -548,6 +555,10 @@ internal sealed class SelectionInspectorPanel : Panel
               $"Affects {model.AffectedLayoutCount} layouts and {model.AffectedDetailCount} details";
         _name.Text = model?.RenameValue ?? string.Empty;
         _name.Enabled = model?.RenameTarget is not null;
+        _notes.Text = model?.NotesValue ?? string.Empty;
+        _notesMixed.Visible = model?.NotesIsMixed == true;
+        _notes.Enabled = model?.EditableNotesTargets.Count > 0;
+        _saveNotes.Enabled = model?.EditableNotesTargets.Count > 0;
         _selectionSection.Enabled = enabled;
 
         _layoutSection.Enabled = model?.AffectedLayoutCount > 0;
@@ -651,6 +662,21 @@ internal sealed class SelectionInspectorPanel : Panel
                 ? LayoutFoundryUiHost.RenameSheetAsync(target.Id, expected, next)
                 : LayoutFoundryUiHost.RenameFolderAsync(target.Id, expected, next),
             $"Renamed to {next}.");
+    }
+
+    private async Task CommitNotesAsync()
+    {
+        if (_updating || _model is null || _model.EditableNotesTargets.Count == 0) return;
+        if (!_model.NotesIsMixed && string.Equals(_model.NotesValue, _notes.Text, StringComparison.Ordinal))
+            return;
+        var count = _model.EditableNotesTargets.Count;
+        await RunAsync(
+            _selectionSection,
+            _selectionError,
+            () => LayoutFoundryUiHost.UpdateHierarchyNotesAsync(
+                _model.EditableNotesTargets,
+                _notes.Text),
+            count == 1 ? "Notes updated." : $"Notes updated on {count} items.");
     }
 
     private async Task CommitPrintAsync()

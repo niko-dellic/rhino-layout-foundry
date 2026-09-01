@@ -41,7 +41,7 @@ public sealed record LayoutPackageManifest(
     IReadOnlyDictionary<string, string> AssetChecksums,
     IReadOnlyList<LayoutPackageTitleBlockDefinition>? TitleBlockDefinitions = null)
 {
-    public const int CurrentPackageVersion = 4;
+    public const int CurrentPackageVersion = 5;
     public const string ManifestEntryName = "manifest.json";
     public const string LayoutAssetEntryName = "assets/layouts.3dm";
 
@@ -62,7 +62,8 @@ public sealed record LayoutPackageSheet(
     TitleBlockRole? TitleBlock,
     bool IncludeInPrintAll,
     SheetTitleBlockData? TitleBlockData = null,
-    SheetNamingBinding? NamingBinding = null);
+    SheetNamingBinding? NamingBinding = null,
+    string Notes = "");
 
 public sealed record LayoutPackageDetail(
     Guid SourceDetailViewportId,

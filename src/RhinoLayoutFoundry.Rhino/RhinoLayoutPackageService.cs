@@ -322,7 +322,8 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
                         binding.LastGeneratedName,
                         StringComparison.Ordinal)
                         ? binding
-                        : null));
+                        : null,
+                    record.Notes ?? string.Empty));
             }
 
             foreach (var rule in state.DisplayRules) referencedDisplayModes.Add(rule.DisplayModeId);
@@ -1206,7 +1207,8 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
                 titleBlock,
                 source.IncludeInPrintAll,
                 source.TitleBlockData,
-                namingBinding);
+                namingBinding,
+                source.Notes ?? string.Empty);
         }
 
         var recovery = (mode == LayoutPackageImportMode.Merge ? before.Recovery : [])

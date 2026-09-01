@@ -75,6 +75,7 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
     private DateTime _navigatorLastAutoScrollUtc;
     private PointF _navigatorPointer;
     private NavigatorFolderDraft? _navigatorFolderDraft;
+    private bool _navigatorFolderDraftCommitPending;
     private readonly HashSet<Guid> _collapsedNavigatorFolders = [];
     private readonly HashSet<Guid> _expandedNavigatorSheets = [];
     private int _namedViewsScrollRow;
@@ -103,6 +104,7 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
         KeyDown += OnKeyDown;
         KeyUp += OnKeyUp;
         TextInput += OnTextInput;
+        LostFocus += (_, _) => RequestNavigatorFolderDraftCommit();
         DragOver += OnDragOver;
         DragDrop += OnDragDrop;
         SizeChanged += (_, _) => RefreshPresentation();
@@ -214,7 +216,10 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
         if (_navigatorFolderDraft is { } draft &&
             (!_snapshot.Folders.Any(folder => folder.Id == draft.ParentFolderId) ||
              _snapshot.Folders.Any(folder => folder.Id == draft.Id)))
+        {
             _navigatorFolderDraft = null;
+            _navigatorFolderDraftCommitPending = false;
+        }
         ClampNavigatorScroll();
         _selection.RemoveWhere(key => !ContainsKey(key));
         if (_selectionAnchor is { } anchor && !_selection.Contains(anchor))
@@ -299,6 +304,7 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
             parentFolderId,
             "New Folder",
             SelectAll: true);
+        _navigatorFolderDraftCommitPending = false;
         EnsureNavigatorDraftVisible();
         Focus();
         Invalidate();
@@ -307,6 +313,15 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
     internal void CancelNavigatorFolderDraft()
     {
         _navigatorFolderDraft = null;
+        _navigatorFolderDraftCommitPending = false;
+        Invalidate();
+    }
+
+    internal void ResumeNavigatorFolderDraft()
+    {
+        if (_navigatorFolderDraft is null) return;
+        _navigatorFolderDraftCommitPending = false;
+        Focus();
         Invalidate();
     }
 
@@ -1856,6 +1871,13 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
     private void OnMouseDown(object? sender, MouseEventArgs eventArgs)
     {
         Focus();
+        if (_navigatorFolderDraft is not null)
+        {
+            RequestNavigatorFolderDraftCommit();
+            eventArgs.Handled = true;
+            return;
+        }
+
         _pressScreen = Point(eventArgs.Location);
         _lastScreen = _pressScreen;
         _pressWorld = _camera.ScreenToWorld(_pressScreen, ViewportSize());
@@ -2394,15 +2416,7 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
         {
             if (eventArgs.Key == Keys.Enter)
             {
-                var name = draft.Name.Trim();
-                if (name.Length > 0)
-                {
-                    FolderDraftRequested?.Invoke(this, new ObserverFolderDraftRequestedEventArgs(
-                        draft.Id,
-                        draft.ParentFolderId,
-                        name));
-                }
-
+                RequestNavigatorFolderDraftCommit();
                 eventArgs.Handled = true;
                 return;
             }
@@ -2543,6 +2557,25 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
         _navigatorFolderDraft = draft with { Name = name, SelectAll = false };
         EnsureNavigatorDraftVisible();
         Invalidate();
+    }
+
+    private void RequestNavigatorFolderDraftCommit()
+    {
+        if (_navigatorFolderDraftCommitPending || _navigatorFolderDraft is not { } draft) return;
+        var name = draft.Name.Trim();
+        if (name.Length == 0)
+        {
+            Application.Instance.AsyncInvoke(Focus);
+            return;
+        }
+
+        var handler = FolderDraftRequested;
+        if (handler is null) return;
+        _navigatorFolderDraftCommitPending = true;
+        handler.Invoke(this, new ObserverFolderDraftRequestedEventArgs(
+            draft.Id,
+            draft.ParentFolderId,
+            name));
     }
 
     private void OnKeyUp(object? sender, KeyEventArgs eventArgs)

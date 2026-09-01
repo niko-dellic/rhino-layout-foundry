@@ -16,6 +16,7 @@ internal sealed class DeleteConfirmationOverlay : Panel
     private readonly Panel _card;
     private readonly Label _title;
     private readonly Label _message;
+    private readonly Label _consequence;
     private readonly FoundryDialogButton _cancelButton;
     private readonly FoundryDialogButton _deleteButton;
     private bool _busy;
@@ -35,6 +36,13 @@ internal sealed class DeleteConfirmationOverlay : Panel
         };
         _message = new Label
         {
+            TextColor = FoundryTheme.PrimaryText,
+            TextAlignment = TextAlignment.Left,
+            Wrap = WrapMode.Word,
+        };
+        _consequence = new Label
+        {
+            Font = SystemFonts.Default(9),
             TextColor = FoundryTheme.MutedText,
             TextAlignment = TextAlignment.Left,
             Wrap = WrapMode.Word,
@@ -71,12 +79,13 @@ internal sealed class DeleteConfirmationOverlay : Panel
                         warningIcon,
                         new StackLayoutItem(new StackLayout
                         {
-                            Spacing = FoundryTheme.Space2,
+                            Spacing = FoundryTheme.Space1,
                             HorizontalContentAlignment = HorizontalAlignment.Stretch,
                             Items =
                             {
                                 _title,
                                 _message,
+                                _consequence,
                             },
                         }, expand: true),
                     },
@@ -127,13 +136,19 @@ internal sealed class DeleteConfirmationOverlay : Panel
 
     internal event EventHandler? ConfirmRequested;
 
-    internal void ShowConfirmation(string summary, bool singularSelection, string? detail = null)
+    internal void ShowConfirmation(
+        string summary,
+        bool singularSelection,
+        string? detail = null,
+        string? consequence = null)
     {
         _busy = false;
-        _title.Text = $"Delete {summary}?";
+        _title.Text = $"Delete {CompactSingularSummary(summary)}?";
         _message.Text = detail ?? (singularSelection
-            ? "This item will be permanently removed. This action cannot be undone."
-            : "These items will be permanently removed. This action cannot be undone.");
+            ? "This item will be permanently removed."
+            : "These items will be permanently removed.");
+        _consequence.Text = consequence ?? "This can’t be undone.";
+        _consequence.Visible = true;
         _cancelButton.Text = "Cancel";
         _deleteButton.Text = "Delete";
         _cancelButton.Enabled = true;
@@ -152,6 +167,7 @@ internal sealed class DeleteConfirmationOverlay : Panel
         _busy = true;
         _title.Text = $"Deleting {summary}…";
         _message.Text = "Keep this panel open until the operation finishes.";
+        _consequence.Visible = false;
         _deleteButton.Text = "Deleting…";
         _cancelButton.Enabled = false;
         _deleteButton.Enabled = false;
@@ -178,8 +194,15 @@ internal sealed class DeleteConfirmationOverlay : Panel
     private void UpdateCardWidth()
     {
         var availableWidth = Math.Max(0, ClientSize.Width - FoundryTheme.Space4 * 2);
-        _card.Width = Math.Min(420, availableWidth);
+        _card.Width = Math.Min(400, availableWidth);
     }
+
+    private static string CompactSingularSummary(string summary) =>
+        summary.StartsWith("1 ", StringComparison.Ordinal) &&
+        !summary.Contains(" and ", StringComparison.Ordinal) &&
+        !summary.Contains(",", StringComparison.Ordinal)
+            ? summary[2..]
+            : summary;
 
     private sealed class DeleteWarningIcon : Drawable
     {

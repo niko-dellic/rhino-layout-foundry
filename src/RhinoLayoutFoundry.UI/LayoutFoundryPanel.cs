@@ -46,6 +46,7 @@ public sealed partial class LayoutFoundryPanel : Panel
     private readonly GridColumn _detailsColumn;
     private readonly GridColumn _displayModeColumn;
     private readonly GridColumn _appearanceStateColumn;
+    private readonly GridColumn _notesColumn;
     private readonly GridColumn _statusColumn;
     private readonly TextBoxCell _paperCell;
     private readonly CustomCell _displayModeCell;
@@ -122,7 +123,6 @@ public sealed partial class LayoutFoundryPanel : Panel
     private CellInteractionGuard? _cellInteractionGuard;
     private CellInteractionGuard? _selectionPreservingCircleInteraction;
     private InlineDraft? _inlineDraft;
-    private bool _inlineDraftCommitRequested;
     private Guid? _contextDestinationFolderId;
     private Guid? _contextPrintFolderId;
     private Form? _fullscreenWindow;
@@ -260,7 +260,7 @@ public sealed partial class LayoutFoundryPanel : Panel
         _displayModeCell = CreateDisplayModeCell();
         _appearanceStateCell = CreateAppearanceStateCell();
         (_treeGrid, _layoutsColumn, _printColumn, _templateColumn, _paperColumn, _detailsColumn,
-            _displayModeColumn, _appearanceStateColumn, _statusColumn) = CreateTreeGrid();
+            _displayModeColumn, _appearanceStateColumn, _notesColumn, _statusColumn) = CreateTreeGrid();
         CreateHierarchyContextMenu();
         _toolbarSurface = FoundryTheme.Surface(
             CreateToolbarContent(),
@@ -414,7 +414,7 @@ public sealed partial class LayoutFoundryPanel : Panel
     private (TreeGridView TreeGrid, GridColumn LayoutsColumn, GridColumn PrintColumn,
         GridColumn TemplateColumn,
         GridColumn PaperColumn, GridColumn DetailsColumn, GridColumn DisplayModeColumn,
-        GridColumn AppearanceStateColumn, GridColumn StatusColumn) CreateTreeGrid()
+        GridColumn AppearanceStateColumn, GridColumn NotesColumn, GridColumn StatusColumn) CreateTreeGrid()
     {
         var treeGrid = new TreeGridView
         {
@@ -494,6 +494,17 @@ public sealed partial class LayoutFoundryPanel : Panel
             Sortable = false,
         };
         treeGrid.Columns.Add(appearanceStateColumn);
+        var notesColumn = new GridColumn
+        {
+            HeaderText = "Notes",
+            DataCell = new TextBoxCell
+            {
+                Binding = Binding.Property<HierarchyTreeItem, string>(item => item.NotesText),
+            },
+            Width = 190,
+            Sortable = false,
+        };
+        treeGrid.Columns.Add(notesColumn);
         var statusColumn = new GridColumn
         {
             HeaderText = "Status",
@@ -506,7 +517,7 @@ public sealed partial class LayoutFoundryPanel : Panel
         treeGrid.Columns.Add(statusColumn);
 
         return (treeGrid, layoutsColumn, printColumn, templateColumn, paperColumn, detailsColumn,
-            displayModeColumn, appearanceStateColumn, statusColumn);
+            displayModeColumn, appearanceStateColumn, notesColumn, statusColumn);
     }
 
     private void OnHierarchyCellFormatting(
@@ -1303,7 +1314,6 @@ public sealed partial class LayoutFoundryPanel : Panel
         {
             if (_inlineDraft is not null)
             {
-                _inlineDraftCommitRequested = true;
                 _treeGrid.CommitEdit();
                 eventArgs.Handled = true;
                 return;
@@ -1317,7 +1327,6 @@ public sealed partial class LayoutFoundryPanel : Panel
             if (_inlineDraft is { } draft)
             {
                 _inlineDraft = null;
-                _inlineDraftCommitRequested = false;
                 SetInlineEditing(false);
                 _treeGrid.CancelEdit();
                 if (IsRenameDraft(draft.Kind))
@@ -1518,24 +1527,32 @@ public sealed partial class LayoutFoundryPanel : Panel
 
         _pendingDeleteSelection = pending;
         _panelShell.Enabled = false;
+        string? deleteDetail = null;
+        string? deleteConsequence = null;
+        if (stateCount > 0)
+            (deleteDetail, deleteConsequence) = AppearanceStateDeletionMessage(stateIds);
         _deleteConfirmationOverlay.ShowConfirmation(
             summary,
             resolved.SelectedItemCount == 1,
-            stateCount == 0
-                ? null
-                : AppearanceStateDeletionMessage(stateIds));
+            deleteDetail,
+            deleteConsequence);
     }
 
-    private string AppearanceStateDeletionMessage(IReadOnlySet<Guid> stateIds)
+    private (string Message, string Consequence) AppearanceStateDeletionMessage(
+        IReadOnlySet<Guid> stateIds)
     {
         var states = _overview.AppearanceStates.Where(state => stateIds.Contains(state.Id)).ToArray();
         var folders = states.Sum(state => state.DependentFolderCount);
         var sheets = states.Sum(state => state.DependentSheetCount);
         var details = states.Sum(state => state.DependentDetailCount);
-        return $"The selected states currently affect {folders} folder{(folders == 1 ? string.Empty : "s")}, " +
-               $"{sheets} layout{(sheets == 1 ? string.Empty : "s")}, and " +
-               $"{details} detail{(details == 1 ? string.Empty : "s")}. Their assignments will return to inherit; " +
-               "all explicitly authored local overrides will remain. This action cannot be undone.";
+        var dependencies = new List<string>();
+        if (folders > 0) dependencies.Add($"{folders} folder{(folders == 1 ? string.Empty : "s")}");
+        if (sheets > 0) dependencies.Add($"{sheets} layout{(sheets == 1 ? string.Empty : "s")}");
+        if (details > 0) dependencies.Add($"{details} detail{(details == 1 ? string.Empty : "s")}");
+        return dependencies.Count == 0
+            ? ("Not currently assigned.", "This can’t be undone.")
+            : ($"Used by {string.Join(" · ", dependencies)}.",
+                "Assignments will be cleared; local overrides remain. This can’t be undone.");
     }
 
     private async Task ConfirmDeleteSelectionAsync()
@@ -1655,14 +1672,13 @@ public sealed partial class LayoutFoundryPanel : Panel
             item.Node.Key.Id,
             parentFolderId,
             item.Node.Label);
-        _inlineDraftCommitRequested = false;
         item.BeginInlineEdit();
         SetInlineEditing(true);
         _statusLabel.Text = kind switch
         {
-            InlineDraftKind.RenameFolder => "Rename the folder, then press Return.",
-            InlineDraftKind.RenameSheet => "Rename the layout, then press Return. Rhino does not support Undo for this change.",
-            _ => "Rename the appearance state, then press Return.",
+            InlineDraftKind.RenameFolder => "Rename the folder. Press Return or click away to save; Escape cancels.",
+            InlineDraftKind.RenameSheet => "Rename the layout. Press Return or click away to save; Escape cancels. Rhino does not support Undo for this change.",
+            _ => "Rename the appearance state. Press Return or click away to save; Escape cancels.",
         };
         Application.Instance.AsyncInvoke(() =>
         {
@@ -2123,7 +2139,6 @@ public sealed partial class LayoutFoundryPanel : Panel
         if (_treeGrid.IsEditing)
         {
             _inlineDraft = null;
-            _inlineDraftCommitRequested = false;
             SetInlineEditing(false);
             _treeGrid.CancelEdit();
         }
@@ -2149,13 +2164,12 @@ public sealed partial class LayoutFoundryPanel : Panel
                 InlineDraftKind.Sheet => "New Page",
                 _ => string.Empty,
             });
-        _inlineDraftCommitRequested = false;
         SetInlineEditing(true);
         _statusLabel.Text = kind switch
         {
-            InlineDraftKind.Folder => "Name the new folder, then press Return.",
-            InlineDraftKind.Sheet => "Name the new layout, then press Return.",
-            _ => "Name the new appearance state, then press Return.",
+            InlineDraftKind.Folder => "Name the new folder. Press Return or click away to create; Escape cancels.",
+            InlineDraftKind.Sheet => "Name the new layout. Press Return or click away to create; Escape cancels.",
+            _ => "Name the new appearance state. Press Return or click away to create; Escape cancels.",
         };
         PopulateTree();
 
@@ -2249,6 +2263,12 @@ public sealed partial class LayoutFoundryPanel : Panel
             return;
         }
 
+        if (ReferenceEquals(eventArgs.GridColumn, _notesColumn))
+        {
+            await EditHierarchyNotesAsync(PropertyInteractionTargets(item.Node.Key));
+            return;
+        }
+
         if (!ReferenceEquals(eventArgs.GridColumn, _printColumn) || !item.HasSheetTargets)
             return;
 
@@ -2267,6 +2287,39 @@ public sealed partial class LayoutFoundryPanel : Panel
             ? include
                 ? "Enabled for printing."
                 : "Disabled from printing."
+            : DiagnosticMessage(result);
+        RefreshOverview();
+    }
+
+    private async Task EditHierarchyNotesAsync(IReadOnlyList<OverviewNodeKey> targets)
+    {
+        var snapshot = LayoutFoundryUiHost.CaptureSnapshot();
+        var applicable = targets.Where(target => target.Kind is
+                OverviewNodeKind.Folder or OverviewNodeKind.Sheet)
+            .Distinct()
+            .ToArray();
+        if (snapshot is null || applicable.Length == 0)
+        {
+            _statusLabel.Text = "Notes are available for folders and layouts.";
+            return;
+        }
+
+        var values = applicable.Select(target => target.Kind == OverviewNodeKind.Folder
+                ? snapshot.Folders.GetValueOrDefault(target.Id)?.Notes ?? string.Empty
+                : snapshot.Sheets.GetValueOrDefault(target.Id)?.Notes ?? string.Empty)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        var dialog = new HierarchyNotesDialog(
+            applicable.Length == 1 ? "Notes" : $"Notes for {applicable.Length} items",
+            values.Length == 1 ? values[0] : string.Empty,
+            values.Length > 1);
+        dialog.ShowModal(this);
+        if (!dialog.Accepted) return;
+
+        _statusLabel.Text = "Saving notes…";
+        var result = await LayoutFoundryUiHost.UpdateHierarchyNotesAsync(applicable, dialog.Notes);
+        _statusLabel.Text = result.Succeeded
+            ? applicable.Length == 1 ? "Notes updated." : $"Notes updated on {applicable.Length} items."
             : DiagnosticMessage(result);
         RefreshOverview();
     }
@@ -2524,21 +2577,11 @@ public sealed partial class LayoutFoundryPanel : Panel
 
     private async Task OnTreeCellEditedAsync(GridViewCellEventArgs eventArgs)
     {
-        if (_inlineDraft is not { } draft)
+        if (_inlineDraft is null)
         {
             return;
         }
 
-        if (!IsRenameDraft(draft.Kind) && !_inlineDraftCommitRequested)
-        {
-            _inlineDraft = null;
-            SetInlineEditing(false);
-            PopulateTree();
-            _statusLabel.Text = "Creation cancelled.";
-            return;
-        }
-
-        _inlineDraftCommitRequested = false;
         await CommitInlineDraftAsync(eventArgs);
     }
 
@@ -2892,7 +2935,8 @@ public sealed partial class LayoutFoundryPanel : Panel
         ReferenceEquals(column, _templateColumn) ||
         ReferenceEquals(column, _paperColumn) ||
         ReferenceEquals(column, _displayModeColumn) ||
-        ReferenceEquals(column, _appearanceStateColumn);
+        ReferenceEquals(column, _appearanceStateColumn) ||
+        ReferenceEquals(column, _notesColumn);
 
     private bool IsInlineRenameTarget(HierarchyTreeItem item, GridColumn? column = null) =>
         (column is null || ReferenceEquals(column, _layoutsColumn)) &&
@@ -3809,6 +3853,19 @@ public sealed partial class LayoutFoundryPanel : Panel
                     ? "Inherited"
                     : $"{appearance.VisibleLayerCount + appearance.HiddenLayerCount} layer · " +
                       $"{appearance.ObjectDisplayOverrideCount} mode";
+
+        public string NotesText
+        {
+            get
+            {
+                if (Node.Key.Kind is not (OverviewNodeKind.Folder or OverviewNodeKind.Sheet))
+                    return string.Empty;
+                var notes = Node.Folder?.Notes ?? Node.Sheet?.Notes;
+                if (string.IsNullOrWhiteSpace(notes)) return "—";
+                return string.Join(" ", notes.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
+                    .Trim();
+            }
+        }
 
         private ViewportAppearanceSummary? AppearanceSummary() =>
             Node.Folder?.Appearance ?? Node.Sheet?.Appearance ?? Node.Detail?.Appearance;

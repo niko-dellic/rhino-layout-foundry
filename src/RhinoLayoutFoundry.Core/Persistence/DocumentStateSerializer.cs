@@ -29,7 +29,7 @@ public static class DocumentStateSerializer
             var projectInformation = state.SchemaVersion < 7
                 ? NormalizeProjectInformation(ProjectInformation.Empty)
                 : NormalizeProjectInformation(state.ProjectInfo);
-            return state with
+            return NormalizeCurrent(state with
             {
                 SchemaVersion = DocumentState.CurrentSchemaVersion,
                 SheetTemplates = state.SchemaVersion == 1 ? [] : state.Templates,
@@ -49,7 +49,7 @@ public static class DocumentStateSerializer
                 CapabilityLinks = [],
                 AppearanceStateResources = [],
                 AppearanceStateAssignments = [],
-            };
+            });
         }
 
         if (state.SchemaVersion == 9)
@@ -100,6 +100,14 @@ public static class DocumentStateSerializer
             });
         }
 
+        if (state.SchemaVersion == 13)
+        {
+            return NormalizeCurrent(state with
+            {
+                SchemaVersion = DocumentState.CurrentSchemaVersion,
+            });
+        }
+
         if (state.SchemaVersion != DocumentState.CurrentSchemaVersion)
         {
             throw new NotSupportedException(
@@ -111,6 +119,12 @@ public static class DocumentStateSerializer
 
     private static DocumentState NormalizeCurrent(DocumentState state) => state with
         {
+            Folders = state.Folders
+                .Select(item => item with { Notes = item.Notes ?? string.Empty })
+                .ToArray(),
+            Sheets = state.Sheets.ToDictionary(
+                pair => pair.Key,
+                pair => pair.Value with { Notes = pair.Value.Notes ?? string.Empty }),
             ObserverCanvas = state.Canvas,
             ImportRecovery = state.Recovery,
             ProjectData = NormalizeProjectInformation(state.ProjectInfo),

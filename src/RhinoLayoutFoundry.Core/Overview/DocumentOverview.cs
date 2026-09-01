@@ -30,7 +30,8 @@ public sealed record FolderOverview(
     int Order,
     TemplateCapability TemplateCapabilities = TemplateCapability.None,
     ViewportAppearanceSummary? Appearance = null,
-    AppearanceStateBindingOverview? AppearanceState = null);
+    AppearanceStateBindingOverview? AppearanceState = null,
+    string Notes = "");
 
 public sealed record SheetOverview(
     Guid PageViewId,
@@ -47,7 +48,8 @@ public sealed record SheetOverview(
     bool IsTemplate = false,
     TemplateCapability TemplateCapabilities = TemplateCapability.None,
     ViewportAppearanceSummary? Appearance = null,
-    AppearanceStateBindingOverview? AppearanceState = null)
+    AppearanceStateBindingOverview? AppearanceState = null,
+    string Notes = "")
 {
     public int DetailCount => Details.Count;
 

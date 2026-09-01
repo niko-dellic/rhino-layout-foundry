@@ -34,7 +34,8 @@ public sealed record ObserverFolderSnapshot(
     Guid Id,
     Guid? ParentId,
     string Name,
-    int Order);
+    int Order,
+    string Notes = "");
 
 public sealed record ObserverSheetSnapshot(
     Guid PageViewId,
@@ -47,7 +48,8 @@ public sealed record ObserverSheetSnapshot(
     IReadOnlyList<ObserverDetailSnapshot> Details,
     bool IncludeInPrintAll,
     long PreviewContentVersion,
-    IReadOnlyList<OverviewIssue>? Diagnostics = null)
+    IReadOnlyList<OverviewIssue>? Diagnostics = null,
+    string Notes = "")
 {
     public IReadOnlyList<OverviewIssue> Issues => Diagnostics ?? [];
 }

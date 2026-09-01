@@ -58,6 +58,27 @@ public sealed class OverviewTreeBuilderTests
     }
 
     [Fact]
+    public void FolderAndSheetNotesParticipateInSearch()
+    {
+        var overview = CreateOverview() with
+        {
+            Folders = CreateOverview().Folders.Select(folder => folder.Name == "Plans"
+                ? folder with { Notes = "Permit coordination" }
+                : folder).ToArray(),
+            Sheets = CreateOverview().Sheets.Select(sheet => sheet.Name == "A-100"
+                ? sheet with { Notes = "Demolition package" }
+                : sheet).ToArray(),
+        };
+
+        var folderMatch = Flatten(OverviewTreeBuilder.Build(overview, "permit")).ToArray();
+        var sheetMatch = Flatten(OverviewTreeBuilder.Build(overview, "demolition")).ToArray();
+
+        Assert.Contains(folderMatch, node => node.Label == "Plans");
+        Assert.Contains(folderMatch, node => node.Label == "A-001");
+        Assert.Contains(sheetMatch, node => node.Label == "A-100");
+    }
+
+    [Fact]
     public void SheetsFilterHidesDetailRows()
     {
         var roots = OverviewTreeBuilder.Build(

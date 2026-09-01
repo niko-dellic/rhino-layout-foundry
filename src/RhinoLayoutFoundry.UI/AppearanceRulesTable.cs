@@ -28,6 +28,8 @@ internal sealed class AppearanceRulesTable : Panel
     private RuleTarget[] _propertyTargets = [];
     private RuleTarget[] _editingTargets = [];
     private readonly HashSet<RuleTarget> _pickedTargets = [];
+    private readonly HashSet<RuleTarget> _dragHighlightedTargets = [];
+    private RuleTarget? _dragAnchorTarget;
     private readonly Dictionary<RuleTarget, AppearanceVisibilityCell> _visibilityCells = [];
 
     internal AppearanceRulesTable(
@@ -90,6 +92,8 @@ internal sealed class AppearanceRulesTable : Panel
         _tree.Columns.Add(_displayModeColumn);
         _tree.CellFormatting += OnCellFormatting;
         _tree.MouseDown += OnMouseDown;
+        _tree.MouseMove += OnMouseMove;
+        _tree.MouseUp += OnMouseUp;
         _tree.CellClick += OnCellClick;
         _search.TextChanged += (_, _) =>
         {
@@ -149,7 +153,8 @@ internal sealed class AppearanceRulesTable : Panel
                 return;
             cell.Target = row.Target;
             cell.Text = row.VisibilityText;
-            var selected = _pickedTargets.Contains(row.Target) ||
+            var selected = _dragHighlightedTargets.Contains(row.Target) ||
+                           _pickedTargets.Contains(row.Target) ||
                            args.CellState.HasFlag(CellStates.Selected);
             cell.BackgroundColor = RowBackground(args.Row, selected);
             cell.TextColor = selected ? SystemColors.SelectionText : args.CellTextColor;
@@ -246,7 +251,8 @@ internal sealed class AppearanceRulesTable : Panel
                 if (control is Label label)
                 {
                     label.Text = row.DisplayModeText;
-                    var selected = _pickedTargets.Contains(row.Target) ||
+                    var selected = _dragHighlightedTargets.Contains(row.Target) ||
+                                   _pickedTargets.Contains(row.Target) ||
                                    args.CellState.HasFlag(CellStates.Selected);
                     label.BackgroundColor = RowBackground(args.Row, selected);
                     label.TextColor = selected ? SystemColors.SelectionText : args.CellTextColor;
@@ -266,7 +272,8 @@ internal sealed class AppearanceRulesTable : Panel
         args.Font = FoundryTheme.HierarchyTableFont;
         if (row.IsObject && ReferenceEquals(args.Column, _visibilityColumn))
             args.ForegroundColor = FoundryTheme.MutedText;
-        if (_pickedTargets.Contains(row.Target) ||
+        if (_dragHighlightedTargets.Contains(row.Target) ||
+            _pickedTargets.Contains(row.Target) ||
             _tree.SelectedItems.OfType<AppearanceRow>().Any(item => item.Target == row.Target))
         {
             args.BackgroundColor = SystemColors.Selection;
@@ -285,11 +292,14 @@ internal sealed class AppearanceRulesTable : Panel
     private void OnMouseDown(object? sender, MouseEventArgs args)
     {
         _propertyTargets = [];
-        if ((args.Buttons & MouseButtons.Primary) == 0 || args.Modifiers != Keys.None) return;
+        if ((args.Buttons & MouseButtons.Primary) == 0) return;
         var cell = _tree.GetCellAt(args.Location);
-        if (cell.Item is not AppearanceRow row || cell.Column is null ||
-            !ReferenceEquals(cell.Column, _visibilityColumn) &&
-            !ReferenceEquals(cell.Column, _displayModeColumn)) return;
+        if (cell.Item is not AppearanceRow row) return;
+        var isPropertyColumn = ReferenceEquals(cell.Column, _visibilityColumn) ||
+                               ReferenceEquals(cell.Column, _displayModeColumn);
+        if (args.Modifiers == Keys.None && !isPropertyColumn)
+            BeginDragSelectionPreview(row);
+        if (args.Modifiers != Keys.None || !isPropertyColumn || cell.Column is null) return;
         var selected = _pickedTargets.Contains(row.Target)
             ? _pickedTargets.ToArray()
             : SelectedRows().Select(item => item.Target).ToArray();
@@ -305,6 +315,59 @@ internal sealed class AppearanceRulesTable : Panel
         _armedPropertyTarget = row.Target;
         if (wasArmed) ActivateProperty(row, cell.Column, _propertyTargets);
         Application.Instance.AsyncInvoke(() => _handledPropertyTarget = null);
+    }
+
+    private void OnMouseMove(object? sender, MouseEventArgs args)
+    {
+        if ((args.Buttons & MouseButtons.Primary) == 0 || _dragAnchorTarget is null) return;
+        if (_tree.GetCellAt(args.Location).Item is AppearanceRow row)
+            UpdateDragSelectionPreview(row);
+    }
+
+    private void OnMouseUp(object? sender, MouseEventArgs args)
+    {
+        if (_dragAnchorTarget is null) return;
+        var previewTargets = _dragHighlightedTargets.ToArray();
+        _dragAnchorTarget = null;
+        _dragHighlightedTargets.Clear();
+        // The native tree finalizes its range selection after MouseUp. Refresh
+        // on the next UI turn so the preview hands off without a visual gap.
+        Application.Instance.AsyncInvoke(() => ReloadTargets(previewTargets));
+    }
+
+    private void BeginDragSelectionPreview(AppearanceRow row)
+    {
+        _dragAnchorTarget = row.Target;
+        _dragHighlightedTargets.Clear();
+        _dragHighlightedTargets.Add(row.Target);
+        _tree.ReloadItem(row, reloadChildren: false);
+    }
+
+    private void UpdateDragSelectionPreview(AppearanceRow current)
+    {
+        if (_dragAnchorTarget is not { } anchor) return;
+        var visibleRows = VisibleRows(_roots).ToArray();
+        var anchorIndex = Array.FindIndex(visibleRows, row => row.Target == anchor);
+        var currentIndex = Array.FindIndex(visibleRows, row => row.Target == current.Target);
+        if (anchorIndex < 0 || currentIndex < 0) return;
+        var first = Math.Min(anchorIndex, currentIndex);
+        var last = Math.Max(anchorIndex, currentIndex);
+        var nextTargets = visibleRows[first..(last + 1)].Select(row => row.Target).ToHashSet();
+        if (_dragHighlightedTargets.SetEquals(nextTargets)) return;
+
+        var changedTargets = _dragHighlightedTargets.Except(nextTargets)
+            .Concat(nextTargets.Except(_dragHighlightedTargets))
+            .ToArray();
+        _dragHighlightedTargets.Clear();
+        _dragHighlightedTargets.UnionWith(nextTargets);
+        ReloadTargets(changedTargets);
+    }
+
+    private void ReloadTargets(IEnumerable<RuleTarget> targets)
+    {
+        var targetSet = targets.ToHashSet();
+        foreach (var row in Flatten(_roots).Where(row => targetSet.Contains(row.Target)))
+            _tree.ReloadItem(row, reloadChildren: false);
     }
 
     private void OnCellClick(object? sender, GridCellMouseEventArgs args)
@@ -547,6 +610,17 @@ internal sealed class AppearanceRulesTable : Panel
         {
             yield return root;
             foreach (var child in Flatten(root.Children.OfType<AppearanceRow>())) yield return child;
+        }
+    }
+
+    private static IEnumerable<AppearanceRow> VisibleRows(IEnumerable<AppearanceRow> roots)
+    {
+        foreach (var root in roots)
+        {
+            yield return root;
+            if (!root.Expanded) continue;
+            foreach (var child in VisibleRows(root.Children.OfType<AppearanceRow>()))
+                yield return child;
         }
     }
 

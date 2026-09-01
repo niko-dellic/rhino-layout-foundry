@@ -71,7 +71,8 @@ public sealed record SheetSnapshot(
     SheetTitleBlockData? TitleBlockData = null,
     BuiltInTitleBlockKind? TitleBlockBuiltInKind = null,
     IReadOnlyList<string>? SheetTags = null,
-    SheetNamingBinding? NamingBinding = null)
+    SheetNamingBinding? NamingBinding = null,
+    string Notes = "")
 {
     public IReadOnlyList<DetailSnapshot> Details => DetailSettings ?? [];
     public IReadOnlyList<string> Tags => SheetTags ?? [];

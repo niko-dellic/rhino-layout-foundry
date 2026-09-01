@@ -22,11 +22,15 @@ public sealed record SelectionInspectorModel(
     Guid? TitleBlockSourceInstanceId,
     bool DisplayModeIsMixed,
     Guid? DisplayModeId,
-    bool? TemplateRegistered)
+    bool? TemplateRegistered,
+    IReadOnlyList<OverviewNodeKey>? NotesTargets = null,
+    bool NotesIsMixed = false,
+    string NotesValue = "")
 {
     public int AffectedLayoutCount => AffectedLayoutIds.Count;
     public int AffectedDetailCount => AffectedDetailIds.Count;
     public bool HasSelection => SelectedFolderCount + SelectedLayoutCount + SelectedDetailCount > 0;
+    public IReadOnlyList<OverviewNodeKey> EditableNotesTargets => NotesTargets ?? [];
 
     public static SelectionInspectorModel Create(
         DocumentSnapshot snapshot,
@@ -67,6 +71,13 @@ public sealed record SelectionInspectorModel(
         bool? templateRegistered = keys.Length == 1 && keys[0].Kind == OverviewNodeKind.Sheet
             ? snapshot.Templates.Any(template => template.SourcePageViewId == keys[0].Id)
             : null;
+        var notesTargets = keys.Where(key => key.Kind is OverviewNodeKind.Folder or OverviewNodeKind.Sheet)
+            .ToArray();
+        var noteValues = notesTargets.Select(key => key.Kind == OverviewNodeKind.Folder
+                ? snapshot.Folders[key.Id].Notes ?? string.Empty
+                : snapshot.Sheets[key.Id].Notes ?? string.Empty)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
 
         return new SelectionInspectorModel(
             keys.Count(key => key.Kind == OverviewNodeKind.Folder),
@@ -86,7 +97,10 @@ public sealed record SelectionInspectorModel(
             titleBlocks.Length == 1 ? titleBlocks[0] : null,
             displayModes.Length > 1,
             displayModes.Length == 1 ? displayModes[0] : null,
-            templateRegistered);
+            templateRegistered,
+            notesTargets,
+            noteValues.Length > 1,
+            noteValues.Length == 1 ? noteValues[0] : string.Empty);
     }
 
     private static bool Exists(DocumentSnapshot snapshot, OverviewNodeKey key) => key.Kind switch

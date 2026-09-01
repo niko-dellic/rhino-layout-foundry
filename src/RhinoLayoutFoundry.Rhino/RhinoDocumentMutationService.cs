@@ -208,7 +208,8 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
             MoveSheetChange or MoveFolderChange or SetPrintInclusionChange or
             SetObserverCanvasStateChange or ReorderSheetsChange or
             ReorganizeHierarchyChange or SetTemplateCapabilitiesChange or
-            SetCapabilityTemplateLinkChange or UpdateLinkedSheetNamesChange;
+            SetCapabilityTemplateLinkChange or UpdateLinkedSheetNamesChange or
+            UpdateHierarchyNotesChange;
     }
 
     private OperationResult ApplyRename(
@@ -298,7 +299,8 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
         if (linkedNames is not null && ValidateLinkedSheetNames(document, linkedNames) is { } namingFailure)
             return namingFailure;
         var storedBeforeState = _stateStore.Get(document);
-        var beforeState = plan.Changes.Any(change => change is SetPrintInclusionChange or ReorderSheetsChange or ReorganizeHierarchyChange)
+        var beforeState = plan.Changes.Any(change => change is SetPrintInclusionChange or ReorderSheetsChange or
+            ReorganizeHierarchyChange or UpdateHierarchyNotesChange)
             ? WithCurrentPageRecords(document, storedBeforeState)
             : storedBeforeState;
         var folders = beforeState.Folders.ToList();
@@ -335,6 +337,7 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
                     templateRegistrations, templateLinks, templates),
                 SetCapabilityTemplateLinkChange link => ApplyTemplateLink(templateLinks, link),
                 UpdateLinkedSheetNamesChange naming => ApplyLinkedSheetBindings(sheets, naming),
+                UpdateHierarchyNotesChange notes => ApplyHierarchyNotes(folders, sheets, notes),
                 _ => Failure("operation.unsupported_plan", "The hierarchy operation is not supported."),
             };
             if (failure is not null)
@@ -995,6 +998,35 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
         return null;
     }
 
+    private static OperationResult? ApplyHierarchyNotes(
+        IList<FolderRecord> folders,
+        IDictionary<Guid, SheetRecord> sheets,
+        UpdateHierarchyNotesChange change)
+    {
+        foreach (var expected in change.ExpectedFolderNotes)
+        {
+            var index = folders.ToList().FindIndex(folder => folder.Id == expected.Key);
+            if (index < 0 ||
+                !string.Equals(folders[index].Notes ?? string.Empty, expected.Value, StringComparison.Ordinal))
+                return Failure("notes.before_value_changed", "A folder's notes changed before the edit was applied.");
+            if (!change.NewFolderNotes.TryGetValue(expected.Key, out var next))
+                return Failure("notes.plan_invalid", "The folder notes edit is incomplete.");
+            folders[index] = folders[index] with { Notes = next ?? string.Empty };
+        }
+
+        foreach (var expected in change.ExpectedSheetNotes)
+        {
+            if (!sheets.TryGetValue(expected.Key, out var sheet) ||
+                !string.Equals(sheet.Notes ?? string.Empty, expected.Value, StringComparison.Ordinal))
+                return Failure("notes.before_value_changed", "A layout's notes changed before the edit was applied.");
+            if (!change.NewSheetNotes.TryGetValue(expected.Key, out var next))
+                return Failure("notes.plan_invalid", "The layout notes edit is incomplete.");
+            sheets[expected.Key] = sheet with { Notes = next ?? string.Empty };
+        }
+
+        return null;
+    }
+
     private static OperationResult? ApplyRenameFolder(
         List<FolderRecord> folders,
         RenameFolderChange renameFolder)
@@ -1426,7 +1458,8 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
                         ? duplicate.DestinationParentFolderId
                         : duplicate.FolderIdMap[oldFolder.ParentId!.Value],
                     oldFolder.Id == source.Id ? duplicate.NewName : oldFolder.Name,
-                    oldFolder.Id == source.Id ? nextRootOrder : oldFolder.Order));
+                    oldFolder.Id == source.Id ? nextRootOrder : oldFolder.Order,
+                    oldFolder.Notes ?? string.Empty));
             }
 
             var sheets = beforeState.Sheets.ToDictionary(pair => pair.Key, pair => pair.Value);
@@ -1513,7 +1546,8 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
                         ? duplicate.DestinationParentFolderId
                         : duplicate.FolderIdMap[oldFolder.ParentId!.Value],
                     oldFolder.Id == source.Id ? duplicate.NewName : oldFolder.Name,
-                    oldFolder.Id == source.Id ? nextRootOrder : oldFolder.Order));
+                    oldFolder.Id == source.Id ? nextRootOrder : oldFolder.Order,
+                    oldFolder.Notes ?? string.Empty));
             }
         }
 

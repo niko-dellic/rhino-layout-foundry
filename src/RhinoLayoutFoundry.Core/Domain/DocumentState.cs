@@ -25,7 +25,7 @@ public sealed record DocumentState(
     IReadOnlyList<AppearanceStateRecord>? AppearanceStateResources = null,
     IReadOnlyList<AppearanceStateAssignment>? AppearanceStateAssignments = null)
 {
-    public const int CurrentSchemaVersion = 13;
+    public const int CurrentSchemaVersion = 14;
 
     [JsonIgnore]
     public IReadOnlyList<SheetTemplateRecipe> Templates => SheetTemplates ?? [];
@@ -158,7 +158,8 @@ public sealed record FolderRecord(
     Guid Id,
     Guid? ParentId,
     string Name,
-    int Order);
+    int Order,
+    string Notes = "");
 
 public sealed record SheetRecord(
     Guid PageViewId,
@@ -169,7 +170,8 @@ public sealed record SheetRecord(
     TitleBlockRole? TitleBlock,
     bool IncludeInPrintAll = true,
     SheetTitleBlockData? TitleBlockData = null,
-    SheetNamingBinding? NamingBinding = null);
+    SheetNamingBinding? NamingBinding = null,
+    string Notes = "");
 
 public sealed record SheetNamingBinding(
     string Pattern,

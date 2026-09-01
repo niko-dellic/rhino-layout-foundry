@@ -180,6 +180,12 @@ public sealed record SetPrintInclusionChange(
     IReadOnlyDictionary<Guid, bool> ExpectedValues,
     bool IncludeInPrintAll) : OperationChange;
 
+public sealed record UpdateHierarchyNotesChange(
+    IReadOnlyDictionary<Guid, string> ExpectedFolderNotes,
+    IReadOnlyDictionary<Guid, string> NewFolderNotes,
+    IReadOnlyDictionary<Guid, string> ExpectedSheetNotes,
+    IReadOnlyDictionary<Guid, string> NewSheetNotes) : OperationChange;
+
 public sealed record SetObserverCanvasStateChange(
     ObserverCanvasState ExpectedState,
     ObserverCanvasState NewState) : OperationChange;
