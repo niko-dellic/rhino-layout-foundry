@@ -104,7 +104,6 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
         KeyDown += OnKeyDown;
         KeyUp += OnKeyUp;
         TextInput += OnTextInput;
-        LostFocus += (_, _) => RequestNavigatorFolderDraftCommit();
         DragOver += OnDragOver;
         DragDrop += OnDragDrop;
         SizeChanged += (_, _) => RefreshPresentation();
@@ -299,15 +298,22 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
         _navigatorVisible = true;
         ExpandNavigatorFolderPath(parentFolderId);
         _navigatorRows = BuildNavigatorRows(_snapshot);
+        var draftId = Guid.NewGuid();
         _navigatorFolderDraft = new NavigatorFolderDraft(
-            Guid.NewGuid(),
+            draftId,
             parentFolderId,
             "New Folder",
             SelectAll: true);
         _navigatorFolderDraftCommitPending = false;
         EnsureNavigatorDraftVisible();
-        Focus();
         Invalidate();
+        Application.Instance.AsyncInvoke(() =>
+        {
+            if (_navigatorFolderDraft?.Id != draftId) return;
+            EnsureNavigatorDraftVisible();
+            Focus();
+            Invalidate();
+        });
     }
 
     internal void CancelNavigatorFolderDraft()

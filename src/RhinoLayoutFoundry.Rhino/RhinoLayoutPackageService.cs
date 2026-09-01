@@ -939,8 +939,9 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
                 continue;
             }
             var attributes = item.Attributes.Duplicate();
-            if (attributes.SetDisplayModeOverride(mode, detailId))
-                document.Objects.ModifyAttributes(item, attributes, quiet: true);
+            if (!RhinoObjectDisplayModeOverride.TrySet(attributes, mode, detailId) ||
+                !document.Objects.ModifyAttributes(item, attributes, quiet: true))
+                warnings.Add($"Rhino could not apply an object display-mode rule to '{item.Id}'.");
         }
     }
 

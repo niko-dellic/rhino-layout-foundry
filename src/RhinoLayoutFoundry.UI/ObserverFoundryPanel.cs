@@ -269,7 +269,7 @@ public sealed class ObserverFoundryPanel : Panel
         _navigatorButton.Checked = true;
         ApplySidebarVisibility();
         _canvas.BeginNavigatorFolderDraft(parentFolderId);
-        _status.Text = "Name the new folder. Press Return or click away to create; Escape cancels.";
+        _status.Text = string.Empty;
     }
 
     private async Task CommitNavigatorFolderDraftAsync(ObserverFolderDraftRequestedEventArgs eventArgs)

@@ -612,7 +612,10 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
                         using var mode = DisplayModeDescription.GetDisplayMode(rule.DisplayModeId)
                             ?? throw new InvalidOperationException(
                                 $"Display mode '{rule.DisplayModeName}' is unavailable.");
-                        if (!attributes.SetDisplayModeOverride(mode, detail.Viewport.Id))
+                        if (!RhinoObjectDisplayModeOverride.TrySet(
+                                attributes,
+                                mode,
+                                detail.Viewport.Id))
                             throw new InvalidOperationException(
                                 $"Rhino could not set an object display override on '{item.Id}'.");
                     }
@@ -2582,7 +2585,7 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
             using var mode = DisplayModeDescription.GetDisplayMode(pair.Value.DisplayModeId);
             if (mode is null) continue;
             var attributes = item.Attributes.Duplicate();
-            if (!attributes.SetDisplayModeOverride(mode, detailViewportId) ||
+            if (!RhinoObjectDisplayModeOverride.TrySet(attributes, mode, detailViewportId) ||
                 !document.Objects.ModifyAttributes(item, attributes, quiet: true))
                 throw new InvalidOperationException(
                     $"Rhino did not apply an object display override to '{item.Id}'.");

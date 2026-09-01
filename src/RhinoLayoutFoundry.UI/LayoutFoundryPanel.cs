@@ -121,7 +121,7 @@ public sealed partial class LayoutFoundryPanel : Panel
     private OverviewNodeKey? _hierarchyAppearanceStateEditingKey;
     private FilteredPicker? _activeHierarchyAppearanceStatePicker;
     private CellInteractionGuard? _cellInteractionGuard;
-    private CellInteractionGuard? _selectionPreservingCircleInteraction;
+    private CellInteractionGuard? _selectionPreservingPropertyInteraction;
     private InlineDraft? _inlineDraft;
     private Guid? _contextDestinationFolderId;
     private Guid? _contextPrintFolderId;
@@ -2207,7 +2207,7 @@ public sealed partial class LayoutFoundryPanel : Panel
             return;
         }
 
-        if (_selectionPreservingCircleInteraction is { } preserved &&
+        if (_selectionPreservingPropertyInteraction is { } preserved &&
             preserved.Key == item.Node.Key &&
             ReferenceEquals(preserved.Column, eventArgs.GridColumn))
         {
@@ -2839,7 +2839,7 @@ public sealed partial class LayoutFoundryPanel : Panel
         }
 
         _cellInteractionGuard = null;
-        _selectionPreservingCircleInteraction = null;
+        _selectionPreservingPropertyInteraction = null;
         _propertyInteractionTargets = [];
         if ((eventArgs.Buttons & MouseButtons.Primary) != 0 &&
             eventArgs.Modifiers == Keys.None &&
@@ -2854,22 +2854,47 @@ public sealed partial class LayoutFoundryPanel : Panel
 
             if (selected.Length > 1 &&
                 selected.Contains(item.Node.Key) &&
-                IsSelectionPreservingCircleColumn(column))
+                IsSelectionPreservingPropertyColumn(column))
             {
                 var interaction = new CellInteractionGuard(item.Node.Key, column);
-                _selectionPreservingCircleInteraction = interaction;
+                _selectionPreservingPropertyInteraction = interaction;
                 eventArgs.Handled = true;
                 ResetPendingDrag();
                 Application.Instance.AsyncInvoke(async () =>
                 {
-                    if (!ReferenceEquals(_selectionPreservingCircleInteraction, interaction))
+                    if (!ReferenceEquals(_selectionPreservingPropertyInteraction, interaction))
                         return;
 
-                    _selectionPreservingCircleInteraction = null;
+                    _selectionPreservingPropertyInteraction = null;
                     if (ReferenceEquals(column, _templateColumn))
                         ShowTemplateRolesPicker(
                             PropertyInteractionTargets(item.Node.Key),
                             eventArgs.Location);
+                    else if (ReferenceEquals(column, _paperColumn))
+                    {
+                        if (!item.HasSheetTargets)
+                            _statusLabel.Text = "Paper size applies to folders and layouts, not individual details.";
+                        else
+                            ShowPaperSizeMenu(
+                                PropertyInteractionTargets(item.Node.Key),
+                                item.Node.Key,
+                                eventArgs.Location);
+                    }
+                    else if (ReferenceEquals(column, _displayModeColumn))
+                    {
+                        if (!item.HasDetailTargets)
+                            _statusLabel.Text = "This row does not contain any detail viewports.";
+                        else
+                            BeginDisplayModeEdit(
+                                PropertyInteractionTargets(item.Node.Key),
+                                item);
+                    }
+                    else if (ReferenceEquals(column, _appearanceStateColumn))
+                        BeginAppearanceStateEdit(
+                            PropertyInteractionTargets(item.Node.Key),
+                            item);
+                    else if (ReferenceEquals(column, _notesColumn))
+                        await EditHierarchyNotesAsync(PropertyInteractionTargets(item.Node.Key));
                     else if (item.HasSheetTargets)
                         await TogglePrintInclusionAsync(item);
                 });
@@ -2945,9 +2970,8 @@ public sealed partial class LayoutFoundryPanel : Panel
         item.Node.Key.Kind is OverviewNodeKind.Folder or OverviewNodeKind.Sheet or
             OverviewNodeKind.AppearanceState;
 
-    private bool IsSelectionPreservingCircleColumn(GridColumn column) =>
-        ReferenceEquals(column, _printColumn) ||
-        ReferenceEquals(column, _templateColumn);
+    private bool IsSelectionPreservingPropertyColumn(GridColumn column) =>
+        IsInteractivePropertyColumn(column);
 
     private bool ConsumeCellInteractionGuard(HierarchyTreeItem item, GridColumn column)
     {
