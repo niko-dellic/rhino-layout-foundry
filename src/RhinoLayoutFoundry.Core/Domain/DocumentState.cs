@@ -25,7 +25,7 @@ public sealed record DocumentState(
     IReadOnlyList<AppearanceStateRecord>? AppearanceStateResources = null,
     IReadOnlyList<AppearanceStateAssignment>? AppearanceStateAssignments = null)
 {
-    public const int CurrentSchemaVersion = 11;
+    public const int CurrentSchemaVersion = 12;
 
     [JsonIgnore]
     public IReadOnlyList<SheetTemplateRecipe> Templates => SheetTemplates ?? [];
@@ -61,9 +61,6 @@ public sealed record DocumentState(
             .Where(template => template.SourcePageViewId is not { } sourceId ||
                                existingPageViewIds.Contains(sourceId))
             .ToArray();
-        var missingRegistrationIds = TemplateRegistrations.Where(item =>
-                item.Source.Kind == HierarchyScopeKind.Sheet && !existingPageViewIds.Contains(item.Source.Id))
-            .Select(item => item.Id).ToHashSet();
         var registrations = TemplateRegistrations.Where(item =>
                 item.Source.Kind != HierarchyScopeKind.Sheet || existingPageViewIds.Contains(item.Source.Id))
             .ToArray();
@@ -71,23 +68,6 @@ public sealed record DocumentState(
         var rules = AppearanceRules.Where(item =>
                 item.Scope.Kind != HierarchyScopeKind.Sheet || existingPageViewIds.Contains(item.Scope.Id))
             .ToList();
-        foreach (var link in TemplateLinks.Where(link =>
-                     missingRegistrationIds.Contains(link.SourceRegistrationId) &&
-                     (link.Target.Kind != HierarchyScopeKind.Sheet || existingPageViewIds.Contains(link.Target.Id))))
-        {
-            var current = rules.LastOrDefault(item => item.Scope == link.Target);
-            var layers = link.Capability == TemplateCapability.LayerStates
-                ? link.LastResolved.Layers.Concat(current?.LayerRules ?? [])
-                    .GroupBy(rule => rule.Layer.LayerId).Select(group => group.Last()).ToArray()
-                : current?.LayerRules.ToArray() ?? [];
-            var objects = link.Capability == TemplateCapability.ObjectDisplayModes
-                ? link.LastResolved.Objects.Concat(current?.ObjectDisplayRules ?? [])
-                    .GroupBy(rule => rule.Selector).Select(group => group.Last()).ToArray()
-                : current?.ObjectDisplayRules.ToArray() ?? [];
-            rules.RemoveAll(item => item.Scope == link.Target);
-            if (layers.Length > 0 || objects.Length > 0)
-                rules.Add(new HierarchyViewportRuleSet(link.Target, layers, objects));
-        }
         var links = TemplateLinks.Where(item =>
                 registrationIds.Contains(item.SourceRegistrationId) &&
                 (item.Target.Kind != HierarchyScopeKind.Sheet || existingPageViewIds.Contains(item.Target.Id)))

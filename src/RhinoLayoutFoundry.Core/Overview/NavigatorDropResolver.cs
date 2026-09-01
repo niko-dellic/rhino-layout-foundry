@@ -39,8 +39,11 @@ public sealed class NavigatorDropResolver
             return NavigatorDropResolution.Invalid("The pointer is outside the navigator.");
 
         var kinds = movingKinds.Distinct().ToArray();
-        if (kinds.Length == 0 || kinds.Any(kind => kind is not (OverviewNodeKind.Folder or OverviewNodeKind.Sheet)))
-            return NavigatorDropResolution.Invalid("Only folders and layouts can be reorganized.");
+        if (kinds.Length == 0 || kinds.Any(kind => kind is not (
+                OverviewNodeKind.Folder or OverviewNodeKind.Sheet or OverviewNodeKind.AppearanceState)))
+            return NavigatorDropResolution.Invalid("Only folders, layouts, and appearance states can be reorganized.");
+        if (kinds.Contains(OverviewNodeKind.AppearanceState) && kinds.Length > 1)
+            return NavigatorDropResolution.Invalid("Appearance states must be moved separately from folders and layouts.");
 
         var row = visibleRows.FirstOrDefault(candidate =>
             pointerY >= candidate.Top && pointerY <= candidate.Top + candidate.Height);
@@ -54,6 +57,16 @@ public sealed class NavigatorDropResolver
 
         if (row.Key.Kind == OverviewNodeKind.Detail)
             return NavigatorDropResolution.Invalid("Details remain attached to their layout.");
+
+        if (kinds[0] == OverviewNodeKind.AppearanceState)
+        {
+            var localYForState = pointerY - row.Top;
+            var edgeForState = Math.Max(2, row.Height * EdgeZoneRatio);
+            return row.Key.Kind == OverviewNodeKind.Folder &&
+                   localYForState > edgeForState && localYForState < row.Height - edgeForState
+                ? IntoFolder(row.Key.Id)
+                : IntoFolder(row.ParentFolderId == Guid.Empty ? rootFolderId : row.ParentFolderId);
+        }
 
         var mixed = kinds.Length > 1;
         var localY = pointerY - row.Top;

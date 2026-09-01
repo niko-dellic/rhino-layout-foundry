@@ -132,26 +132,17 @@ internal static class FoundryViewIcons
         graphics.DrawRectangle(new Pen(FoundryTheme.PrimaryText, Hairline), 4.5f, 4.5f, 7, 7);
     });
 
-    internal static Icon LayerState() => NewIcon(graphics =>
+    internal static Icon AppearanceState() => NewIcon(graphics =>
     {
-        var pen = new Pen(FoundryTheme.PrimaryText, Emphasis);
+        var color = FoundryTheme.PrimaryText;
+        var pen = new Pen(color, Hairline);
         graphics.DrawLine(pen, 2, 4, 8, 1.75f);
         graphics.DrawLine(pen, 8, 1.75f, 14, 4);
         graphics.DrawLine(pen, 14, 4, 8, 6.25f);
         graphics.DrawLine(pen, 8, 6.25f, 2, 4);
-        graphics.DrawLine(pen, 2, 7.75f, 8, 10);
-        graphics.DrawLine(pen, 8, 10, 14, 7.75f);
-        graphics.DrawLine(pen, 2, 11.5f, 8, 13.75f);
-        graphics.DrawLine(pen, 8, 13.75f, 14, 11.5f);
-    });
-
-    internal static Icon ObjectDisplayState() => NewIcon(graphics =>
-    {
-        var pen = new Pen(FoundryTheme.PrimaryText, Emphasis);
-        graphics.DrawEllipse(pen, 5, 1.75f, 6, 2.75f);
-        graphics.DrawLine(pen, 5, 3.1f, 2.5f, 12.75f);
-        graphics.DrawLine(pen, 11, 3.1f, 13.5f, 12.75f);
-        graphics.DrawEllipse(pen, 2.5f, 11.25f, 11, 3);
+        graphics.DrawLine(pen, 2, 8, 8, 10.25f);
+        graphics.DrawLine(pen, 8, 10.25f, 14, 8);
+        graphics.DrawEllipse(new Pen(color, Emphasis), 9.75f, 10.25f, 4, 4);
     });
 
     internal static Icon NewLayout() => NewIcon(graphics =>
@@ -159,32 +150,6 @@ internal static class FoundryViewIcons
         var color = FoundryTheme.PrimaryText;
         graphics.DrawRectangle(new Pen(color, Emphasis), 1.5f, 3.5f, 9, 10.5f);
         graphics.DrawRectangle(new Pen(color, Hairline), 3.5f, 6, 5, 5.5f);
-        DrawPlus(graphics, color, 12.5f, 3.5f);
-    });
-
-    internal static Icon NewLayerState() => NewIcon(graphics =>
-    {
-        var color = FoundryTheme.PrimaryText;
-        var pen = new Pen(color, Hairline);
-        graphics.DrawLine(pen, 1.5f, 5, 5.5f, 3.25f);
-        graphics.DrawLine(pen, 5.5f, 3.25f, 9.5f, 5);
-        graphics.DrawLine(pen, 9.5f, 5, 5.5f, 6.75f);
-        graphics.DrawLine(pen, 5.5f, 6.75f, 1.5f, 5);
-        graphics.DrawLine(pen, 1.5f, 8, 5.5f, 9.75f);
-        graphics.DrawLine(pen, 5.5f, 9.75f, 9.5f, 8);
-        graphics.DrawLine(pen, 1.5f, 11, 5.5f, 12.75f);
-        graphics.DrawLine(pen, 5.5f, 12.75f, 9.5f, 11);
-        DrawPlus(graphics, color, 12.5f, 3.5f);
-    });
-
-    internal static Icon NewObjectDisplayState() => NewIcon(graphics =>
-    {
-        var color = FoundryTheme.PrimaryText;
-        var pen = new Pen(color, Hairline);
-        graphics.DrawEllipse(pen, 3.25f, 3.25f, 4.5f, 2);
-        graphics.DrawLine(pen, 3.25f, 4.25f, 1.75f, 12);
-        graphics.DrawLine(pen, 7.75f, 4.25f, 9.25f, 12);
-        graphics.DrawEllipse(pen, 1.75f, 10.75f, 7.5f, 2.5f);
         DrawPlus(graphics, color, 12.5f, 3.5f);
     });
 
@@ -246,6 +211,21 @@ internal static class FoundryViewIcons
     internal static Icon ImportPackage() => TransferPackage(arrowPointsDown: true);
 
     internal static Icon ExportPackage() => TransferPackage(arrowPointsDown: false);
+
+    internal static Icon Print() => NewIcon(graphics =>
+    {
+        var color = FoundryTheme.PrimaryText;
+        var pen = new Pen(color, Emphasis);
+        graphics.DrawRectangle(pen, 3.5f, 1.5f, 9, 5.5f);
+        graphics.DrawLine(pen, 1.5f, 6, 14.5f, 6);
+        graphics.DrawLine(pen, 1.5f, 6, 1.5f, 12.5f);
+        graphics.DrawLine(pen, 14.5f, 6, 14.5f, 12.5f);
+        graphics.DrawLine(pen, 1.5f, 12.5f, 3.5f, 12.5f);
+        graphics.DrawLine(pen, 12.5f, 12.5f, 14.5f, 12.5f);
+        graphics.FillEllipse(color, 11.5f, 8, 1.25f, 1.25f);
+        graphics.DrawRectangle(pen, 3.5f, 10, 9, 4.5f);
+        graphics.DrawLine(new Pen(color, Hairline), 5, 12, 11, 12);
+    });
 
     internal static Icon FitAll() => NewIcon(graphics =>
     {

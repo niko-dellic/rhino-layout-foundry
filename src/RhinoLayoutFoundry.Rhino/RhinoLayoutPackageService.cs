@@ -1394,11 +1394,6 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
             if (RemapScope(sourceLink.Target) is not { } targetScope ||
                 !registrationMap.TryGetValue(sourceLink.SourceRegistrationId, out var registrationId))
                 continue;
-            var payload = sourceLink.LastResolved with
-            {
-                LayerRules = sourceLink.LastResolved.Layers.Select(RemapLayerRule).ToArray(),
-                ObjectDisplayRules = sourceLink.LastResolved.Objects.Select(RemapObjectRule).ToArray(),
-            };
             capabilityLinks.Add(sourceLink with
             {
                 Id = Guid.NewGuid(),
@@ -1409,7 +1404,7 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
                         mapping.SourceDetailViewportId),
                     detailsBySource.GetValueOrDefault(mapping.TargetDetailViewportId,
                         mapping.TargetDetailViewportId))).ToArray(),
-                LastResolved = payload,
+                LastResolved = sourceLink.LastResolved,
             });
         }
 
@@ -1443,8 +1438,7 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
             if (RemapScope(sourceAssignment.Target) is not { } target ||
                 !appearanceStateMap.TryGetValue(sourceAssignment.StateId, out var stateId))
                 continue;
-            appearanceAssignments.RemoveAll(item =>
-                item.Target == target && item.Kind == sourceAssignment.Kind);
+            appearanceAssignments.RemoveAll(item => item.Target == target);
             appearanceAssignments.Add(sourceAssignment with
             {
                 Id = Guid.NewGuid(),

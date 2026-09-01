@@ -29,6 +29,7 @@ public sealed partial class LayoutFoundryPanel : Panel
     private readonly FoundryToolbarIconButton _createButton;
     private readonly FoundryToolbarIconButton _deleteButton;
     private readonly FoundryToolbarIconButton _projectInfoButton;
+    private readonly FoundryToolbarIconButton _printButton;
     private readonly FoundryToolbarIconButton _importButton;
     private readonly FoundryToolbarIconButton _exportButton;
     private readonly FoundryToolbarIconButton _listViewButton;
@@ -44,11 +45,11 @@ public sealed partial class LayoutFoundryPanel : Panel
     private readonly GridColumn _paperColumn;
     private readonly GridColumn _detailsColumn;
     private readonly GridColumn _displayModeColumn;
-    private readonly GridColumn _layersColumn;
-    private readonly GridColumn _objectModesColumn;
+    private readonly GridColumn _appearanceStateColumn;
     private readonly GridColumn _statusColumn;
     private readonly TextBoxCell _paperCell;
     private readonly CustomCell _displayModeCell;
+    private readonly CustomCell _appearanceStateCell;
     private readonly Panel _contentHost;
     private readonly Panel _toolbarSurface;
     private readonly Panel _renameActions;
@@ -65,8 +66,7 @@ public sealed partial class LayoutFoundryPanel : Panel
     private ButtonMenuItem _setCurrentMenuItem = null!;
     private ButtonMenuItem _newFolderMenuItem = null!;
     private ButtonMenuItem _newPageMenuItem = null!;
-    private ButtonMenuItem _newLayerStateMenuItem = null!;
-    private ButtonMenuItem _newObjectStateMenuItem = null!;
+    private ButtonMenuItem _newAppearanceStateMenuItem = null!;
     private ButtonMenuItem _duplicateSelectionMenuItem = null!;
     private ButtonMenuItem _copySelectionMenuItem = null!;
     private ButtonMenuItem _pasteSelectionMenuItem = null!;
@@ -109,11 +109,16 @@ public sealed partial class LayoutFoundryPanel : Panel
     private PointF? _dragStart;
     private HierarchyTreeItem? _dragSourceItem;
     private IReadOnlyList<OverviewNodeKey> _dragSourceKeys = [];
+    private NavigatorDropResolution? _treeDrop;
     private IReadOnlyList<OverviewNodeKey> _propertyInteractionTargets = [];
     private IReadOnlyList<OverviewNodeKey> _hierarchyDisplayModeTargets = [];
     private Dictionary<string, Guid> _hierarchyDisplayModes = new(StringComparer.OrdinalIgnoreCase);
     private OverviewNodeKey? _hierarchyDisplayModeEditingKey;
     private FilteredPicker? _activeHierarchyDisplayModePicker;
+    private IReadOnlyList<OverviewNodeKey> _hierarchyAppearanceStateTargets = [];
+    private Dictionary<string, Guid?> _hierarchyAppearanceStates = new(StringComparer.OrdinalIgnoreCase);
+    private OverviewNodeKey? _hierarchyAppearanceStateEditingKey;
+    private FilteredPicker? _activeHierarchyAppearanceStatePicker;
     private CellInteractionGuard? _cellInteractionGuard;
     private CellInteractionGuard? _selectionPreservingCircleInteraction;
     private InlineDraft? _inlineDraft;
@@ -211,6 +216,12 @@ public sealed partial class LayoutFoundryPanel : Panel
         {
             Enabled = false,
         };
+        _printButton = new FoundryToolbarIconButton(
+            FoundryViewIcons.Print(),
+            "Print enabled layouts to PDF")
+        {
+            Enabled = false,
+        };
         _importButton = new FoundryToolbarIconButton(
             FoundryViewIcons.ImportPackage(),
             "Import layout package")
@@ -247,8 +258,9 @@ public sealed partial class LayoutFoundryPanel : Panel
             Binding = Binding.Property<HierarchyTreeItem, string>(item => item.PaperCellText),
         };
         _displayModeCell = CreateDisplayModeCell();
+        _appearanceStateCell = CreateAppearanceStateCell();
         (_treeGrid, _layoutsColumn, _printColumn, _templateColumn, _paperColumn, _detailsColumn,
-            _displayModeColumn, _layersColumn, _objectModesColumn, _statusColumn) = CreateTreeGrid();
+            _displayModeColumn, _appearanceStateColumn, _statusColumn) = CreateTreeGrid();
         CreateHierarchyContextMenu();
         _toolbarSurface = FoundryTheme.Surface(
             CreateToolbarContent(),
@@ -342,6 +354,7 @@ public sealed partial class LayoutFoundryPanel : Panel
         _treeGrid.MouseMove += OnTreeMouseMove;
         _treeGrid.DragOver += OnTreeDragOver;
         _treeGrid.DragDrop += async (_, eventArgs) => await CompleteInternalDragAsync(eventArgs);
+        _treeGrid.DragLeave += (_, _) => ClearTreeDropFeedback();
         _treeGrid.DragEnd += (_, _) => ResetPendingDrag();
         _treeGrid.CellClick += async (_, eventArgs) => await OnTreeCellClickAsync(eventArgs);
         _treeGrid.CellEdited += async (_, eventArgs) => await OnTreeCellEditedAsync(eventArgs);
@@ -364,6 +377,7 @@ public sealed partial class LayoutFoundryPanel : Panel
         _manageButton.Click += (_, _) => OpenSelectedProperties();
         _deleteButton.Click += (_, _) => RequestDeleteSelection(SelectedKeys());
         _projectInfoButton.Click += (_, _) => OpenProjectInformation();
+        _printButton.Click += async (_, _) => await PrintHierarchyScopeAsync(null);
         _importButton.Click += async (_, _) => await ImportLayoutPackageAsync();
         _exportButton.Click += async (_, _) => await ExportLayoutPackageAsync();
         _listViewButton.Click += (_, _) => ShowListView();
@@ -400,7 +414,7 @@ public sealed partial class LayoutFoundryPanel : Panel
     private (TreeGridView TreeGrid, GridColumn LayoutsColumn, GridColumn PrintColumn,
         GridColumn TemplateColumn,
         GridColumn PaperColumn, GridColumn DetailsColumn, GridColumn DisplayModeColumn,
-        GridColumn LayersColumn, GridColumn ObjectModesColumn, GridColumn StatusColumn) CreateTreeGrid()
+        GridColumn AppearanceStateColumn, GridColumn StatusColumn) CreateTreeGrid()
     {
         var treeGrid = new TreeGridView
         {
@@ -472,28 +486,14 @@ public sealed partial class LayoutFoundryPanel : Panel
             Sortable = true,
         };
         treeGrid.Columns.Add(displayModeColumn);
-        var layersColumn = new GridColumn
+        var appearanceStateColumn = new GridColumn
         {
-            HeaderText = "Layers",
-            DataCell = new TextBoxCell
-            {
-                Binding = Binding.Property<HierarchyTreeItem, string>(item => item.LayerStateText),
-            },
-            Width = 142,
+            HeaderText = "Appearance state",
+            DataCell = _appearanceStateCell,
+            Width = 176,
             Sortable = false,
         };
-        treeGrid.Columns.Add(layersColumn);
-        var objectModesColumn = new GridColumn
-        {
-            HeaderText = "Object modes",
-            DataCell = new TextBoxCell
-            {
-                Binding = Binding.Property<HierarchyTreeItem, string>(item => item.ObjectModesText),
-            },
-            Width = 144,
-            Sortable = false,
-        };
-        treeGrid.Columns.Add(objectModesColumn);
+        treeGrid.Columns.Add(appearanceStateColumn);
         var statusColumn = new GridColumn
         {
             HeaderText = "Status",
@@ -506,18 +506,28 @@ public sealed partial class LayoutFoundryPanel : Panel
         treeGrid.Columns.Add(statusColumn);
 
         return (treeGrid, layoutsColumn, printColumn, templateColumn, paperColumn, detailsColumn,
-            displayModeColumn, layersColumn, objectModesColumn, statusColumn);
+            displayModeColumn, appearanceStateColumn, statusColumn);
     }
 
     private void OnHierarchyCellFormatting(
         object? sender,
         GridCellFormatEventArgs eventArgs)
     {
-        if (eventArgs.Item is not HierarchyTreeItem item ||
-            item.Node.Key.Kind != OverviewNodeKind.Folder)
+        if (eventArgs.Item is not HierarchyTreeItem item)
         {
             return;
         }
+
+        if (_treeDrop is { IsValid: true, HighlightFolderId: { } highlight } &&
+            item.Node.Key.Kind == OverviewNodeKind.Folder && item.Node.Key.Id == highlight)
+        {
+            eventArgs.BackgroundColor = FoundryTheme.HierarchyDropBackground;
+            eventArgs.ForegroundColor = FoundryTheme.HierarchyDropForeground;
+            return;
+        }
+
+        if (item.Node.Key.Kind != OverviewNodeKind.Folder)
+            return;
 
         if (_treeGrid.SelectedItems
             .OfType<HierarchyTreeItem>()
@@ -608,6 +618,55 @@ public sealed partial class LayoutFoundryPanel : Panel
         };
 
         return cell;
+    }
+
+    private CustomCell CreateAppearanceStateCell()
+    {
+        return new CustomCell
+        {
+            GetIdentifier = eventArgs => eventArgs.Item is HierarchyTreeItem item &&
+                                         _hierarchyAppearanceStateEditingKey == item.Node.Key
+                ? "foundry-appearance-state-editor"
+                : "foundry-appearance-state-label",
+            CreateCell = eventArgs =>
+            {
+                if (eventArgs.Item is HierarchyTreeItem item &&
+                    _hierarchyAppearanceStateEditingKey == item.Node.Key)
+                {
+                    FilteredPicker? picker = null;
+                    picker = new FilteredPicker([], "Search appearance states", popupHeight: 280, controlHeight: 24);
+                    picker.SelectionCommitted += async (_, _) =>
+                    {
+                        if (ReferenceEquals(_activeHierarchyAppearanceStatePicker, picker))
+                            await CommitHierarchyAppearanceStateAsync();
+                    };
+                    picker.DismissRequested += (_, _) =>
+                    {
+                        if (ReferenceEquals(_activeHierarchyAppearanceStatePicker, picker))
+                            CloseHierarchyAppearanceStatePicker();
+                    };
+                    return picker;
+                }
+
+                return new Label { VerticalAlignment = VerticalAlignment.Center };
+            },
+            ConfigureCell = (eventArgs, control) =>
+            {
+                if (eventArgs.Item is not HierarchyTreeItem item) return;
+                if (control is Label label)
+                {
+                    label.Text = item.AppearanceStateText;
+                    label.TextColor = eventArgs.CellTextColor;
+                    return;
+                }
+
+                if (control is not FilteredPicker picker ||
+                    _hierarchyAppearanceStateEditingKey != item.Node.Key) return;
+                picker.SetChoices(_hierarchyAppearanceStates.Keys);
+                picker.Text = CurrentAppearanceStateChoice();
+                _activeHierarchyAppearanceStatePicker = picker;
+            },
+        };
     }
 
     private void SetInlineEditing(bool enabled)
@@ -814,24 +873,21 @@ public sealed partial class LayoutFoundryPanel : Panel
             case CreateResourceKind.Layout:
                 OpenCreateLayouts(destination);
                 break;
-            case CreateResourceKind.LayerState:
-                PromptAppearanceStateCreation(AppearanceStateKind.LayerState, destination);
-                break;
-            case CreateResourceKind.ObjectDisplayState:
-                PromptAppearanceStateCreation(AppearanceStateKind.ObjectDisplayState, destination);
+            case CreateResourceKind.AppearanceState:
+                PromptAppearanceStateCreation(destination);
                 break;
         }
 
         return Task.CompletedTask;
     }
 
-    private void QueueAppearanceStateCreation(AppearanceStateKind kind, Guid? destinationFolderId)
+    private void QueueAppearanceStateCreation(Guid? destinationFolderId)
     {
         Application.Instance.AsyncInvoke(() =>
         {
             try
             {
-                PromptAppearanceStateCreation(kind, destinationFolderId);
+                PromptAppearanceStateCreation(destinationFolderId);
             }
             catch (Exception exception)
             {
@@ -840,7 +896,7 @@ public sealed partial class LayoutFoundryPanel : Panel
         });
     }
 
-    private void PromptAppearanceStateCreation(AppearanceStateKind kind, Guid? destinationFolderId = null)
+    private void PromptAppearanceStateCreation(Guid? destinationFolderId = null)
     {
         if (_overview.DocumentRuntimeSerialNumber is null) return;
         var resolvedFolderId = destinationFolderId ?? ResolveCreationDestinationFolderId() ?? _overview.RootFolderId;
@@ -856,9 +912,7 @@ public sealed partial class LayoutFoundryPanel : Panel
             return;
         }
 
-        var baseName = kind == AppearanceStateKind.LayerState
-            ? "New Layer State"
-            : "New Object Display State";
+        const string baseName = "New Appearance State";
         var siblingNames = snapshot.AppearanceStates
             .Where(state => state.FolderId == folderId)
             .Select(state => state.Name)
@@ -867,21 +921,17 @@ public sealed partial class LayoutFoundryPanel : Panel
         for (var suffix = 2; siblingNames.Contains(suggestedName); suffix++)
             suggestedName = $"{baseName} {suffix}";
 
-        var dialog = new AppearanceStateEditorDialog(snapshot, folderId, kind, suggestedName);
+        var dialog = new AppearanceStateEditorDialog(snapshot, folderId, suggestedName);
         dialog.ShowModal(this);
         if (!dialog.Changed) return;
 
         _overview = LayoutFoundryUiHost.CaptureOverview();
         var created = _overview.AppearanceStates.LastOrDefault(state =>
-            state.FolderId == folderId && state.Kind == kind &&
+            state.FolderId == folderId &&
             string.Equals(state.Name, dialog.StateName, StringComparison.OrdinalIgnoreCase));
         if (created is not null)
         {
-            var key = new OverviewNodeKey(
-                kind == AppearanceStateKind.LayerState
-                    ? OverviewNodeKind.LayerState
-                    : OverviewNodeKind.ObjectDisplayState,
-                created.Id);
+            var key = new OverviewNodeKey(OverviewNodeKind.AppearanceState, created.Id);
             _selection.Replace([key], key);
             LayoutFoundryUiHost.Selection.Replace(
                 _overview.DocumentRuntimeSerialNumber,
@@ -890,9 +940,7 @@ public sealed partial class LayoutFoundryPanel : Panel
                 this);
         }
 
-        _statusLabel.Text = kind == AppearanceStateKind.LayerState
-            ? $"Created layer state '{dialog.StateName}'."
-            : $"Created object display state '{dialog.StateName}'.";
+        _statusLabel.Text = $"Created appearance state '{dialog.StateName}'.";
         PopulateTree();
     }
 
@@ -990,6 +1038,7 @@ public sealed partial class LayoutFoundryPanel : Panel
     private void LayoutPanelOverlay()
     {
         CloseHierarchyDisplayModePicker();
+        CloseHierarchyAppearanceStatePicker();
         var size = _panelOverlayHost.ClientSize;
         if (size.Width <= 0 || size.Height <= 0)
             return;
@@ -1038,6 +1087,7 @@ public sealed partial class LayoutFoundryPanel : Panel
                     Height = 20,
                     BackgroundColor = FoundryTheme.CanvasBorder,
                 },
+                _printButton,
                 _importButton,
                 _exportButton,
                 new Panel
@@ -1081,8 +1131,7 @@ public sealed partial class LayoutFoundryPanel : Panel
         _setCurrentMenuItem = new ButtonMenuItem { Text = "Set Current" };
         _newFolderMenuItem = new ButtonMenuItem { Text = "New Folder" };
         _newPageMenuItem = new ButtonMenuItem { Text = "New Layout…" };
-        _newLayerStateMenuItem = new ButtonMenuItem { Text = "New Layer State" };
-        _newObjectStateMenuItem = new ButtonMenuItem { Text = "New Object Display State" };
+        _newAppearanceStateMenuItem = new ButtonMenuItem { Text = "New Appearance State" };
         _duplicateSelectionMenuItem = new ButtonMenuItem { Text = "Duplicate" };
         _copySelectionMenuItem = new ButtonMenuItem { Text = "Copy" };
         _pasteSelectionMenuItem = new ButtonMenuItem { Text = "Paste" };
@@ -1098,10 +1147,8 @@ public sealed partial class LayoutFoundryPanel : Panel
         _newFolderMenuItem.Click += (_, _) =>
             BeginInlineCreation(InlineDraftKind.Folder, _contextDestinationFolderId);
         _newPageMenuItem.Click += (_, _) => QueueOpenCreateLayouts(_contextDestinationFolderId);
-        _newLayerStateMenuItem.Click += (_, _) =>
-            QueueAppearanceStateCreation(AppearanceStateKind.LayerState, _contextDestinationFolderId);
-        _newObjectStateMenuItem.Click += (_, _) =>
-            QueueAppearanceStateCreation(AppearanceStateKind.ObjectDisplayState, _contextDestinationFolderId);
+        _newAppearanceStateMenuItem.Click += (_, _) =>
+            QueueAppearanceStateCreation(_contextDestinationFolderId);
         _duplicateSelectionMenuItem.Click += async (_, _) => await DuplicateSelectionAsync();
         _copySelectionMenuItem.Click += (_, _) => CopySelection();
         _pasteSelectionMenuItem.Click += async (_, _) => await PasteSelectionAsync();
@@ -1109,7 +1156,8 @@ public sealed partial class LayoutFoundryPanel : Panel
         _renamePageMenuItem.Click += (_, _) => BeginInlineSheetRename();
         _newDetailMenuItem.Click += (_, _) => RunSelectedSheetCommand(LayoutSheetCommand.NewDetail);
         _printPageMenuItem.Click += (_, _) => RunSelectedSheetCommand(LayoutSheetCommand.Print);
-        _printScopeMenuItem.Click += async (_, _) => await PrintHierarchyScopeAsync();
+        _printScopeMenuItem.Click += async (_, _) =>
+            await PrintHierarchyScopeAsync(_contextPrintFolderId);
         _propertiesPageMenuItem.Click += (_, _) => OpenSelectedProperties();
         _renameFolderMenuItem.Click += async (_, _) => await RenameSelectedFolderAsync();
 
@@ -1118,8 +1166,7 @@ public sealed partial class LayoutFoundryPanel : Panel
             new SeparatorMenuItem(),
             _newFolderMenuItem,
             _newPageMenuItem,
-            _newLayerStateMenuItem,
-            _newObjectStateMenuItem,
+            _newAppearanceStateMenuItem,
             new SeparatorMenuItem(),
             _copySelectionMenuItem,
             _pasteSelectionMenuItem,
@@ -1324,9 +1371,9 @@ public sealed partial class LayoutFoundryPanel : Panel
         _statusLabel.Text = result.Succeeded ? string.Empty : result.Message;
     }
 
-    private async Task PrintHierarchyScopeAsync()
+    private async Task PrintHierarchyScopeAsync(Guid? folderId)
     {
-        var scope = LayoutPrintScopeResolver.Resolve(_overview, _contextPrintFolderId);
+        var scope = LayoutPrintScopeResolver.Resolve(_overview, folderId);
         if (!scope.Exists)
         {
             _statusLabel.Text = "That folder no longer exists. Refresh and try again.";
@@ -1350,7 +1397,7 @@ public sealed partial class LayoutFoundryPanel : Panel
 
         var dialog = new SaveFileDialog
         {
-            Title = _contextPrintFolderId is null ? "Print Enabled Layouts" : $"Print {scope.Name}",
+            Title = folderId is null ? "Print Enabled Layouts" : $"Print {scope.Name}",
             FileName = $"{safeName}.pdf",
         };
         dialog.Filters.Add(new FileFilter("PDF document", ".pdf"));
@@ -1620,8 +1667,7 @@ public sealed partial class LayoutFoundryPanel : Panel
         {
             OverviewNodeKind.Folder => InlineDraftKind.RenameFolder,
             OverviewNodeKind.Sheet => InlineDraftKind.RenameSheet,
-            OverviewNodeKind.LayerState => InlineDraftKind.RenameLayerState,
-            OverviewNodeKind.ObjectDisplayState => InlineDraftKind.RenameObjectDisplayState,
+            OverviewNodeKind.AppearanceState => InlineDraftKind.RenameAppearanceState,
             _ => throw new ArgumentOutOfRangeException(),
         };
         var parentFolderId = item.Node.Sheet?.FolderId ??
@@ -1826,8 +1872,6 @@ public sealed partial class LayoutFoundryPanel : Panel
                 draft.Kind switch
                 {
                     InlineDraftKind.Folder => OverviewNodeKind.Folder,
-                    InlineDraftKind.LayerState => OverviewNodeKind.LayerState,
-                    InlineDraftKind.ObjectDisplayState => OverviewNodeKind.ObjectDisplayState,
                     _ => OverviewNodeKind.Sheet,
                 },
                 draft.Id)
@@ -1952,20 +1996,8 @@ public sealed partial class LayoutFoundryPanel : Panel
                     [],
                     [])).ToArray(),
             },
-            InlineDraftKind.LayerState or InlineDraftKind.ObjectDisplayState => _overview with
-            {
-                AppearanceStateResources = _overview.AppearanceStates.Append(new AppearanceStateOverview(
-                    draft.Id,
-                    draft.ParentFolderId,
-                    int.MaxValue,
-                    draft.Name,
-                    draft.Kind == InlineDraftKind.LayerState
-                        ? AppearanceStateKind.LayerState
-                        : AppearanceStateKind.ObjectDisplayState,
-                    0, 0, 0, 0, 0)).ToArray(),
-            },
             InlineDraftKind.RenameFolder or InlineDraftKind.RenameSheet or
-                InlineDraftKind.RenameLayerState or InlineDraftKind.RenameObjectDisplayState => _overview,
+                InlineDraftKind.RenameAppearanceState => _overview,
             _ => _overview,
         };
     }
@@ -2041,8 +2073,7 @@ public sealed partial class LayoutFoundryPanel : Panel
         _paperColumn.HeaderText = SortHeader("Paper size", OverviewSortProperty.PaperSize);
         _detailsColumn.HeaderText = SortHeader("Details", OverviewSortProperty.DetailCount);
         _displayModeColumn.HeaderText = SortHeader("Display mode", OverviewSortProperty.DisplayMode);
-        _layersColumn.HeaderText = "Layers";
-        _objectModesColumn.HeaderText = "Object modes";
+        _appearanceStateColumn.HeaderText = "Appearance state";
         _statusColumn.HeaderText = SortHeader("Status", OverviewSortProperty.Status);
     }
 
@@ -2069,6 +2100,8 @@ public sealed partial class LayoutFoundryPanel : Panel
 
         _importButton.Enabled = _overview.DocumentRuntimeSerialNumber is not null;
         _exportButton.Enabled = _overview.DocumentRuntimeSerialNumber is not null;
+        _printButton.Enabled = _overview.DocumentRuntimeSerialNumber is not null &&
+                               LayoutPrintScopeResolver.Resolve(_overview, null).HasSheets;
         _projectInfoButton.Enabled = _overview.DocumentRuntimeSerialNumber is not null;
         _createButton.Enabled = _overview.DocumentRuntimeSerialNumber is not null;
         var destinationId = ResolveCreationDestinationFolderId();
@@ -2138,8 +2171,6 @@ public sealed partial class LayoutFoundryPanel : Panel
             {
                 InlineDraftKind.Folder => "New Folder",
                 InlineDraftKind.Sheet => "New Page",
-                InlineDraftKind.LayerState => "New Layer State",
-                InlineDraftKind.ObjectDisplayState => "New Object Display State",
                 _ => string.Empty,
             });
         _inlineDraftCommitRequested = false;
@@ -2236,19 +2267,9 @@ public sealed partial class LayoutFoundryPanel : Panel
             return;
         }
 
-        if (ReferenceEquals(eventArgs.GridColumn, _layersColumn))
+        if (ReferenceEquals(eventArgs.GridColumn, _appearanceStateColumn))
         {
-            OpenAppearanceSettings(
-                PropertyInteractionTargets(item.Node.Key),
-                SelectionInspectorContent.Layers);
-            return;
-        }
-
-        if (ReferenceEquals(eventArgs.GridColumn, _objectModesColumn))
-        {
-            OpenAppearanceSettings(
-                PropertyInteractionTargets(item.Node.Key),
-                SelectionInspectorContent.ObjectModes);
+            BeginAppearanceStateEdit(PropertyInteractionTargets(item.Node.Key), item);
             return;
         }
 
@@ -2363,6 +2384,85 @@ public sealed partial class LayoutFoundryPanel : Panel
             if (item is not null)
                 _treeGrid.ReloadItem(item, reloadChildren: false);
         }
+    }
+
+    private void BeginAppearanceStateEdit(
+        IReadOnlyList<OverviewNodeKey> targets,
+        HierarchyTreeItem item)
+    {
+        var applicable = targets
+            .Where(target => target.Kind is OverviewNodeKind.Folder or OverviewNodeKind.Sheet or OverviewNodeKind.Detail)
+            .Distinct()
+            .ToArray();
+        var snapshot = LayoutFoundryUiHost.CaptureSnapshot();
+        if (snapshot is null || applicable.Length == 0)
+        {
+            _statusLabel.Text = "Appearance states apply to folders, layouts, and details.";
+            return;
+        }
+
+        _hierarchyAppearanceStates = new Dictionary<string, Guid?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Inherit"] = null,
+        };
+        foreach (var state in snapshot.AppearanceStates.OrderBy(state => state.Name, StringComparer.OrdinalIgnoreCase))
+        {
+            var folder = snapshot.Folders.GetValueOrDefault(state.FolderId)?.Name ?? "Missing folder";
+            var label = $"{state.Name} · {folder}";
+            if (_hierarchyAppearanceStates.ContainsKey(label)) label += $" · {state.Id.ToString()[..8]}";
+            _hierarchyAppearanceStates[label] = state.Id;
+        }
+        _hierarchyAppearanceStateTargets = applicable;
+        _hierarchyAppearanceStateEditingKey = item.Node.Key;
+        _activeHierarchyAppearanceStatePicker = null;
+        _treeGrid.ReloadItem(item, reloadChildren: false);
+        Application.Instance.AsyncInvoke(() =>
+        {
+            if (_hierarchyAppearanceStateEditingKey == item.Node.Key)
+                _activeHierarchyAppearanceStatePicker?.OpenResults();
+        });
+    }
+
+    private string CurrentAppearanceStateChoice()
+    {
+        var snapshot = LayoutFoundryUiHost.CaptureSnapshot();
+        if (snapshot is null || _hierarchyAppearanceStateTargets.Count == 0) return "Inherit";
+        var stateIds = _hierarchyAppearanceStateTargets
+            .Select(target => snapshot.StateAssignments.LastOrDefault(assignment =>
+                assignment.Target == LayoutFoundryUiHost.ToHierarchyScope(target))?.StateId)
+            .Distinct()
+            .ToArray();
+        if (stateIds.Length != 1 || stateIds[0] is not { } stateId) return "Inherit";
+        return _hierarchyAppearanceStates.FirstOrDefault(pair => pair.Value == stateId).Key ?? "Inherit";
+    }
+
+    private async Task CommitHierarchyAppearanceStateAsync()
+    {
+        var label = _activeHierarchyAppearanceStatePicker?.Text.Trim() ?? string.Empty;
+        if (!_hierarchyAppearanceStates.TryGetValue(label, out var stateId) ||
+            _hierarchyAppearanceStateTargets.Count == 0) return;
+        var targets = _hierarchyAppearanceStateTargets.ToArray();
+        CloseHierarchyAppearanceStatePicker();
+        _statusLabel.Text = stateId is null ? "Restoring inherited appearance…" : "Assigning appearance state…";
+        var result = await LayoutFoundryUiHost.AssignAppearanceStateAsync(targets, stateId);
+        _statusLabel.Text = result.Succeeded
+            ? stateId is null ? "Appearance now inherits from its folder." : "Appearance state assigned."
+            : DiagnosticMessage(result);
+        RefreshOverview();
+    }
+
+    private void CloseHierarchyAppearanceStatePicker()
+    {
+        var editingKey = _hierarchyAppearanceStateEditingKey;
+        var picker = _activeHierarchyAppearanceStatePicker;
+        _hierarchyAppearanceStateEditingKey = null;
+        _activeHierarchyAppearanceStatePicker = null;
+        picker?.CloseResults();
+        _hierarchyAppearanceStateTargets = [];
+        _hierarchyAppearanceStates.Clear();
+        if (editingKey is not { } key) return;
+        var item = Flatten(_renderedTreeItems).FirstOrDefault(candidate => candidate.Node.Key == key);
+        if (item is not null) _treeGrid.ReloadItem(item, reloadChildren: false);
     }
 
     private async Task SetPaperSizeAsync(
@@ -2490,8 +2590,7 @@ public sealed partial class LayoutFoundryPanel : Panel
             InlineDraftKind.Sheet => "Creating layout…",
             InlineDraftKind.RenameFolder => "Renaming folder…",
             InlineDraftKind.RenameSheet => "Renaming layout…",
-            InlineDraftKind.LayerState or InlineDraftKind.ObjectDisplayState => "Creating appearance state…",
-            InlineDraftKind.RenameLayerState or InlineDraftKind.RenameObjectDisplayState => "Renaming appearance state…",
+            InlineDraftKind.RenameAppearanceState => "Renaming appearance state…",
             _ => string.Empty,
         };
         var result = draft.Kind switch
@@ -2509,11 +2608,7 @@ public sealed partial class LayoutFoundryPanel : Panel
                 name),
             InlineDraftKind.RenameSheet => ToOperationResult(
                 LayoutFoundryUiHost.RenameSheetDirect(draft.Id, name)),
-            InlineDraftKind.LayerState => await LayoutFoundryUiHost.CreateAppearanceStateAsync(
-                draft.ParentFolderId, name, AppearanceStateKind.LayerState),
-            InlineDraftKind.ObjectDisplayState => await LayoutFoundryUiHost.CreateAppearanceStateAsync(
-                draft.ParentFolderId, name, AppearanceStateKind.ObjectDisplayState),
-            InlineDraftKind.RenameLayerState or InlineDraftKind.RenameObjectDisplayState =>
+            InlineDraftKind.RenameAppearanceState =>
                 await LayoutFoundryUiHost.UpdateAppearanceStateAsync(draft.Id, name),
             _ => throw new ArgumentOutOfRangeException(),
         };
@@ -2533,25 +2628,8 @@ public sealed partial class LayoutFoundryPanel : Panel
                 ? new OverviewNodeKey(OverviewNodeKind.Folder, draft.Id)
             : draft.Kind == InlineDraftKind.RenameSheet
                 ? new OverviewNodeKey(OverviewNodeKind.Sheet, draft.Id)
-            : draft.Kind is InlineDraftKind.RenameLayerState or InlineDraftKind.RenameObjectDisplayState
-                ? new OverviewNodeKey(
-                    draft.Kind == InlineDraftKind.RenameLayerState
-                        ? OverviewNodeKind.LayerState
-                        : OverviewNodeKind.ObjectDisplayState,
-                    draft.Id)
-            : draft.Kind is InlineDraftKind.LayerState or InlineDraftKind.ObjectDisplayState
-                ? _overview.AppearanceStates.FirstOrDefault(state =>
-                    state.FolderId == draft.ParentFolderId &&
-                    string.Equals(state.Name, name, StringComparison.Ordinal) &&
-                    state.Kind == (draft.Kind == InlineDraftKind.LayerState
-                        ? AppearanceStateKind.LayerState
-                        : AppearanceStateKind.ObjectDisplayState)) is { } state
-                    ? new OverviewNodeKey(
-                        state.Kind == AppearanceStateKind.LayerState
-                            ? OverviewNodeKind.LayerState
-                            : OverviewNodeKind.ObjectDisplayState,
-                        state.Id)
-                    : (OverviewNodeKey?)null
+            : draft.Kind == InlineDraftKind.RenameAppearanceState
+                ? new OverviewNodeKey(OverviewNodeKind.AppearanceState, draft.Id)
                 : _overview.Sheets
                     .Where(sheet => sheet.FolderId == draft.ParentFolderId)
                     .FirstOrDefault(sheet => string.Equals(sheet.Name, name, StringComparison.Ordinal)) is { } sheet
@@ -2568,9 +2646,7 @@ public sealed partial class LayoutFoundryPanel : Panel
             InlineDraftKind.Sheet => $"Created layout '{name}'. Rhino does not support Undo for layout creation.",
             InlineDraftKind.RenameFolder => $"Renamed folder to '{name}'.",
             InlineDraftKind.RenameSheet => $"Renamed layout to '{name}'. Rhino does not support Undo for this change.",
-            InlineDraftKind.LayerState => $"Created layer state '{name}'.",
-            InlineDraftKind.ObjectDisplayState => $"Created object display state '{name}'.",
-            InlineDraftKind.RenameLayerState or InlineDraftKind.RenameObjectDisplayState =>
+            InlineDraftKind.RenameAppearanceState =>
                 $"Renamed appearance state to '{name}'.",
             _ => string.Empty,
         };
@@ -2621,8 +2697,7 @@ public sealed partial class LayoutFoundryPanel : Panel
     private static bool IsRenameDraft(InlineDraftKind kind) =>
         kind is InlineDraftKind.RenameFolder or
             InlineDraftKind.RenameSheet or
-            InlineDraftKind.RenameLayerState or
-            InlineDraftKind.RenameObjectDisplayState;
+            InlineDraftKind.RenameAppearanceState;
 
     private void UpdateContextMenuActions()
     {
@@ -2648,22 +2723,17 @@ public sealed partial class LayoutFoundryPanel : Panel
         _newFolderMenuItem.Enabled = _overview.DocumentRuntimeSerialNumber is not null;
         _newPageMenuItem.Visible = true;
         _newPageMenuItem.Enabled = _overview.DocumentRuntimeSerialNumber is not null;
-        _newLayerStateMenuItem.Visible = isFolderContext || isRootContext;
-        _newLayerStateMenuItem.Enabled = _overview.DocumentRuntimeSerialNumber is not null;
-        _newObjectStateMenuItem.Visible = isFolderContext || isRootContext;
-        _newObjectStateMenuItem.Enabled = _overview.DocumentRuntimeSerialNumber is not null;
+        _newAppearanceStateMenuItem.Visible = isFolderContext || isRootContext;
+        _newAppearanceStateMenuItem.Enabled = _overview.DocumentRuntimeSerialNumber is not null;
         _newFolderMenuItem.Text = destinationName is null || _contextDestinationFolderId == _overview.RootFolderId
             ? "New Folder"
             : $"New Folder in {destinationName}";
         _newPageMenuItem.Text = destinationName is null || _contextDestinationFolderId == _overview.RootFolderId
             ? "New Layout…"
             : $"New Layout in {destinationName}…";
-        _newLayerStateMenuItem.Text = destinationName is null || _contextDestinationFolderId == _overview.RootFolderId
-            ? "New Layer State"
-            : $"New Layer State in {destinationName}";
-        _newObjectStateMenuItem.Text = destinationName is null || _contextDestinationFolderId == _overview.RootFolderId
-            ? "New Object Display State"
-            : $"New Object Display State in {destinationName}";
+        _newAppearanceStateMenuItem.Text = destinationName is null || _contextDestinationFolderId == _overview.RootFolderId
+            ? "New Appearance State"
+            : $"New Appearance State in {destinationName}";
         _duplicateSelectionMenuItem.Visible = selectionCount > 0 && !isDocumentContext;
         _duplicateSelectionMenuItem.Enabled = selectionCount > 0 && !isDocumentContext;
         _copySelectionMenuItem.Visible = selectionCount > 0 && !isDocumentContext;
@@ -2692,7 +2762,7 @@ public sealed partial class LayoutFoundryPanel : Panel
         _printScopeMenuItem.Enabled = printScope.Exists && printScope.HasSheets;
         _printScopeMenuItem.Text = isFolderContext ? "Print Folder…" : "Print Enabled…";
         var hasAppearanceStateTarget = selectedItems.Count == 1 &&
-            selectedItems[0].Node.Key.Kind is OverviewNodeKind.LayerState or OverviewNodeKind.ObjectDisplayState;
+            selectedItems[0].Node.Key.Kind == OverviewNodeKind.AppearanceState;
         _propertiesPageMenuItem.Visible = hasLayoutPropertyTargets || hasAppearanceStateTarget;
         _propertiesPageMenuItem.Enabled = hasLayoutPropertyTargets || hasAppearanceStateTarget;
         _propertiesPageMenuItem.Text = hasAppearanceStateTarget ? "Edit State…" : "Layout Properties…";
@@ -2742,6 +2812,11 @@ public sealed partial class LayoutFoundryPanel : Panel
             (item?.Node.Key != editingKey || !ReferenceEquals(column, _displayModeColumn)))
         {
             CloseHierarchyDisplayModePicker();
+        }
+        if (_hierarchyAppearanceStateEditingKey is { } appearanceEditingKey &&
+            (item?.Node.Key != appearanceEditingKey || !ReferenceEquals(column, _appearanceStateColumn)))
+        {
+            CloseHierarchyAppearanceStatePicker();
         }
 
         _cellInteractionGuard = null;
@@ -2841,15 +2916,14 @@ public sealed partial class LayoutFoundryPanel : Panel
         ReferenceEquals(column, _templateColumn) ||
         ReferenceEquals(column, _paperColumn) ||
         ReferenceEquals(column, _displayModeColumn) ||
-        ReferenceEquals(column, _layersColumn) ||
-        ReferenceEquals(column, _objectModesColumn);
+        ReferenceEquals(column, _appearanceStateColumn);
 
     private bool IsInlineRenameTarget(HierarchyTreeItem item, GridColumn? column = null) =>
         (column is null || ReferenceEquals(column, _layoutsColumn)) &&
         !item.IsInlineDraft &&
         !item.Node.IsDocumentRoot &&
         item.Node.Key.Kind is OverviewNodeKind.Folder or OverviewNodeKind.Sheet or
-            OverviewNodeKind.LayerState or OverviewNodeKind.ObjectDisplayState;
+            OverviewNodeKind.AppearanceState;
 
     private bool IsSelectionPreservingCircleColumn(GridColumn column) =>
         ReferenceEquals(column, _printColumn) ||
@@ -2900,7 +2974,8 @@ public sealed partial class LayoutFoundryPanel : Panel
             : [_dragSourceItem];
         _dragSourceKeys = sources.Select(item => item.Node.Key).Distinct().ToArray();
         _dragInProgress = true;
-        _statusLabel.Text = "Drop on a folder, or on empty hierarchy space to move to the root.";
+        _statusLabel.Text =
+            "Drop on a folder, between matching siblings, or on empty hierarchy space to move to the root.";
         var dragData = new DataObject();
         dragData.SetString("move", InternalHierarchyDragType);
         _treeGrid.DoDragDrop(dragData, DragEffects.Move);
@@ -2915,11 +2990,14 @@ public sealed partial class LayoutFoundryPanel : Panel
         }
 
         var dragInfo = _treeGrid.GetDragInfo(eventArgs);
-        dragInfo.RestrictToOver();
-        var target = dragInfo.Item as HierarchyTreeItem;
-        eventArgs.Effects = target is null || target.Node.Key.Kind == OverviewNodeKind.Folder
-            ? DragEffects.Move
-            : DragEffects.None;
+        var resolution = ResolveTreeDrop(dragInfo);
+        if (resolution is { IsValid: true, Target.Kind: HierarchyPlacementKind.IntoFolder })
+            dragInfo.RestrictToOver();
+        else if (resolution is { IsValid: true })
+            dragInfo.RestrictToInsert();
+
+        SetTreeDropFeedback(resolution);
+        eventArgs.Effects = resolution.IsValid ? DragEffects.Move : DragEffects.None;
     }
 
     private async Task CompleteInternalDragAsync(DragEventArgs eventArgs)
@@ -2933,68 +3011,54 @@ public sealed partial class LayoutFoundryPanel : Panel
             return;
         }
 
-        var target = _treeGrid.GetDragInfo(eventArgs).Item as HierarchyTreeItem;
-        var destinationFolderId = target is null
-            ? _overview.RootFolderId
-            : target.Node.Key.Kind == OverviewNodeKind.Folder
-                ? target.Node.Key.Id
-                : null;
+        var resolution = ResolveTreeDrop(_treeGrid.GetDragInfo(eventArgs));
         var sourceKeys = _dragSourceKeys.Count > 0
             ? _dragSourceKeys
             : [dragSource.Node.Key];
         ResetPendingDrag();
 
-        if (destinationFolderId is null)
+        if (!resolution.IsValid || resolution.Target is not { } placement)
         {
             eventArgs.Effects = DragEffects.None;
-            _statusLabel.Text = "Move cancelled. Drop on a folder or empty hierarchy space.";
+            _statusLabel.Text = resolution.RejectionReason ??
+                                "Move cancelled. Drop on a folder or between matching siblings.";
             return;
         }
 
         eventArgs.Effects = DragEffects.Move;
-
-        var destinationName = _overview.Folders
-            .FirstOrDefault(folder => folder.Id == destinationFolderId.Value)?.Name ?? "Layouts";
         var folderIds = sourceKeys
             .Where(key => key.Kind == OverviewNodeKind.Folder)
             .Select(key => key.Id)
             .Distinct()
             .ToArray();
-        OperationResult result;
-        OverviewNodeKey[] movedKeys;
-        string noun;
-        if (folderIds.Length > 0)
+        var sheetIds = sourceKeys
+            .Select(ResolveSheetPageViewId)
+            .Where(id => id is not null)
+            .Select(id => id!.Value)
+            .Distinct()
+            .ToArray();
+        var movedKeys = folderIds
+            .Select(id => new OverviewNodeKey(OverviewNodeKind.Folder, id))
+            .Concat(sheetIds.Select(id => new OverviewNodeKey(OverviewNodeKind.Sheet, id)))
+            .ToArray();
+        if (movedKeys.Length == 0)
         {
-            if (sourceKeys.Any(key => key.Kind != OverviewNodeKind.Folder))
-            {
-                _statusLabel.Text = "Move folders and layouts separately.";
-                return;
-            }
-
-            _statusLabel.Text = $"Moving {folderIds.Length} folder{(folderIds.Length == 1 ? string.Empty : "s")} to {destinationName}…";
-            result = await LayoutFoundryUiHost.MoveFoldersAsync(destinationFolderId.Value, folderIds);
-            movedKeys = folderIds.Select(id => new OverviewNodeKey(OverviewNodeKind.Folder, id)).ToArray();
-            noun = folderIds.Length == 1 ? "folder" : "folders";
+            _statusLabel.Text = "Nothing was moved.";
+            return;
         }
-        else
-        {
-            var sheetIds = sourceKeys
-                .Select(ResolveSheetPageViewId)
-                .Where(id => id is not null)
-                .Select(id => id!.Value)
-                .Distinct()
-                .ToArray();
-            if (sheetIds.Length == 0)
-            {
-                _statusLabel.Text = "Nothing was moved.";
-                return;
-            }
 
-            _statusLabel.Text = $"Moving {sheetIds.Length} layout{(sheetIds.Length == 1 ? string.Empty : "s")} to {destinationName}…";
-            result = await LayoutFoundryUiHost.MoveSheetsAsync(destinationFolderId.Value, sheetIds);
-            movedKeys = sheetIds.Select(id => new OverviewNodeKey(OverviewNodeKind.Sheet, id)).ToArray();
-            noun = sheetIds.Length == 1 ? "layout" : "layouts";
-        }
+        var noun = folderIds.Length > 0 && sheetIds.Length > 0
+            ? "items"
+            : folderIds.Length > 0
+                ? folderIds.Length == 1 ? "folder" : "folders"
+                : sheetIds.Length == 1 ? "layout" : "layouts";
+        _statusLabel.Text = placement.Kind == HierarchyPlacementKind.IntoFolder
+            ? $"Moving {movedKeys.Length} {noun} into {PlacementTargetName(placement)}…"
+            : $"Reordering {movedKeys.Length} {noun}…";
+        var result = await LayoutFoundryUiHost.ReorganizeHierarchyAsync(
+            folderIds,
+            sheetIds,
+            placement);
 
         if (!result.Succeeded)
         {
@@ -3003,8 +3067,82 @@ public sealed partial class LayoutFoundryPanel : Panel
         }
 
         _selection.Replace(movedKeys, movedKeys.FirstOrDefault());
-        _statusLabel.Text = $"Moved {movedKeys.Length} {noun} to {destinationName}.";
+        _statusLabel.Text = placement.Kind == HierarchyPlacementKind.IntoFolder
+            ? $"Moved {movedKeys.Length} {noun} into {PlacementTargetName(placement)}."
+            : $"Reordered {movedKeys.Length} {noun}.";
         RefreshOverview();
+    }
+
+    private NavigatorDropResolution ResolveTreeDrop(TreeGridViewDragInfo dragInfo)
+    {
+        var folderIds = _dragSourceKeys
+            .Where(key => key.Kind == OverviewNodeKind.Folder)
+            .Select(key => key.Id)
+            .Distinct()
+            .ToArray();
+        var sheetIds = _dragSourceKeys
+            .Select(ResolveSheetPageViewId)
+            .Where(id => id is not null)
+            .Select(id => id!.Value)
+            .Distinct()
+            .ToArray();
+        if (folderIds.Length == 0 && sheetIds.Length == 0)
+            return NavigatorDropResolution.Invalid("Only folders and layouts can be reorganized.");
+
+        if (_overview.RootFolderId is not { } rootFolderId)
+            return NavigatorDropResolution.Invalid("The document root is unavailable.");
+
+        var movingKinds = new List<OverviewNodeKind>(2);
+        if (folderIds.Length > 0) movingKinds.Add(OverviewNodeKind.Folder);
+        if (sheetIds.Length > 0) movingKinds.Add(OverviewNodeKind.Sheet);
+
+        if (dragInfo.Item is not HierarchyTreeItem item)
+            return new NavigatorDropResolver().Resolve(
+                [],
+                12,
+                0,
+                24,
+                movingKinds,
+                rootFolderId);
+
+        if (item.IsInlineDraft)
+            return NavigatorDropResolution.Invalid(
+                "Finish creating the row before reorganizing the hierarchy.");
+
+        var pointerY = dragInfo.Position switch
+        {
+            GridDragPosition.Before => 0,
+            GridDragPosition.After => 24,
+            _ => 12,
+        };
+        return new NavigatorDropResolver().Resolve(
+            [new NavigatorDropRow(item.Node.Key, Guid.Empty, 0, 24)],
+            pointerY,
+            0,
+            24,
+            movingKinds,
+            rootFolderId);
+    }
+
+    private string PlacementTargetName(HierarchyPlacementTarget target) =>
+        _overview.Folders.FirstOrDefault(folder => folder.Id == target.TargetId)?.Name ?? "Layouts";
+
+    private void SetTreeDropFeedback(NavigatorDropResolution resolution)
+    {
+        if (_treeDrop == resolution)
+            return;
+
+        _treeDrop = resolution;
+        _treeGrid.Invalidate();
+    }
+
+    private void ClearTreeDropFeedback()
+    {
+        if (_treeDrop is null)
+            return;
+
+        _treeDrop = null;
+        _treeGrid.Invalidate();
     }
 
     private Guid? ResolveSheetPageViewId(HierarchyTreeItem item)
@@ -3045,6 +3183,7 @@ public sealed partial class LayoutFoundryPanel : Panel
 
     private void ResetPendingDrag()
     {
+        ClearTreeDropFeedback();
         _dragStart = null;
         _dragSourceItem = null;
         _dragSourceKeys = [];
@@ -3108,7 +3247,7 @@ public sealed partial class LayoutFoundryPanel : Panel
     {
         var selection = SelectedKeys().Distinct().ToArray();
         if (selection.Length != 1 || selection[0].Kind is not
-                (OverviewNodeKind.LayerState or OverviewNodeKind.ObjectDisplayState))
+                OverviewNodeKind.AppearanceState)
         {
             OpenBatchProperties();
             return;
@@ -3116,9 +3255,7 @@ public sealed partial class LayoutFoundryPanel : Panel
 
         OpenAppearanceSettings(
             selection,
-            selection[0].Kind == OverviewNodeKind.LayerState
-                ? SelectionInspectorContent.Layers
-                : SelectionInspectorContent.ObjectModes);
+            SelectionInspectorContent.Appearance);
     }
 
     private void OpenAppearanceSettings(
@@ -3133,20 +3270,12 @@ public sealed partial class LayoutFoundryPanel : Panel
         }
         var targets = selection.Distinct().ToArray();
         if (targets.Length == 1 && targets[0].Kind is
-                OverviewNodeKind.LayerState or OverviewNodeKind.ObjectDisplayState)
+                OverviewNodeKind.AppearanceState)
         {
             var state = snapshot.AppearanceStates.FirstOrDefault(item => item.Id == targets[0].Id);
             if (state is null)
             {
                 _statusLabel.Text = "The selected appearance state is no longer available.";
-                return;
-            }
-            if (state.Kind == AppearanceStateKind.LayerState !=
-                (contentMode == SelectionInspectorContent.Layers))
-            {
-                _statusLabel.Text = state.Kind == AppearanceStateKind.LayerState
-                    ? "Edit this resource from the Layers column."
-                    : "Edit this resource from the Object modes column.";
                 return;
             }
             var stateDialog = new AppearanceStateEditorDialog(snapshot, state);
@@ -3585,8 +3714,7 @@ public sealed partial class LayoutFoundryPanel : Panel
                     OverviewNodeKind.Folder => FoundryHierarchyIcons.Folder,
                     OverviewNodeKind.Sheet => FoundryHierarchyIcons.Layout,
                     OverviewNodeKind.Detail => FoundryHierarchyIcons.Detail,
-                    OverviewNodeKind.LayerState => FoundryHierarchyIcons.LayerState,
-                    OverviewNodeKind.ObjectDisplayState => FoundryHierarchyIcons.ObjectDisplayState,
+                    OverviewNodeKind.AppearanceState => FoundryHierarchyIcons.AppearanceState,
                     _ => null,
                 };
             _displayText = IsInlineDraft
@@ -3693,43 +3821,25 @@ public sealed partial class LayoutFoundryPanel : Panel
                                                         Node.Detail?.TemplateCapabilities ??
                                                         TemplateCapability.None);
 
-        public string LayerStateText => Node.AppearanceState is { Kind: AppearanceStateKind.LayerState } state
+        public string AppearanceStateText => Node.AppearanceState is { } state
             ? $"{state.RuleCount} rule{(state.RuleCount == 1 ? string.Empty : "s")} · {state.DirectAssignmentCount} use{(state.DirectAssignmentCount == 1 ? string.Empty : "s")}"
-            : StateBinding(AppearanceStateKind.LayerState) is { } binding
+            : StateBinding() is { } binding
                 ? $"{binding.Name}{(binding.IsInherited ? " · inherited" : string.Empty)}"
             : AppearanceSummary() is not { } appearance
             ? "—"
             : appearance.IsMixed
                 ? "Mixed"
-                : appearance.VisibleLayerCount == 0 && appearance.HiddenLayerCount == 0
+                : appearance.VisibleLayerCount == 0 && appearance.HiddenLayerCount == 0 &&
+                  appearance.ObjectDisplayOverrideCount == 0
                     ? "Inherited"
-                    : $"On {appearance.VisibleLayerCount} · Off {appearance.HiddenLayerCount}";
-
-        public string ObjectModesText => Node.AppearanceState is { Kind: AppearanceStateKind.ObjectDisplayState } state
-            ? $"{state.RuleCount} rule{(state.RuleCount == 1 ? string.Empty : "s")} · {state.DirectAssignmentCount} use{(state.DirectAssignmentCount == 1 ? string.Empty : "s")}"
-            : StateBinding(AppearanceStateKind.ObjectDisplayState) is { } binding
-                ? $"{binding.Name}{(binding.IsInherited ? " · inherited" : string.Empty)}"
-            : AppearanceSummary() is not { } appearance
-            ? "—"
-            : appearance.IsMixed
-                ? "Mixed"
-                : appearance.ObjectDisplayOverrideCount == 0
-                    ? "Inherited"
-                    : appearance.UnresolvedCount > 0
-                        ? $"{appearance.ObjectDisplayOverrideCount} · {appearance.UnresolvedCount} missing"
-                        : $"{appearance.ObjectDisplayOverrideCount} override{(appearance.ObjectDisplayOverrideCount == 1 ? string.Empty : "s")}";
+                    : $"{appearance.VisibleLayerCount + appearance.HiddenLayerCount} layer · " +
+                      $"{appearance.ObjectDisplayOverrideCount} mode";
 
         private ViewportAppearanceSummary? AppearanceSummary() =>
             Node.Folder?.Appearance ?? Node.Sheet?.Appearance ?? Node.Detail?.Appearance;
 
-        private AppearanceStateBindingOverview? StateBinding(AppearanceStateKind kind) => kind switch
-        {
-            AppearanceStateKind.LayerState =>
-                Node.Folder?.LayerState ?? Node.Sheet?.LayerState ?? Node.Detail?.LayerState,
-            AppearanceStateKind.ObjectDisplayState =>
-                Node.Folder?.ObjectDisplayState ?? Node.Sheet?.ObjectDisplayState ?? Node.Detail?.ObjectDisplayState,
-            _ => null,
-        };
+        private AppearanceStateBindingOverview? StateBinding() =>
+            Node.Folder?.AppearanceState ?? Node.Sheet?.AppearanceState ?? Node.Detail?.AppearanceState;
 
         private static string CapabilitySummary(TemplateCapability capabilities)
         {
@@ -3826,12 +3936,9 @@ public sealed partial class LayoutFoundryPanel : Panel
     {
         Folder,
         Sheet,
-        LayerState,
-        ObjectDisplayState,
         RenameFolder,
         RenameSheet,
-        RenameLayerState,
-        RenameObjectDisplayState,
+        RenameAppearanceState,
     }
 
     private enum FoundryPanelViewMode

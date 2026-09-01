@@ -443,9 +443,9 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
             return;
         }
 
-        if (_snapshot.Sheets.Count == 0)
+        if (_snapshot.Sheets.Count == 0 && _snapshot.AppearanceStates.Count == 0)
         {
-            DrawEmpty(graphics, "Create a layout to begin arranging the board.");
+            DrawEmpty(graphics, "Create a layout or appearance state to begin arranging the board.");
             DrawNavigator(graphics, ViewportSize());
             DrawNamedViews(graphics, ViewportSize());
             return;
@@ -466,6 +466,9 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
             if (tier != ObserverCanvasLodTier.Folder)
                 DrawSheet(graphics, card, viewport, tier, eventArgs.ClipRectangle);
         }
+
+        foreach (var card in _spatialIndex.QueryAppearanceStates(visibleWorld))
+            DrawAppearanceState(graphics, card, viewport);
 
         foreach (var summary in _presentation.FolderSummaries)
             DrawFolderSummary(graphics, summary, viewport);
@@ -555,8 +558,62 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
             FitText(
                 graphics,
                 _folderFont,
-                $"{frame.Folder.Name}   ·   {frame.DirectSheetCount} layout{(frame.DirectSheetCount == 1 ? string.Empty : "s")}",
+                FolderHeaderText(frame),
                 Math.Max(8, bounds.Width - 38)));
+    }
+
+    private static string FolderHeaderText(ObserverFolderFrame frame)
+    {
+        var parts = new List<string>();
+        if (frame.DirectSheetCount > 0)
+            parts.Add($"{frame.DirectSheetCount} layout{(frame.DirectSheetCount == 1 ? string.Empty : "s")}");
+        if (frame.DirectAppearanceStateCount > 0)
+            parts.Add($"{frame.DirectAppearanceStateCount} appearance state{(frame.DirectAppearanceStateCount == 1 ? string.Empty : "s")}");
+        return parts.Count == 0 ? frame.Folder.Name : $"{frame.Folder.Name}   ·   {string.Join(" · ", parts)}";
+    }
+
+    private void DrawAppearanceState(
+        Graphics graphics,
+        ObserverAppearanceStateCard card,
+        ObserverSize viewport)
+    {
+        var bounds = ScreenRect(card.Bounds, viewport);
+        if (bounds.Width < 8 || bounds.Height < 8) return;
+        var key = new OverviewNodeKey(OverviewNodeKind.AppearanceState, card.State.Id);
+        var selected = _selection.Contains(key);
+        var emphasized = _filter.Emphasizes(key);
+        graphics.FillRectangle(
+            emphasized
+                ? FoundryTheme.CanvasOverlayBackground
+                : FoundryTheme.WithAlpha(FoundryTheme.CanvasOverlayBackground, 64),
+            bounds);
+        var border = selected
+            ? FoundryTheme.SelectionAccent
+            : emphasized
+                ? FoundryTheme.CanvasBorder
+                : FoundryTheme.WithAlpha(FoundryTheme.CanvasBorder, 64);
+        graphics.DrawRectangle(new Pen(border, selected ? 2 : 1), bounds);
+        var text = emphasized
+            ? FoundryTheme.PrimaryText
+            : FoundryTheme.WithAlpha(FoundryTheme.PrimaryText, 64);
+        FoundryHierarchyIcons.DrawAppearanceState(
+            graphics, text, new RectangleF(bounds.Left + 10, bounds.Top + 10, 18, 18));
+        graphics.DrawText(
+            _sheetFont,
+            text,
+            bounds.Left + 36,
+            bounds.Top + 10,
+            FitText(graphics, _sheetFont, card.State.Name, Math.Max(8, bounds.Width - 46)));
+        if (bounds.Height >= 44)
+        {
+            var ruleCount = card.State.LayerRules.Count + card.State.ObjectDisplayRules.Count;
+            graphics.DrawText(
+                _smallFont,
+                emphasized ? FoundryTheme.SecondaryText : FoundryTheme.WithAlpha(FoundryTheme.SecondaryText, 64),
+                bounds.Left + 36,
+                bounds.Top + 34,
+                $"{ruleCount} rule{(ruleCount == 1 ? string.Empty : "s")}");
+        }
     }
 
     private void DrawSheet(
@@ -947,26 +1004,21 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
 
     private void DrawDependencyConnections(Graphics graphics, ObserverSize viewport)
     {
-        if (!_dependencyConnectionsVisible || !_navigatorVisible ||
-            _snapshot.StateAssignments.Count == 0)
+        if (!_dependencyConnectionsVisible || _snapshot.StateAssignments.Count == 0)
             return;
 
-        var rows = NavigatorRowsForDisplay();
-        var visibleCount = NavigatorVisibleRowCount(viewport);
         using var halo = new Pen(FoundryTheme.WithAlpha(FoundryTheme.CanvasBackground, 205), 3);
         using var line = new Pen(FoundryTheme.WithAlpha(FoundryTheme.MutedText, 150), 1);
         foreach (var assignment in _snapshot.StateAssignments)
         {
-            var rowIndex = Array.FindIndex(rows, row => row.Key.Id == assignment.StateId &&
-                row.Key.Kind is OverviewNodeKind.LayerState or OverviewNodeKind.ObjectDisplayState);
-            var visibleIndex = rowIndex - _navigatorScrollRow;
-            if (visibleIndex < 0 || visibleIndex >= visibleCount) continue;
-            var start = new PointF(
-                NavigatorWidth,
-                NavigatorTop + NavigatorHeaderHeight + visibleIndex * NavigatorRowHeight +
-                NavigatorRowHeight / 2f);
+            if (!_layout.AppearanceStates.TryGetValue(assignment.StateId, out var stateCard)) continue;
+            var sourceBounds = ScreenRect(stateCard.Bounds, viewport);
+            var start = new PointF(sourceBounds.Right, sourceBounds.Top + sourceBounds.Height / 2f);
             if (!TryAssignmentTargetPoint(assignment.Target, viewport, out var end)) continue;
-            var elbowX = Math.Max(NavigatorWidth + 14, (start.X + end.X) / 2f);
+            var direction = end.X >= start.X ? 1 : -1;
+            var elbowX = direction > 0
+                ? Math.Max(start.X + 14, (start.X + end.X) / 2f)
+                : Math.Min(start.X - 14, (start.X + end.X) / 2f);
             void Segment(Pen pen)
             {
                 graphics.DrawLine(pen, start.X, start.Y, elbowX, start.Y);
@@ -975,6 +1027,7 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
             }
             Segment(halo);
             Segment(line);
+            graphics.FillEllipse(FoundryTheme.MutedText, start.X - 2, start.Y - 2, 4, 4);
             graphics.FillEllipse(FoundryTheme.MutedText, end.X - 2, end.Y - 2, 4, 4);
         }
     }
@@ -1033,19 +1086,19 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
             if (destinationHighlighted)
             {
                 graphics.FillRectangle(
-                    FoundryTheme.WithAlpha(FoundryTheme.SelectionAccent, 52),
+                    FoundryTheme.HierarchyDropBackground,
                     0,
                     y,
                     NavigatorWidth,
                     NavigatorRowHeight);
                 graphics.DrawRectangle(
-                    new Pen(FoundryTheme.SelectionAccent, 1),
+                    new Pen(FoundryTheme.HierarchyDropStroke, 1),
                     1,
                     y + 1,
                     NavigatorWidth - 3,
                     NavigatorRowHeight - 2);
             }
-            if (selected || row.IsDraft)
+            if ((selected || row.IsDraft) && !destinationHighlighted)
             {
                 graphics.FillRectangle(
                     row.IsDraft
@@ -1060,19 +1113,21 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
             var emphasized = row.IsDraft || !_filter.IsActive || _filter.Emphasizes(row.Key) || selected;
             var disclosureX = 8 + row.Depth * 16;
             DrawNavigatorConnectors(graphics, row, y, disclosureX);
+            var rowColor = destinationHighlighted
+                ? FoundryTheme.HierarchyDropForeground
+                : emphasized
+                    ? FoundryTheme.PrimaryText
+                    : FoundryTheme.WithAlpha(FoundryTheme.MutedText, 80);
             if (row.CanExpand)
             {
                 DrawOverlayText(
                     graphics,
                     _sheetFont,
-                    emphasized ? FoundryTheme.PrimaryText : FoundryTheme.WithAlpha(FoundryTheme.MutedText, 80),
+                    rowColor,
                     disclosureX,
                     y + 5,
                     row.IsExpanded ? "▾" : "▸");
             }
-            var rowColor = emphasized
-                ? FoundryTheme.PrimaryText
-                : FoundryTheme.WithAlpha(FoundryTheme.MutedText, 80);
             DrawNavigatorIcon(graphics, row, rowColor, disclosureX + 14, y + 3);
             DrawOverlayText(
                 graphics,
@@ -1096,7 +1151,7 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
             _navigatorDrop is { IsValid: true, InsertionLineY: { } insertionY })
         {
             graphics.DrawLine(
-                new Pen(FoundryTheme.SelectionAccent, 2),
+                new Pen(FoundryTheme.HierarchyDropStroke, 2),
                 4,
                 (float)insertionY,
                 NavigatorWidth - 5,
@@ -1117,6 +1172,33 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
                 2,
                 thumbHeight);
         }
+
+        DrawNavigatorDragPreview(graphics);
+    }
+
+    private void DrawNavigatorDragPreview(Graphics graphics)
+    {
+        if (_dragMode != DragMode.Navigator || _navigatorPressRow is not { } source)
+            return;
+
+        var count = Math.Max(1, _navigatorDragKeys.Length);
+        var suffix = count > 1 ? $"  {count} items" : string.Empty;
+        var label = FitText(graphics, _sheetFont, source.Label + suffix, 180);
+        var width = Math.Max(92, graphics.MeasureString(_sheetFont, label).Width + 42);
+        var x = Math.Min(Math.Max(8, _navigatorPointer.X + 14), Math.Max(8, Size.Width - width - 8));
+        var y = Math.Min(Math.Max(8, _navigatorPointer.Y + 14), Math.Max(8, Size.Height - NavigatorRowHeight - 8));
+        var bounds = new RectangleF(x, y, width, NavigatorRowHeight);
+        using var path = GraphicsPath.GetRoundRect(bounds, 4);
+        graphics.FillPath(FoundryTheme.HierarchyDropBackground, path);
+        graphics.DrawPath(new Pen(FoundryTheme.HierarchyDropStroke, 1), path);
+        DrawNavigatorIcon(graphics, source, FoundryTheme.HierarchyDropForeground, x + 4, y + 3);
+        DrawOverlayText(
+            graphics,
+            _sheetFont,
+            FoundryTheme.HierarchyDropForeground,
+            x + 27,
+            y + 5,
+            label);
     }
 
     private static void DrawNavigatorIcon(
@@ -1153,11 +1235,8 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
             case OverviewNodeKind.Detail:
                 FoundryHierarchyIcons.DrawDetail(graphics, iconColor, iconBounds);
                 break;
-            case OverviewNodeKind.LayerState:
-                FoundryHierarchyIcons.DrawLayerState(graphics, iconColor, iconBounds);
-                break;
-            case OverviewNodeKind.ObjectDisplayState:
-                FoundryHierarchyIcons.DrawObjectDisplayState(graphics, iconColor, iconBounds);
+            case OverviewNodeKind.AppearanceState:
+                FoundryHierarchyIcons.DrawAppearanceState(graphics, iconColor, iconBounds);
                 break;
         }
     }
@@ -1722,11 +1801,7 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
             foreach (var state in childStates)
             {
                 rows.Add(new CanvasNavigatorRow(
-                    new OverviewNodeKey(
-                        state.Kind == AppearanceStateKind.LayerState
-                            ? OverviewNodeKind.LayerState
-                            : OverviewNodeKind.ObjectDisplayState,
-                        state.Id),
+                    new OverviewNodeKey(OverviewNodeKind.AppearanceState, state.Id),
                     state.Name,
                     depth + 1,
                     state.FolderId,
@@ -1841,7 +1916,8 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
             else if (!navigatorRow.IsDraft)
             {
                 var movable = !navigatorRow.IsDocumentRoot &&
-                              navigatorRow.Key.Kind is OverviewNodeKind.Folder or OverviewNodeKind.Sheet;
+                              navigatorRow.Key.Kind is OverviewNodeKind.Folder or OverviewNodeKind.Sheet or
+                                  OverviewNodeKind.AppearanceState;
                 var alreadySelected = _selection.Contains(navigatorRow.Key);
                 _navigatorCollapseSelectionOnMouseUp = movable && alreadySelected &&
                                                          !IsAdditive(eventArgs.Modifiers);
@@ -1852,13 +1928,15 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
                     _navigatorPressRow = navigatorRow;
                     var orderedVisible = NavigatorRowsForDisplay()
                         .Where(row => !row.IsDraft &&
-                                      row.Key.Kind is OverviewNodeKind.Folder or OverviewNodeKind.Sheet &&
+                                      (row.Key.Kind is OverviewNodeKind.Folder or OverviewNodeKind.Sheet or
+                                          OverviewNodeKind.AppearanceState) &&
                                       _selection.Contains(row.Key))
                         .Select(row => row.Key)
                         .Distinct()
                         .ToList();
                     orderedVisible.AddRange(_selection
-                        .Where(key => key.Kind is OverviewNodeKind.Folder or OverviewNodeKind.Sheet &&
+                        .Where(key => (key.Kind is OverviewNodeKind.Folder or OverviewNodeKind.Sheet or
+                                          OverviewNodeKind.AppearanceState) &&
                                       !orderedVisible.Contains(key))
                         .OrderBy(key => key.Kind)
                         .ThenBy(key => key.Id));
@@ -1887,6 +1965,17 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
             {
                 _dragMode = DragMode.None;
             }
+            eventArgs.Handled = true;
+            return;
+        }
+
+        var appearanceState = _spatialIndex.HitAppearanceState(_pressWorld);
+        if (appearanceState is not null)
+        {
+            SelectKey(
+                new OverviewNodeKey(OverviewNodeKind.AppearanceState, appearanceState.State.Id),
+                eventArgs.Modifiers);
+            _dragMode = DragMode.None;
             eventArgs.Handled = true;
             return;
         }
@@ -2052,8 +2141,16 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
                     .Where(key => key.Kind == OverviewNodeKind.Sheet)
                     .Select(key => key.Id)
                     .ToArray();
-                HierarchyPlacementRequested?.Invoke(this,
-                    new ObserverHierarchyPlacementRequestedEventArgs(folderIds, sheetIds, target));
+                var stateIds = _navigatorDragKeys
+                    .Where(key => key.Kind == OverviewNodeKind.AppearanceState)
+                    .Select(key => key.Id)
+                    .ToArray();
+                if (stateIds.Length > 0 && target.Kind == HierarchyPlacementKind.IntoFolder)
+                    HierarchyMoveRequested?.Invoke(this, new ObserverHierarchyMoveRequestedEventArgs(
+                        target.TargetId, [], [], stateIds));
+                else
+                    HierarchyPlacementRequested?.Invoke(this,
+                        new ObserverHierarchyPlacementRequestedEventArgs(folderIds, sheetIds, target));
             }
 
             ResetDrag();
@@ -2164,6 +2261,10 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
                 keys.Add(new OverviewNodeKey(OverviewNodeKind.Sheet, card.Sheet.PageViewId));
             }
 
+            keys.AddRange(_spatialIndex.QueryAppearanceStates(lasso)
+                .Where(card => crossing || lasso.Contains(card.Bounds))
+                .Select(card => new OverviewNodeKey(OverviewNodeKind.AppearanceState, card.State.Id)));
+
             var lassoScreen = _camera.WorldToScreen(lasso, ViewportSize());
             keys.AddRange(_presentation.FolderSummaries
                 .Where(summary => crossing
@@ -2215,6 +2316,15 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
         }
 
         var world = _camera.ScreenToWorld(Point(eventArgs.Location), ViewportSize());
+        var appearanceState = _spatialIndex.HitAppearanceState(world);
+        if (appearanceState is not null)
+        {
+            SelectKey(new OverviewNodeKey(OverviewNodeKind.AppearanceState, appearanceState.State.Id),
+                eventArgs.Modifiers);
+            Application.Instance.AsyncInvoke(FocusSelection);
+            eventArgs.Handled = true;
+            return;
+        }
         var card = _spatialIndex.HitSheet(world);
         if (card is null) return;
         var tier = _presentation.TierForSheet(card.Sheet.PageViewId);
@@ -2477,6 +2587,14 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
             return;
         }
 
+        var appearanceState = _spatialIndex.HitAppearanceState(world);
+        if (appearanceState is not null)
+        {
+            var key = new OverviewNodeKey(OverviewNodeKind.AppearanceState, appearanceState.State.Id);
+            if (!preserveExistingIfHit || !_selection.Contains(key)) SelectKey(key, modifiers);
+            return;
+        }
+
         var sheet = _spatialIndex.HitSheet(world);
         if (sheet is not null &&
             _presentation.TierForSheet(sheet.Sheet.PageViewId) != ObserverCanvasLodTier.Folder)
@@ -2629,6 +2747,9 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
                 bounds = ObserverRect.Union(bounds, card.Bounds);
             else if (key.Kind == OverviewNodeKind.Folder && _layout.Folders.TryGetValue(key.Id, out var frame))
                 bounds = ObserverRect.Union(bounds, frame.Bounds);
+            else if (key.Kind == OverviewNodeKind.AppearanceState &&
+                     _layout.AppearanceStates.TryGetValue(key.Id, out var stateCard))
+                bounds = ObserverRect.Union(bounds, stateCard.Bounds);
             else if (key.Kind == OverviewNodeKind.Detail)
             {
                 var owner = _layout.Sheets.Values.FirstOrDefault(candidate =>
@@ -2711,7 +2832,7 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
         OverviewNodeKind.Folder => _snapshot.Folders.Any(folder => folder.Id == key.Id),
         OverviewNodeKind.Sheet => _snapshot.Sheets.Any(sheet => sheet.PageViewId == key.Id),
         OverviewNodeKind.Detail => _snapshot.Sheets.Any(sheet => sheet.Details.Any(detail => detail.DetailViewportId == key.Id)),
-        OverviewNodeKind.LayerState or OverviewNodeKind.ObjectDisplayState =>
+        OverviewNodeKind.AppearanceState =>
             _snapshot.AppearanceStates.Any(state => state.Id == key.Id),
         _ => false,
     };
@@ -2839,6 +2960,16 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
             Guid? current = card.Sheet.FolderId;
             while (current is { } folderId &&
                    folders.TryGetValue(folderId, out var folder))
+            {
+                if (!result.Add(folderId)) break;
+                current = folder.ParentId;
+            }
+        }
+
+        foreach (var card in _layout.AppearanceStates.Values)
+        {
+            Guid? current = card.State.FolderId;
+            while (current is { } folderId && folders.TryGetValue(folderId, out var folder))
             {
                 if (!result.Add(folderId)) break;
                 current = folder.ParentId;
@@ -3002,16 +3133,19 @@ internal sealed class ObserverHierarchyMoveRequestedEventArgs : EventArgs
     internal ObserverHierarchyMoveRequestedEventArgs(
         Guid destinationFolderId,
         IReadOnlyList<Guid> sheetIds,
-        IReadOnlyList<Guid> folderIds)
+        IReadOnlyList<Guid> folderIds,
+        IReadOnlyList<Guid>? appearanceStateIds = null)
     {
         DestinationFolderId = destinationFolderId;
         SheetIds = sheetIds;
         FolderIds = folderIds;
+        AppearanceStateIds = appearanceStateIds ?? [];
     }
 
     internal Guid DestinationFolderId { get; }
     internal IReadOnlyList<Guid> SheetIds { get; }
     internal IReadOnlyList<Guid> FolderIds { get; }
+    internal IReadOnlyList<Guid> AppearanceStateIds { get; }
 }
 
 internal sealed class ObserverReorderStepRequestedEventArgs : EventArgs

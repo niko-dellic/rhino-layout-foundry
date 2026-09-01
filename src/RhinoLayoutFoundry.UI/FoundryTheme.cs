@@ -84,6 +84,16 @@ internal static class FoundryTheme
         ? Color.FromArgb(39, 39, 42, 255)
         : Color.FromArgb(244, 244, 245, 255);
 
+    // Keep hierarchy reorganization feedback consistent with the native table
+    // drag treatment instead of borrowing the blue canvas-selection accent.
+    internal static Color HierarchyDropBackground => SystemColors.Selection;
+
+    internal static Color HierarchyDropForeground => SystemColors.SelectionText;
+
+    internal static Color HierarchyDropStroke => IsDarkMode
+        ? Color.FromArgb(212, 212, 216, 255)
+        : Color.FromArgb(82, 82, 91, 255);
+
     internal const double DefaultCanvasGridOpacity = 0.80;
 
     internal static Color CanvasGridColor => IsDarkMode
@@ -146,6 +156,12 @@ internal static class FoundryTheme
             Content = content,
         };
     }
+
+    internal static Control VerticalRule() => new Panel
+    {
+        BackgroundColor = CanvasBorder,
+        Size = new Size(1, 20),
+    };
 
     private static Color RhinoColor(Func<System.Drawing.Color> getColor, Color fallback)
     {

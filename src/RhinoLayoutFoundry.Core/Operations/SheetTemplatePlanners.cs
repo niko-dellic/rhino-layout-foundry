@@ -88,8 +88,7 @@ public sealed record LayoutCreationSpec(
     IReadOnlyList<string?>? NamedViewsByDetail = null,
     IReadOnlyList<Guid?>? DetailDisplayModesByDetail = null,
     Guid? DetailLayerId = null,
-    Guid? LayerStateId = null,
-    Guid? ObjectDisplayStateId = null);
+    Guid? AppearanceStateId = null);
 
 public sealed record BatchCreateSheetsRequest(
     uint DocumentRuntimeSerialNumber,
@@ -125,7 +124,7 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
         var templates = snapshot.Templates.ToDictionary(item => item.Id);
         var expanded = new List<(Guid DraftId, SheetTemplateRecipe Template,
             IReadOnlyDictionary<Guid, string> NamedViewAssignments, bool UseDedicatedDetailLayer,
-            Guid? DetailLayerId, Guid? LayerStateId, Guid? ObjectDisplayStateId)>();
+            Guid? DetailLayerId, Guid? AppearanceStateId)>();
         if (hasCreationSpecs)
         {
             foreach (var spec in request.CreationSpecs!)
@@ -154,8 +153,7 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
                     expanded.Add((Guid.NewGuid(), resolved.Template, resolved.NamedViewAssignments,
                         spec.UseDedicatedDetailLayer,
                         spec.UseDedicatedDetailLayer ? null : spec.DetailLayerId,
-                        spec.LayerStateId,
-                        spec.ObjectDisplayStateId));
+                        spec.AppearanceStateId));
             }
         }
         else foreach (var item in request.TemplateQuantities)
@@ -173,7 +171,7 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
             ValidateTemplate(template, snapshot, request.NamedViewAssignments, diagnostics);
             for (var index = 0; index < item.Quantity; index++)
                 expanded.Add((Guid.NewGuid(), template,
-                    request.NamedViewAssignments ?? new Dictionary<Guid, string>(), true, null, null, null));
+                    request.NamedViewAssignments ?? new Dictionary<Guid, string>(), true, null, null));
         }
 
         var pattern = request.NamingPattern?.Trim() ?? string.Empty;
@@ -220,8 +218,7 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
                     request.ProjectData ?? snapshot.ProjectInfo,
                     request.InitialRevisions,
                     expanded[index].DetailLayerId,
-                    expanded[index].LayerStateId,
-                    expanded[index].ObjectDisplayStateId,
+                    expanded[index].AppearanceStateId,
                     resolvedPattern,
                     request.Start + index * request.Step));
             }
@@ -347,8 +344,7 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
                 : spec.DetailDisplayModeId ?? slot.DisplayModeId,
         }).ToArray();
 
-        ValidateAppearanceState(spec.LayerStateId, AppearanceStateKind.LayerState, snapshot, diagnostics);
-        ValidateAppearanceState(spec.ObjectDisplayStateId, AppearanceStateKind.ObjectDisplayState, snapshot, diagnostics);
+        ValidateAppearanceState(spec.AppearanceStateId, snapshot, diagnostics);
 
         var namedViewAssignments = new Dictionary<Guid, string>();
         if (spec.NamedViewsByDetail is not null)
@@ -422,17 +418,16 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
 
     private static void ValidateAppearanceState(
         Guid? stateId,
-        AppearanceStateKind kind,
         DocumentSnapshot snapshot,
         ICollection<Diagnostic> diagnostics)
     {
         if (stateId is not { } id) return;
         var state = snapshot.AppearanceStates.LastOrDefault(item => item.Id == id);
-        if (state is null || state.Kind != kind)
+        if (state is null)
         {
             diagnostics.Add(CaptureSheetTemplatePlanner.Error(
                 "appearance_state.source_missing",
-                $"The selected {(kind == AppearanceStateKind.LayerState ? "layer" : "object display")} state is unavailable."));
+                "The selected appearance state is unavailable."));
         }
     }
 

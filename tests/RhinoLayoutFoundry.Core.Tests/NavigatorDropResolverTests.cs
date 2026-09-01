@@ -40,6 +40,20 @@ public sealed class NavigatorDropResolverTests
         Assert.Equal(_root, root.HighlightFolderId);
     }
 
+    [Fact]
+    public void AppearanceStatesMoveIntoFoldersWithoutEnteringTheFolderSheetOrder()
+    {
+        var folder = Resolve(35, [OverviewNodeKind.AppearanceState]);
+        var besideSheet = Resolve(51, [OverviewNodeKind.AppearanceState]);
+
+        Assert.True(folder.IsValid);
+        Assert.Equal(_folder, folder.Target!.TargetId);
+        Assert.Equal(HierarchyPlacementKind.IntoFolder, folder.Target.Kind);
+        Assert.True(besideSheet.IsValid);
+        Assert.Equal(_root, besideSheet.Target!.TargetId);
+        Assert.Null(besideSheet.InsertionLineY);
+    }
+
     private NavigatorDropResolution Resolve(double y, IReadOnlyCollection<OverviewNodeKind> kinds)
     {
         var rows = new[]

@@ -139,8 +139,7 @@ public sealed record CreateSheetFromTemplateChange(
     ProjectInformation? ProjectData = null,
     IReadOnlyList<SheetRevisionRecord>? InitialRevisions = null,
     Guid? DetailLayerId = null,
-    Guid? LayerStateId = null,
-    Guid? ObjectDisplayStateId = null,
+    Guid? AppearanceStateId = null,
     string NamingPattern = "",
     int NamingIndex = 0) : OperationChange;
 
@@ -197,7 +196,6 @@ public sealed record SetAppearanceStateResourceChange(
 
 public sealed record SetAppearanceStateAssignmentChange(
     HierarchyScope Target,
-    AppearanceStateKind Kind,
     AppearanceStateAssignment? ExpectedAssignment,
     AppearanceStateAssignment? NewAssignment) : OperationChange;
 

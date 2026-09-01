@@ -192,12 +192,8 @@ internal sealed class RhinoDocumentSnapshotProvider : IDocumentSnapshotProvider
                         : null,
                     DetailSlots = refreshed.DetailSlots.Select(slot => slot with
                     {
-                        LayerRules = capabilities.HasFlag(TemplateCapability.LayerStates)
-                            ? slot.Layers
-                            : [],
-                        ObjectDisplayRules = capabilities.HasFlag(TemplateCapability.ObjectDisplayModes)
-                            ? slot.Objects
-                            : [],
+                        LayerRules = [],
+                        ObjectDisplayRules = [],
                     }).ToArray(),
                 };
             })
@@ -235,13 +231,8 @@ internal sealed class RhinoDocumentSnapshotProvider : IDocumentSnapshotProvider
                     var slot = CaptureDetail(document, detail, null);
                     return slot with
                     {
-                        LayerRules = registration.Capabilities.HasFlag(TemplateCapability.LayerStates)
-                            ? slot.Layers
-                            : [],
-                        ObjectDisplayRules = registration.Capabilities.HasFlag(
-                                TemplateCapability.ObjectDisplayModes)
-                            ? slot.Objects
-                            : [],
+                        LayerRules = [],
+                        ObjectDisplayRules = [],
                     };
                 }).ToArray(),
                 registration.Source.Kind == HierarchyScopeKind.Sheet &&

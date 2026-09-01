@@ -7,8 +7,7 @@ internal enum CreateResourceKind
 {
     Folder,
     Layout,
-    LayerState,
-    ObjectDisplayState,
+    AppearanceState,
 }
 
 internal sealed class CreateResourceMenuOverlay : PixelLayout
@@ -69,8 +68,7 @@ internal sealed class CreateResourceMenuOverlay : PixelLayout
         [
             new(CreateResourceKind.Folder, "Folder", FoundryViewIcons.Folder()),
             new(CreateResourceKind.Layout, "Sheet", FoundryViewIcons.Layout()),
-            new(CreateResourceKind.LayerState, "Layer state", FoundryViewIcons.LayerState()),
-            new(CreateResourceKind.ObjectDisplayState, "Object state", FoundryViewIcons.ObjectDisplayState()),
+            new(CreateResourceKind.AppearanceState, "Appearance state", FoundryViewIcons.AppearanceState()),
         ];
         private int _hovered = -1;
         private int _focused;

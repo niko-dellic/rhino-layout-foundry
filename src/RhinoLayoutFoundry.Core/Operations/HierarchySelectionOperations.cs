@@ -55,7 +55,7 @@ public static class HierarchySelectionResolver
                 case OverviewNodeKind.Detail when detailOwners.TryGetValue(key.Id, out var sheetId):
                     selectedSheets.Add(sheetId);
                     break;
-                case OverviewNodeKind.LayerState or OverviewNodeKind.ObjectDisplayState
+                case OverviewNodeKind.AppearanceState
                     when stateFolders.ContainsKey(key.Id):
                     selectedStates.Add(key.Id);
                     break;

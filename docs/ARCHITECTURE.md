@@ -300,6 +300,8 @@ Foundry-only hierarchy metadata uses the supported private-data case for `RhinoD
 
 The export service resolves the ordered sheet list, validates every page, and creates a multipage PDF with RhinoCommon's [`FilePdf.AddPage`](https://developer.rhino3d.com/api/rhinocommon/rhino.fileio.filepdf/addpage?version=8.x) and per-sheet capture settings.
 
+Batch export uses an explicit print profile: Rhino print colors and print widths, vector-preferred output, and no viewport background color, background bitmap, wallpaper, grid, axes, or margin guides. Raster-only display content retains the requested export resolution (300 DPI by default). During each `FilePdf.AddPage` call, Foundry supplies the white print-media framebuffer fill that Rhino's native Print pipeline applies; this prevents the macOS layout viewport's gray preview surface from leaking into page and detail backgrounds. This matches Rhino's [print color and background controls](https://docs.mcneel.com/rhino/8/help/en-us/commands/print.htm) without changing the document's display or Print Preview state.
+
 Output is written to a temporary sibling path when possible. Only a complete successful export replaces or creates the requested final path. Cancellation or failure cleans up the temporary file and returns page-specific diagnostics.
 
 Physical printer integration is outside v1 because driver capabilities and dialogs vary by operating system.

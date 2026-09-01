@@ -10,8 +10,8 @@ internal static class FoundryHierarchyIcons
     private static readonly Icon FolderIcon = NewIcon(DrawFolder);
     private static readonly Icon LayoutIcon = NewIcon(DrawLayout);
     private static readonly Icon DetailIcon = NewIcon(DrawDetail);
-    private static readonly Icon LayerStateIcon = NewIcon(DrawLayerState);
-    private static readonly Icon ObjectDisplayStateIcon = NewIcon(DrawObjectDisplayState);
+    private static readonly Icon ObjectIcon = NewIcon(DrawObject);
+    private static readonly Icon AppearanceStateIcon = NewIcon(DrawAppearanceState);
 
     internal static Image Rhino => RhinoIcon;
 
@@ -21,9 +21,9 @@ internal static class FoundryHierarchyIcons
 
     internal static Image Detail => DetailIcon;
 
-    internal static Image LayerState => LayerStateIcon;
+    internal static Image Object => ObjectIcon;
 
-    internal static Image ObjectDisplayState => ObjectDisplayStateIcon;
+    internal static Image AppearanceState => AppearanceStateIcon;
 
     internal static void DrawRhino(Graphics graphics, Color color, RectangleF bounds)
     {
@@ -82,7 +82,7 @@ internal static class FoundryHierarchyIcons
         DrawLine(graphics, pen, bounds, 10.75f, 8, 14.25f, 8);
     }
 
-    internal static void DrawLayerState(Graphics graphics, Color color, RectangleF bounds)
+    internal static void DrawAppearanceState(Graphics graphics, Color color, RectangleF bounds)
     {
         using var pen = IconPen(color, bounds);
         DrawLine(graphics, pen, bounds, 2, 4, 8, 1.75f);
@@ -93,9 +93,10 @@ internal static class FoundryHierarchyIcons
         DrawLine(graphics, pen, bounds, 8, 10, 14, 7.75f);
         DrawLine(graphics, pen, bounds, 2, 11.5f, 8, 13.75f);
         DrawLine(graphics, pen, bounds, 8, 13.75f, 14, 11.5f);
+        DrawEllipse(graphics, pen, bounds, 10.25f, 9.75f, 4, 4);
     }
 
-    internal static void DrawObjectDisplayState(Graphics graphics, Color color, RectangleF bounds)
+    internal static void DrawObject(Graphics graphics, Color color, RectangleF bounds)
     {
         using var pen = IconPen(color, bounds);
         DrawEllipse(graphics, pen, bounds, 5, 1.75f, 6, 2.75f);

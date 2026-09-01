@@ -863,10 +863,39 @@ public static class LayoutFoundryUiHost
         return new OperationResult(true, diagnostics);
     }
 
+    public static async Task<OperationResult> SetAppearanceRulesAsync(
+        IReadOnlyList<OverviewNodeKey> targets,
+        IReadOnlyList<LayerVisibilityRule> layerRules,
+        IReadOnlyList<ObjectDisplayRule> objectRules,
+        CancellationToken cancellationToken = default)
+    {
+        if (_snapshotProvider is null || _mutationService is null)
+            return UnavailableResult("Foundry is not connected to an active Rhino plug-in.");
+        var diagnostics = new List<Diagnostic>();
+        foreach (var target in targets.Distinct())
+        {
+            var snapshot = _snapshotProvider.Capture();
+            var plan = new SetHierarchyViewportRulesPlanner().Plan(
+                new SetHierarchyViewportRulesRequest(
+                    snapshot.DocumentRuntimeSerialNumber,
+                    snapshot.Revision,
+                    ToHierarchyScope(target),
+                    layerRules,
+                    objectRules),
+                snapshot);
+            var result = plan.CanApply
+                ? await _mutationService.ApplyAsync(plan, cancellationToken)
+                : new OperationResult(false, plan.Diagnostics);
+            diagnostics.AddRange(result.Diagnostics);
+            if (!result.Succeeded) return new OperationResult(false, diagnostics);
+        }
+        NotifyOverviewChanged(OverviewInvalidation.All);
+        return new OperationResult(true, diagnostics);
+    }
+
     public static async Task<OperationResult> CreateAppearanceStateAsync(
         Guid folderId,
         string name,
-        AppearanceStateKind kind,
         IReadOnlyList<LayerVisibilityRule>? layerRules = null,
         IReadOnlyList<ObjectDisplayRule>? objectRules = null,
         CancellationToken cancellationToken = default)
@@ -881,7 +910,6 @@ public static class LayoutFoundryUiHost
                 snapshot.Revision,
                 folderId,
                 name,
-                kind,
                 layerRules,
                 objectRules), snapshot);
             var result = plan.CanApply
@@ -925,7 +953,6 @@ public static class LayoutFoundryUiHost
 
     public static async Task<OperationResult> AssignAppearanceStateAsync(
         IReadOnlyList<OverviewNodeKey> targets,
-        AppearanceStateKind kind,
         Guid? stateId,
         CancellationToken cancellationToken = default)
     {
@@ -939,7 +966,7 @@ public static class LayoutFoundryUiHost
                 var snapshot = _snapshotProvider.Capture();
                 var plan = new AssignAppearanceStatePlanner().Plan(new AssignAppearanceStateRequest(
                     snapshot.DocumentRuntimeSerialNumber, snapshot.Revision,
-                    ToHierarchyScope(target), kind, stateId), snapshot);
+                    ToHierarchyScope(target), stateId), snapshot);
                 var result = plan.CanApply
                     ? await _mutationService.ApplyAsync(plan, cancellationToken)
                     : new OperationResult(false, plan.Diagnostics);
@@ -1002,23 +1029,13 @@ public static class LayoutFoundryUiHost
                 .LastOrDefault(item => item.Id == sourceRegistrationId);
             if (registration is null)
                 return UnavailableResult("The selected template source is no longer available.");
-            var sourceRules = snapshot.AppearanceRules
-                .LastOrDefault(item => item.Scope == registration.Source);
-            var payload = new TemplateCapabilityPayload(
-                LayerRules: capability == TemplateCapability.LayerStates
-                    ? sourceRules?.LayerRules.ToArray() ?? []
-                    : null,
-                ObjectDisplayRules: capability == TemplateCapability.ObjectDisplayModes
-                    ? sourceRules?.ObjectDisplayRules.ToArray() ?? []
-                    : null);
             var plan = new LinkTemplateCapabilityPlanner().Plan(
                 new LinkTemplateCapabilityRequest(
                     snapshot.DocumentRuntimeSerialNumber,
                     snapshot.Revision,
                     ToHierarchyScope(target),
                     sourceRegistrationId,
-                    capability,
-                    LastResolved: payload),
+                    capability),
                 snapshot);
             var result = plan.CanApply
                 ? await _mutationService.ApplyAsync(plan, cancellationToken)
@@ -1062,7 +1079,7 @@ public static class LayoutFoundryUiHost
         return new OperationResult(true, diagnostics);
     }
 
-    private static HierarchyScope ToHierarchyScope(OverviewNodeKey key) => new(
+    internal static HierarchyScope ToHierarchyScope(OverviewNodeKey key) => new(
         key.Kind switch
         {
             OverviewNodeKind.Folder => HierarchyScopeKind.Folder,

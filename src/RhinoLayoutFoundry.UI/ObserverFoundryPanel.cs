@@ -846,7 +846,10 @@ public sealed class ObserverFoundryPanel : Panel
     private async Task MoveHierarchyAsync(ObserverHierarchyMoveRequestedEventArgs eventArgs)
     {
         OperationResult result;
-        if (eventArgs.SheetIds.Count > 0)
+        if (eventArgs.AppearanceStateIds.Count > 0)
+            result = await LayoutFoundryUiHost.MoveAppearanceStatesAsync(
+                eventArgs.AppearanceStateIds, eventArgs.DestinationFolderId);
+        else if (eventArgs.SheetIds.Count > 0)
             result = await LayoutFoundryUiHost.MoveSheetsAsync(eventArgs.DestinationFolderId, eventArgs.SheetIds);
         else
             result = await LayoutFoundryUiHost.MoveFoldersAsync(eventArgs.DestinationFolderId, eventArgs.FolderIds);
@@ -1032,7 +1035,7 @@ public sealed class ObserverFoundryPanel : Panel
         var move = new ButtonMenuItem { Text = "Move to Folder" };
         move.Enabled = selection.Any(key =>
             key.Kind is OverviewNodeKind.Folder or OverviewNodeKind.Sheet or OverviewNodeKind.Detail or
-                OverviewNodeKind.LayerState or OverviewNodeKind.ObjectDisplayState);
+                OverviewNodeKind.AppearanceState);
         foreach (var folder in _snapshot.Folders
                      .OrderBy(folder => FolderDepth(folder.Id))
                      .ThenBy(folder => folder.Order)
@@ -1067,8 +1070,7 @@ public sealed class ObserverFoundryPanel : Panel
             if (owner is not null) sheetIds.Add(owner.PageViewId);
         }
 
-        var stateIds = selection.Where(key => key.Kind is
-                OverviewNodeKind.LayerState or OverviewNodeKind.ObjectDisplayState)
+        var stateIds = selection.Where(key => key.Kind == OverviewNodeKind.AppearanceState)
             .Select(key => key.Id).ToArray();
 
         if (stateIds.Length > 0)
@@ -1101,7 +1103,7 @@ public sealed class ObserverFoundryPanel : Panel
     {
         var selection = LayoutFoundryUiHost.Selection.Selected.ToArray();
         if (selection.Length == 1 && selection[0].Kind is
-                OverviewNodeKind.LayerState or OverviewNodeKind.ObjectDisplayState)
+                OverviewNodeKind.AppearanceState)
         {
             var snapshot = LayoutFoundryUiHost.CaptureSnapshot();
             var state = snapshot?.AppearanceStates.FirstOrDefault(item => item.Id == selection[0].Id);
@@ -1313,12 +1315,8 @@ public sealed class ObserverFoundryPanel : Panel
                          .OrderBy(state => state.Order)
                          .ThenBy(state => state.Name, StringComparer.OrdinalIgnoreCase))
                 rows.Add(new NavigatorRow(
-                    new OverviewNodeKey(
-                        state.Kind == AppearanceStateKind.LayerState
-                            ? OverviewNodeKind.LayerState
-                            : OverviewNodeKind.ObjectDisplayState,
-                        state.Id),
-                    $"{new string(' ', (depth + 1) * 3)}{(state.Kind == AppearanceStateKind.LayerState ? "≋" : "△")}  {state.Name}"));
+                    new OverviewNodeKey(OverviewNodeKind.AppearanceState, state.Id),
+                    $"{new string(' ', (depth + 1) * 3)}◫  {state.Name}"));
             foreach (var sheet in snapshot.Sheets.Where(sheet => sheet.FolderId == folder.Id)
                          .OrderBy(sheet => sheet.Order)
                          .ThenBy(sheet => sheet.Name, StringComparer.OrdinalIgnoreCase))

@@ -101,14 +101,34 @@ internal sealed class RhinoLayoutPdfExportService : ILayoutPdfExportService
                         return new LayoutPdfExportResult(false, addedPages, "PDF export was cancelled.");
                     }
 
-                    var settings = new ViewCaptureSettings(page, request.DotsPerInch)
+                    // Match Rhino's print-oriented output rather than the layout's
+                    // on-screen display. In particular, layout/detail background
+                    // colors are preview chrome and must not tint the PDF page.
+                    using var settings = new ViewCaptureSettings(page, request.DotsPerInch)
                     {
-                        DrawBackground = true,
+                        OutputColor = ViewCaptureSettings.ColorMode.PrintColor,
+                        UsePrintWidths = true,
+                        RasterMode = false,
+                        DrawBackground = false,
+                        DrawBackgroundBitmap = false,
+                        DrawWallpaper = false,
                         DrawGrid = false,
                         DrawAxis = false,
-                        UsePrintWidths = true,
+                        DrawMargins = false,
                     };
-                    pdf.AddPage(settings);
+                    // FilePdf does not initialize layout/detail framebuffers with
+                    // Rhino Print's white media fill on macOS. Without this hook,
+                    // the on-screen gray layout surface leaks into the PDF even
+                    // when DrawBackground is false.
+                    DisplayPipeline.InitFrameBuffer += InitializePrintFrameBuffer;
+                    try
+                    {
+                        pdf.AddPage(settings);
+                    }
+                    finally
+                    {
+                        DisplayPipeline.InitFrameBuffer -= InitializePrintFrameBuffer;
+                    }
                     addedPages++;
                 }
 
@@ -134,4 +154,9 @@ internal sealed class RhinoLayoutPdfExportService : ILayoutPdfExportService
             return new LayoutPdfExportResult(false, 0, $"Rhino could not create the PDF: {exception.Message}");
         }
     }
+
+    private static void InitializePrintFrameBuffer(
+        object? sender,
+        InitFrameBufferEventArgs eventArgs) =>
+        eventArgs.SetFill(System.Drawing.Color.White);
 }

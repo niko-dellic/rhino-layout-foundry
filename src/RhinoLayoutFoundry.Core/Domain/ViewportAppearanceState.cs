@@ -6,8 +6,6 @@ public enum TemplateCapability
     None = 0,
     Layout = 1 << 0,
     TitleBlock = 1 << 1,
-    LayerStates = 1 << 2,
-    ObjectDisplayModes = 1 << 3,
 }
 
 public enum HierarchyScopeKind
@@ -43,8 +41,7 @@ public sealed record ObjectDisplaySelector(
     ObjectDisplaySelectorKind Kind,
     Guid? ObjectId = null,
     Guid? LayerId = null,
-    string? LayerFullPath = null,
-    bool IncludeChildLayers = false);
+    string? LayerFullPath = null);
 
 public sealed record ObjectDisplayRule(
     ObjectDisplaySelector Selector,
@@ -60,12 +57,6 @@ public sealed record HierarchyViewportRuleSet(
     IReadOnlyList<LayerVisibilityRule> LayerRules,
     IReadOnlyList<ObjectDisplayRule> ObjectDisplayRules);
 
-public enum AppearanceStateKind
-{
-    LayerState,
-    ObjectDisplayState,
-}
-
 /// <summary>
 /// A reusable, document-owned appearance resource. Folder membership is only
 /// organizational; behavior is established through explicit assignments.
@@ -75,18 +66,16 @@ public sealed record AppearanceStateRecord(
     Guid FolderId,
     int Order,
     string Name,
-    AppearanceStateKind Kind,
     IReadOnlyList<LayerVisibilityRule> LayerRules,
     IReadOnlyList<ObjectDisplayRule> ObjectDisplayRules);
 
 /// <summary>
-/// A target can own at most one assignment for each appearance-state kind.
+/// A target can own at most one appearance-state assignment.
 /// More-specific hierarchy assignments naturally replace the inherited basis.
 /// </summary>
 public sealed record AppearanceStateAssignment(
     Guid Id,
     HierarchyScope Target,
-    AppearanceStateKind Kind,
     Guid StateId);
 
 public sealed record CapabilityTemplateRegistration(
@@ -100,13 +89,7 @@ public sealed record TemplateDetailMapping(
 
 public sealed record TemplateCapabilityPayload(
     SheetTemplateRecipe? Layout = null,
-    TitleBlockTemplateRecipe? TitleBlock = null,
-    IReadOnlyList<LayerVisibilityRule>? LayerRules = null,
-    IReadOnlyList<ObjectDisplayRule>? ObjectDisplayRules = null)
-{
-    public IReadOnlyList<LayerVisibilityRule> Layers => LayerRules ?? [];
-    public IReadOnlyList<ObjectDisplayRule> Objects => ObjectDisplayRules ?? [];
-}
+    TitleBlockTemplateRecipe? TitleBlock = null);
 
 /// <summary>
 /// One live capability link. LastResolved is deliberately persisted so source
@@ -173,8 +156,6 @@ public static class ViewportAppearanceResolver
         IReadOnlyDictionary<HierarchyScope, HierarchyViewportRuleSet> localRules,
         IReadOnlyDictionary<Guid, LayerSnapshot> layers,
         IReadOnlyDictionary<Guid, ModelObjectSnapshot> objects,
-        IReadOnlyList<CapabilityTemplateLink>? links = null,
-        IReadOnlyDictionary<Guid, CapabilityTemplateRegistration>? registrations = null,
         IReadOnlyDictionary<Guid, AppearanceStateRecord>? appearanceStates = null,
         IReadOnlyList<AppearanceStateAssignment>? stateAssignments = null)
     {
@@ -204,56 +185,19 @@ public static class ViewportAppearanceResolver
             }
         }
 
-        void ApplyLinked(
-            HierarchyScope target,
-            TemplateCapability capability,
-            HashSet<(HierarchyScope Scope, TemplateCapability Capability)> visited)
-        {
-            if (links is null || registrations is null || !visited.Add((target, capability))) return;
-            var link = links.LastOrDefault(item => item.Target == target && item.Capability == capability);
-            if (link is null) return;
-            if (registrations.TryGetValue(link.SourceRegistrationId, out var registration))
-            {
-                ApplyLinked(registration.Source, capability, visited);
-                if (localRules.TryGetValue(registration.Source, out var sourceRules))
-                {
-                    if (capability == TemplateCapability.LayerStates)
-                        ApplyRules(sourceRules.LayerRules, []);
-                    else if (capability == TemplateCapability.ObjectDisplayModes)
-                        ApplyRules([], sourceRules.ObjectDisplayRules);
-                }
-                else if (capability == TemplateCapability.LayerStates)
-                    ApplyRules(link.LastResolved.Layers, []);
-                else if (capability == TemplateCapability.ObjectDisplayModes)
-                    ApplyRules([], link.LastResolved.Objects);
-            }
-            else if (capability == TemplateCapability.LayerStates)
-                ApplyRules(link.LastResolved.Layers, []);
-            else if (capability == TemplateCapability.ObjectDisplayModes)
-                ApplyRules([], link.LastResolved.Objects);
-        }
-
-        void ApplyAssigned(HierarchyScope target, AppearanceStateKind kind)
+        void ApplyAssigned(HierarchyScope target)
         {
             if (appearanceStates is null || stateAssignments is null) return;
-            var assignment = stateAssignments.LastOrDefault(item =>
-                item.Target == target && item.Kind == kind);
+            var assignment = stateAssignments.LastOrDefault(item => item.Target == target);
             if (assignment is null ||
-                !appearanceStates.TryGetValue(assignment.StateId, out var state) ||
-                state.Kind != kind)
+                !appearanceStates.TryGetValue(assignment.StateId, out var state))
                 return;
-            if (kind == AppearanceStateKind.LayerState)
-                ApplyRules(state.LayerRules, []);
-            else
-                ApplyRules([], state.ObjectDisplayRules);
+            ApplyRules(state.LayerRules, state.ObjectDisplayRules);
         }
 
         foreach (var scope in leastToMostSpecificScopes)
         {
-            ApplyAssigned(scope, AppearanceStateKind.LayerState);
-            ApplyAssigned(scope, AppearanceStateKind.ObjectDisplayState);
-            ApplyLinked(scope, TemplateCapability.LayerStates, []);
-            ApplyLinked(scope, TemplateCapability.ObjectDisplayModes, []);
+            ApplyAssigned(scope);
             if (!localRules.TryGetValue(scope, out var rules)) continue;
             ApplyRules(rules.LayerRules, rules.ObjectDisplayRules);
         }
@@ -322,12 +266,8 @@ public static class ViewportAppearanceResolver
         {
             if (current == selectorLayerId)
             {
-                if (currentDepth == 0 || selector.IncludeChildLayers)
-                {
-                    depth = LayerDepth(selectorLayerId, layers);
-                    return true;
-                }
-                return false;
+                depth = LayerDepth(selectorLayerId, layers);
+                return true;
             }
             if (layer.ParentId is not { } parentId) break;
             current = parentId;

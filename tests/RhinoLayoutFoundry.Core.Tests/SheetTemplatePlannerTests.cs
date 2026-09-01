@@ -180,10 +180,9 @@ public sealed class SheetTemplatePlannerTests
     }
 
     [Fact]
-    public void BatchCreationAppliesIndependentAppearanceTemplateSources()
+    public void BatchCreationAppliesUnifiedAppearanceState()
     {
-        var layerStateId = Guid.NewGuid();
-        var objectStateId = Guid.NewGuid();
+        var appearanceStateId = Guid.NewGuid();
         var layerId = Guid.NewGuid();
         var objectId = Guid.NewGuid();
         var layerRule = new LayerVisibilityRule(
@@ -197,10 +196,8 @@ public sealed class SheetTemplatePlannerTests
         {
             AppearanceStateResources =
             [
-                new AppearanceStateRecord(layerStateId, TestSnapshots.RootFolderId, 0,
-                    "Presentation layers", AppearanceStateKind.LayerState, [layerRule], []),
-                new AppearanceStateRecord(objectStateId, TestSnapshots.RootFolderId, 1,
-                    "Technical objects", AppearanceStateKind.ObjectDisplayState, [], [objectRule]),
+                new AppearanceStateRecord(appearanceStateId, TestSnapshots.RootFolderId, 0,
+                    "Presentation appearance", [layerRule], [objectRule]),
             ],
         };
         var plan = new BatchCreateSheetsPlanner().Plan(new BatchCreateSheetsRequest(
@@ -217,14 +214,12 @@ public sealed class SheetTemplatePlannerTests
                     1,
                     new PaperRecipe(594, 420, "Millimeters"),
                     BuiltInLayoutKind.SingleDetail,
-                    LayerStateId: layerStateId,
-                    ObjectDisplayStateId: objectStateId),
+                    AppearanceStateId: appearanceStateId),
             ]), snapshot);
 
         Assert.True(plan.CanApply);
         var change = Assert.IsType<CreateSheetFromTemplateChange>(Assert.Single(plan.Changes));
-        Assert.Equal(layerStateId, change.LayerStateId);
-        Assert.Equal(objectStateId, change.ObjectDisplayStateId);
+        Assert.Equal(appearanceStateId, change.AppearanceStateId);
         var detail = Assert.Single(change.Template.DetailSlots);
         Assert.Empty(detail.Layers);
         Assert.Empty(detail.Objects);

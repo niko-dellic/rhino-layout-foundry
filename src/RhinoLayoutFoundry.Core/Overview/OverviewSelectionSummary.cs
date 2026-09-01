@@ -4,11 +4,10 @@ public sealed record OverviewSelectionSummary(
     int FolderCount,
     int SheetCount,
     int DetailCount,
-    int LayerStateCount,
-    int ObjectDisplayStateCount)
+    int AppearanceStateCount)
 {
     public int TotalCount => FolderCount + SheetCount + DetailCount +
-        LayerStateCount + ObjectDisplayStateCount;
+        AppearanceStateCount;
 
     public string DisplayText
     {
@@ -23,8 +22,7 @@ public sealed record OverviewSelectionSummary(
             AddPart(parts, FolderCount, "folder");
             AddPart(parts, SheetCount, "sheet");
             AddPart(parts, DetailCount, "detail");
-            AddPart(parts, LayerStateCount, "layer state");
-            AddPart(parts, ObjectDisplayStateCount, "object state");
+            AddPart(parts, AppearanceStateCount, "appearance state");
             return string.Join(" · ", parts) + " selected";
         }
     }
@@ -36,8 +34,7 @@ public sealed record OverviewSelectionSummary(
         var folders = 0;
         var sheets = 0;
         var details = 0;
-        var layerStates = 0;
-        var objectDisplayStates = 0;
+        var appearanceStates = 0;
         foreach (var key in keys.Distinct())
         {
             switch (key.Kind)
@@ -51,11 +48,8 @@ public sealed record OverviewSelectionSummary(
                 case OverviewNodeKind.Detail:
                     details++;
                     break;
-                case OverviewNodeKind.LayerState:
-                    layerStates++;
-                    break;
-                case OverviewNodeKind.ObjectDisplayState:
-                    objectDisplayStates++;
+                case OverviewNodeKind.AppearanceState:
+                    appearanceStates++;
                     break;
                 default:
                     throw new ArgumentOutOfRangeException(nameof(keys), key.Kind, null);
@@ -66,8 +60,7 @@ public sealed record OverviewSelectionSummary(
             folders,
             sheets,
             details,
-            layerStates,
-            objectDisplayStates);
+            appearanceStates);
     }
 
     private static void AddPart(ICollection<string> parts, int count, string singular)

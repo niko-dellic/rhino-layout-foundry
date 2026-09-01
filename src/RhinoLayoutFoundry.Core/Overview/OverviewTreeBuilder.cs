@@ -7,8 +7,7 @@ public enum OverviewNodeKind
     Folder,
     Sheet,
     Detail,
-    LayerState,
-    ObjectDisplayState,
+    AppearanceState,
 }
 
 public enum OverviewFilterKind
@@ -175,13 +174,9 @@ public static class OverviewTreeBuilder
                          includeAllTextMatches || Matches(state.Name, filter.Query)))
             {
                 children.Add(new OverviewTreeNode(
-                    new OverviewNodeKey(
-                        state.Kind == AppearanceStateKind.LayerState
-                            ? OverviewNodeKind.LayerState
-                            : OverviewNodeKind.ObjectDisplayState,
-                        state.Id),
+                    new OverviewNodeKey(OverviewNodeKind.AppearanceState, state.Id),
                     state.Name,
-                    state.Kind == AppearanceStateKind.LayerState ? "Layer state" : "Object display state",
+                    "Appearance state",
                     [],
                     AppearanceState: state));
             }

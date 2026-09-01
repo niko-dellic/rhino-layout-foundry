@@ -10,8 +10,7 @@ namespace RhinoLayoutFoundry.UI;
 internal enum SelectionInspectorContent
 {
     All,
-    Layers,
-    ObjectModes,
+    Appearance,
 }
 
 internal sealed class SelectionInspectorPanel : Panel
@@ -47,6 +46,12 @@ internal sealed class SelectionInspectorPanel : Panel
     private readonly FilteredPicker _displayMode = new([], "Search display modes");
     private readonly Label _detailError = ErrorLabel();
     private readonly Panel _detailSection;
+    private readonly FilteredPicker _appearanceState = new([], "Search appearance states");
+    private readonly FoundryDialogButton _assignAppearanceState = new("Assign", FoundryDialogButtonStyle.Secondary, 76);
+    private readonly FoundryDialogButton _inheritAppearanceState = new("Use inherited", FoundryDialogButtonStyle.Secondary, 104);
+    private readonly FoundryDialogButton _editAppearanceOverrides = new("Edit local overrides…", FoundryDialogButtonStyle.Secondary, 154);
+    private readonly Label _appearanceError = ErrorLabel();
+    private readonly Panel _appearanceSection;
     private readonly TextBox _layerSearch = new() { PlaceholderText = "Search layers" };
     private readonly FilteredPicker _layerTemplate = new([], "Search layer states");
     private readonly FoundryDialogButton _linkLayerTemplate = new("Assign", FoundryDialogButtonStyle.Secondary, 76);
@@ -98,6 +103,7 @@ internal sealed class SelectionInspectorPanel : Panel
     private Dictionary<string, Guid> _layerIdByLabel = new(StringComparer.OrdinalIgnoreCase);
     private Dictionary<string, Guid> _layerTemplateByLabel = new(StringComparer.OrdinalIgnoreCase);
     private Dictionary<string, Guid> _objectTemplateByLabel = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, Guid> _appearanceStateByLabel = new(StringComparer.OrdinalIgnoreCase);
     private ObserverPoint _namedViewPress;
     private bool _updating;
     private bool _paperCommitInProgress;
@@ -175,6 +181,25 @@ internal sealed class SelectionInspectorPanel : Panel
             {
                 Field("Display mode", _displayMode),
                 _detailError,
+            },
+        });
+
+        _appearanceSection = Section("Appearance", new StackLayout
+        {
+            Spacing = FoundryTheme.Space2,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            Items =
+            {
+                Field("State basis", _appearanceState),
+                new StackLayout
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = FoundryTheme.Space1,
+                    Items = { _assignAppearanceState, _inheritAppearanceState },
+                },
+                _editAppearanceOverrides,
+                FoundryTheme.MutedLabel("The assigned state is the basis; local rules override it without detaching."),
+                _appearanceError,
             },
         });
 
@@ -361,8 +386,7 @@ internal sealed class SelectionInspectorPanel : Panel
                 _templateSection,
                 _layoutSection,
                 _detailSection,
-                _layersSection,
-                _objectsSection,
+                _appearanceSection,
                 _namedViewSection,
             },
         };
@@ -380,8 +404,7 @@ internal sealed class SelectionInspectorPanel : Panel
             _templateSection.Visible = false;
             _layoutSection.Visible = false;
             _detailSection.Visible = false;
-            _layersSection.Visible = contentMode == SelectionInspectorContent.Layers;
-            _objectsSection.Visible = contentMode == SelectionInspectorContent.ObjectModes;
+            _appearanceSection.Visible = contentMode == SelectionInspectorContent.Appearance;
             _namedViewSection.Visible = false;
         }
 
@@ -468,21 +491,14 @@ internal sealed class SelectionInspectorPanel : Panel
         };
         _assignNamedView.Click += (_, _) => _ = CommitNamedViewAsync();
         _layerSearch.TextChanged += (_, _) => ReloadLayers();
-        _linkLayerTemplate.Click += (_, _) => _ = AssignStateAsync(
-            _layerTemplate, _layerTemplateByLabel, AppearanceStateKind.LayerState,
-            _layersSection, _layersError);
-        _detachLayerTemplate.Click += (_, _) => _ = ClearStateAssignmentAsync(
-            AppearanceStateKind.LayerState, _layersSection, _layersError);
+        _assignAppearanceState.Click += (_, _) => _ = AssignStateAsync();
+        _inheritAppearanceState.Click += (_, _) => _ = ClearStateAssignmentAsync();
+        _editAppearanceOverrides.Click += (_, _) => _ = EditLocalAppearanceOverridesAsync();
         _layersInherit.Click += (_, _) => _ = CommitLayerVisibilityAsync(null);
         _layersOn.Click += (_, _) => _ = CommitLayerVisibilityAsync(LayerVisibilityOverride.Visible);
         _layersOff.Click += (_, _) => _ = CommitLayerVisibilityAsync(LayerVisibilityOverride.Hidden);
         _clearLayerOverrides.Click += (_, _) => _ = ClearLayerOverridesAsync();
         _addObjectRule.Click += (_, _) => _ = AddExactObjectRuleAsync();
-        _linkObjectTemplate.Click += (_, _) => _ = AssignStateAsync(
-            _objectTemplate, _objectTemplateByLabel, AppearanceStateKind.ObjectDisplayState,
-            _objectsSection, _objectsError);
-        _detachObjectTemplate.Click += (_, _) => _ = ClearStateAssignmentAsync(
-            AppearanceStateKind.ObjectDisplayState, _objectsSection, _objectsError);
         _addLayerRule.Click += (_, _) => _ = AddLayerObjectRuleAsync();
         _removeObjectRule.Click += (_, _) => _ = RemoveObjectRulesAsync();
         SetContext(null, []);
@@ -605,22 +621,12 @@ internal sealed class SelectionInspectorPanel : Panel
         _objectMode.SetChoices(_displayModeByLabel.Keys);
         if (!_objectMode.ContainsChoice(_objectMode.Text))
             _objectMode.Text = _displayModeByLabel.Keys.FirstOrDefault() ?? string.Empty;
-        _layersSection.Enabled = selectedScopes.Length > 0 && model?.AffectedDetailCount > 0;
-        _objectsSection.Enabled = selectedScopes.Length > 0 && model?.AffectedDetailCount > 0;
-        _layerTemplateByLabel = BuildStateChoices(snapshot, AppearanceStateKind.LayerState);
-        _objectTemplateByLabel = BuildStateChoices(snapshot, AppearanceStateKind.ObjectDisplayState);
-        _layerTemplate.SetChoices(_layerTemplateByLabel.Keys);
-        _objectTemplate.SetChoices(_objectTemplateByLabel.Keys);
-        _layerTemplate.Text = AssignedStateLabel(
-            selectedScopes, AppearanceStateKind.LayerState, _layerTemplateByLabel);
-        _objectTemplate.Text = AssignedStateLabel(
-            selectedScopes, AppearanceStateKind.ObjectDisplayState, _objectTemplateByLabel);
-        _detachLayerTemplate.Enabled = selectedScopes.Any(scope => snapshot?.StateAssignments.Any(link =>
-            link.Target == scope && link.Kind == AppearanceStateKind.LayerState) == true);
-        _detachObjectTemplate.Enabled = selectedScopes.Any(scope => snapshot?.StateAssignments.Any(link =>
-            link.Target == scope && link.Kind == AppearanceStateKind.ObjectDisplayState) == true);
-        ReloadLayers();
-        ReloadObjectRules();
+        _appearanceSection.Enabled = selectedScopes.Length > 0;
+        _appearanceStateByLabel = BuildStateChoices(snapshot);
+        _appearanceState.SetChoices(_appearanceStateByLabel.Keys);
+        _appearanceState.Text = AssignedStateLabel(selectedScopes, _appearanceStateByLabel);
+        _inheritAppearanceState.Enabled = selectedScopes.Any(scope =>
+            snapshot?.StateAssignments.Any(link => link.Target == scope) == true);
 
         var namedViewBrowsingEnabled = snapshot is not null;
         _namedViewSection.Enabled = namedViewBrowsingEnabled;
@@ -725,40 +731,60 @@ internal sealed class SelectionInspectorPanel : Panel
         }
     }
 
-    private async Task AssignStateAsync(
-        FilteredPicker picker,
-        IReadOnlyDictionary<string, Guid> stateByLabel,
-        AppearanceStateKind kind,
-        Control section,
-        Label error)
+    private async Task AssignStateAsync()
     {
-        if (!stateByLabel.TryGetValue(picker.Text.Trim(), out var stateId))
+        if (!_appearanceStateByLabel.TryGetValue(_appearanceState.Text.Trim(), out var stateId))
         {
-            ShowError(error, "Choose an appearance state.");
+            ShowError(_appearanceError, "Choose an appearance state.");
             return;
         }
-        await RunAsync(section, error,
-            () => LayoutFoundryUiHost.AssignAppearanceStateAsync(_selection, kind, stateId),
-            $"{StateKindLabel(kind)} assigned.");
+        await RunAsync(_appearanceSection, _appearanceError,
+            () => LayoutFoundryUiHost.AssignAppearanceStateAsync(_selection, stateId),
+            "Appearance state assigned.");
     }
 
-    private async Task ClearStateAssignmentAsync(
-        AppearanceStateKind kind,
-        Control section,
-        Label error)
+    private async Task ClearStateAssignmentAsync()
     {
-        await RunAsync(section, error,
-            () => LayoutFoundryUiHost.AssignAppearanceStateAsync(_selection, kind, null),
-            $"{StateKindLabel(kind)} returned to inherited basis. Local overrides were preserved.");
+        await RunAsync(_appearanceSection, _appearanceError,
+            () => LayoutFoundryUiHost.AssignAppearanceStateAsync(_selection, null),
+            "Appearance state returned to inherited basis. Local overrides were preserved.");
+    }
+
+    private async Task EditLocalAppearanceOverridesAsync()
+    {
+        if (_snapshot is null) return;
+        var scopes = SelectedScopes().ToArray();
+        if (scopes.Length == 0)
+        {
+            ShowError(_appearanceError, "Select a folder, layout, or detail first.");
+            return;
+        }
+
+        var first = _snapshot.AppearanceRules.LastOrDefault(item => item.Scope == scopes[0]);
+        var dialog = new LocalAppearanceRulesDialog(
+            _snapshot,
+            first?.LayerRules ?? [],
+            first?.ObjectDisplayRules ?? []);
+        dialog.ShowModal(ParentWindow);
+        if (!dialog.Accepted) return;
+        await RunAsync(
+            _appearanceSection,
+            _appearanceError,
+            () => LayoutFoundryUiHost.SetAppearanceRulesAsync(
+                _selection,
+                dialog.LayerRules,
+                dialog.ObjectDisplayRules),
+            scopes.Length == 1
+                ? "Local appearance overrides updated."
+                : $"Local appearance overrides updated on {scopes.Length} targets.");
     }
 
     private Dictionary<string, Guid> BuildStateChoices(
-        DocumentSnapshot? snapshot,
-        AppearanceStateKind kind)
+        DocumentSnapshot? snapshot)
     {
         var result = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
         if (snapshot is null) return result;
-        foreach (var state in snapshot.AppearanceStates.Where(item => item.Kind == kind)
+        foreach (var state in snapshot.AppearanceStates
                      .OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase))
         {
             var folder = snapshot.Folders.GetValueOrDefault(state.FolderId)?.Name ?? "Missing folder";
@@ -771,21 +797,16 @@ internal sealed class SelectionInspectorPanel : Panel
 
     private string AssignedStateLabel(
         IReadOnlyList<HierarchyScope> scopes,
-        AppearanceStateKind kind,
         IReadOnlyDictionary<string, Guid> states)
     {
         if (_snapshot is null || scopes.Count == 0) return string.Empty;
         var stateIds = scopes.Select(scope => _snapshot.StateAssignments.LastOrDefault(link =>
-                link.Target == scope && link.Kind == kind)?.StateId)
+                link.Target == scope)?.StateId)
             .Distinct().ToArray();
         if (stateIds.Length != 1 || stateIds[0] is not { } id)
             return stateIds.Length > 1 ? Mixed : "Inherited";
         return states.FirstOrDefault(pair => pair.Value == id).Key ?? string.Empty;
     }
-
-    private static string StateKindLabel(AppearanceStateKind kind) => kind == AppearanceStateKind.LayerState
-        ? "Layer state"
-        : "Object display state";
 
     private static string ScopeLabel(DocumentSnapshot snapshot, HierarchyScope scope)
     {
@@ -809,8 +830,6 @@ internal sealed class SelectionInspectorPanel : Panel
 
     private static string CapabilityLabel(TemplateCapability capability) => capability switch
     {
-        TemplateCapability.LayerStates => "Layer-state",
-        TemplateCapability.ObjectDisplayModes => "Object-display",
         TemplateCapability.Layout => "Layout",
         TemplateCapability.TitleBlock => "Title-block",
         _ => "Capability",
@@ -935,8 +954,7 @@ internal sealed class SelectionInspectorPanel : Panel
         var selector = new ObjectDisplaySelector(
             ObjectDisplaySelectorKind.Layer,
             LayerId: layerId,
-            LayerFullPath: layer.FullPath,
-            IncludeChildLayers: _includeChildLayers.Checked == true);
+            LayerFullPath: layer.FullPath);
         await SaveObjectRuleAsync(selector, modeId, modeName, "Layer display rule added.");
     }
 
@@ -982,8 +1000,7 @@ internal sealed class SelectionInspectorPanel : Panel
             _snapshot?.ModelObjects.TryGetValue(objectId, out var modelObject) == true)
             return ObjectLabel(modelObject);
         if (rule.Selector.Kind == ObjectDisplaySelectorKind.Layer)
-            return $"Layer: {rule.Selector.LayerFullPath ?? "Missing layer"}" +
-                   (rule.Selector.IncludeChildLayers ? " + children" : string.Empty);
+            return $"Layer: {rule.Selector.LayerFullPath ?? "Missing layer"} + children";
         return "Missing object";
     }
 

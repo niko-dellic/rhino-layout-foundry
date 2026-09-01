@@ -30,8 +30,7 @@ public sealed record FolderOverview(
     int Order,
     TemplateCapability TemplateCapabilities = TemplateCapability.None,
     ViewportAppearanceSummary? Appearance = null,
-    AppearanceStateBindingOverview? LayerState = null,
-    AppearanceStateBindingOverview? ObjectDisplayState = null);
+    AppearanceStateBindingOverview? AppearanceState = null);
 
 public sealed record SheetOverview(
     Guid PageViewId,
@@ -48,8 +47,7 @@ public sealed record SheetOverview(
     bool IsTemplate = false,
     TemplateCapability TemplateCapabilities = TemplateCapability.None,
     ViewportAppearanceSummary? Appearance = null,
-    AppearanceStateBindingOverview? LayerState = null,
-    AppearanceStateBindingOverview? ObjectDisplayState = null)
+    AppearanceStateBindingOverview? AppearanceState = null)
 {
     public int DetailCount => Details.Count;
 
@@ -66,8 +64,7 @@ public sealed record DetailOverview(
     string DisplayModeName = "",
     TemplateCapability TemplateCapabilities = TemplateCapability.None,
     ViewportAppearanceSummary? Appearance = null,
-    AppearanceStateBindingOverview? LayerState = null,
-    AppearanceStateBindingOverview? ObjectDisplayState = null);
+    AppearanceStateBindingOverview? AppearanceState = null);
 
 public sealed record AppearanceStateBindingOverview(
     Guid StateId,
@@ -80,7 +77,6 @@ public sealed record AppearanceStateOverview(
     Guid FolderId,
     int Order,
     string Name,
-    AppearanceStateKind Kind,
     int RuleCount,
     int DirectAssignmentCount,
     int DependentFolderCount,

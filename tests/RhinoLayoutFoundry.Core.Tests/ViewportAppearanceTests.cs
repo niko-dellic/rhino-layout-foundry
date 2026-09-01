@@ -31,7 +31,7 @@ public sealed class ViewportAppearanceTests
             [objectId] = new(objectId, "Wall", ChildLayerId, childLayer.FullPath, false),
         };
         var folderLayerRule = ModeForLayer(RootLayerId, rootLayer.FullPath,
-            TestSnapshots.DisplayModeOneId, "Wireframe", includeChildren: true);
+            TestSnapshots.DisplayModeOneId, "Wireframe");
         var sheetLayerRule = ModeForLayer(ChildLayerId, childLayer.FullPath,
             TestSnapshots.DisplayModeTwoId, "Rendered");
         var detailObjectRule = new ObjectDisplayRule(
@@ -67,36 +67,6 @@ public sealed class ViewportAppearanceTests
     }
 
     [Fact]
-    public void CapabilityLinkPlannerRejectsCycles()
-    {
-        var sheet = new HierarchyScope(HierarchyScopeKind.Sheet, TestSnapshots.SheetOneId);
-        var other = new HierarchyScope(HierarchyScopeKind.Sheet, TestSnapshots.SheetTwoId);
-        var firstRegistration = new CapabilityTemplateRegistration(
-            Guid.NewGuid(), sheet, TemplateCapability.LayerStates);
-        var secondRegistration = new CapabilityTemplateRegistration(
-            Guid.NewGuid(), other, TemplateCapability.LayerStates);
-        var snapshot = TestSnapshots.Create() with
-        {
-            CapabilityTemplates = [firstRegistration, secondRegistration],
-            CapabilityLinks =
-            [
-                new CapabilityTemplateLink(Guid.NewGuid(), other, firstRegistration.Id,
-                    TemplateCapability.LayerStates, [], new TemplateCapabilityPayload()),
-            ],
-        };
-
-        var plan = new LinkTemplateCapabilityPlanner().Plan(new LinkTemplateCapabilityRequest(
-            snapshot.DocumentRuntimeSerialNumber,
-            snapshot.Revision,
-            sheet,
-            secondRegistration.Id,
-            TemplateCapability.LayerStates), snapshot);
-
-        Assert.False(plan.CanApply);
-        Assert.Contains(plan.Diagnostics, diagnostic => diagnostic.Code == "template.link_cycle");
-    }
-
-    [Fact]
     public void RulePlannerValidatesAndStagesOneScope()
     {
         var layer = new LayerSnapshot(ChildLayerId, null, "Walls", true);
@@ -129,51 +99,22 @@ public sealed class ViewportAppearanceTests
     }
 
     [Fact]
-    public void NewLayerStateStagesItsNameAndRulesInOneChange()
+    public void NewAppearanceStateStagesItsNameAndAllRulesInOneChange()
     {
         var layer = new LayerSnapshot(ChildLayerId, null, "Walls", true);
         var rule = new LayerVisibilityRule(
             new LayerReference(layer.Id, layer.FullPath),
             LayerVisibilityOverride.Hidden);
-        var snapshot = TestSnapshots.Create() with
-        {
-            LayerSettings = new Dictionary<Guid, LayerSnapshot> { [layer.Id] = layer },
-        };
-
-        var plan = new CreateAppearanceStatePlanner().Plan(
-            new CreateAppearanceStateRequest(
-                snapshot.DocumentRuntimeSerialNumber,
-                snapshot.Revision,
-                TestSnapshots.RootFolderId,
-                "Presentation layers",
-                AppearanceStateKind.LayerState,
-                LayerRules: [rule]),
-            snapshot);
-
-        Assert.True(plan.CanApply);
-        var change = Assert.IsType<SetAppearanceStateResourceChange>(Assert.Single(plan.Changes));
-        Assert.Equal("Presentation layers", change.NewState!.Name);
-        Assert.Equal(rule, Assert.Single(change.NewState.LayerRules));
-        Assert.Empty(change.NewState.ObjectDisplayRules);
-    }
-
-    [Fact]
-    public void NewObjectStateStagesItsNameAndRulesInOneChange()
-    {
         var objectSnapshot = new ModelObjectSnapshot(
-            TestSnapshots.ObjectId,
-            "Wall",
-            ChildLayerId,
-            "Walls",
-            false);
-        var rule = new ObjectDisplayRule(
-            new ObjectDisplaySelector(
-                ObjectDisplaySelectorKind.ExactObject,
+            TestSnapshots.ObjectId, "Wall", layer.Id, layer.FullPath, false);
+        var objectRule = new ObjectDisplayRule(
+            new ObjectDisplaySelector(ObjectDisplaySelectorKind.ExactObject,
                 ObjectId: objectSnapshot.Id),
             TestSnapshots.DisplayModeOneId,
             "Wireframe");
         var snapshot = TestSnapshots.Create() with
         {
+            LayerSettings = new Dictionary<Guid, LayerSnapshot> { [layer.Id] = layer },
             ModelObjectSettings = new Dictionary<Guid, ModelObjectSnapshot>
             {
                 [objectSnapshot.Id] = objectSnapshot,
@@ -185,79 +126,16 @@ public sealed class ViewportAppearanceTests
                 snapshot.DocumentRuntimeSerialNumber,
                 snapshot.Revision,
                 TestSnapshots.RootFolderId,
-                "Hero objects",
-                AppearanceStateKind.ObjectDisplayState,
-                ObjectDisplayRules: [rule]),
+                "Presentation appearance",
+                LayerRules: [rule],
+                ObjectDisplayRules: [objectRule]),
             snapshot);
 
         Assert.True(plan.CanApply);
         var change = Assert.IsType<SetAppearanceStateResourceChange>(Assert.Single(plan.Changes));
-        Assert.Equal("Hero objects", change.NewState!.Name);
-        Assert.Equal(rule, Assert.Single(change.NewState.ObjectDisplayRules));
-        Assert.Empty(change.NewState.LayerRules);
-    }
-
-    [Fact]
-    public void LiveCapabilityLinkFeedsTargetBeforeItsLocalOverrides()
-    {
-        var source = new HierarchyScope(HierarchyScopeKind.Sheet, TestSnapshots.SheetOneId);
-        var target = new HierarchyScope(HierarchyScopeKind.Sheet, TestSnapshots.SheetTwoId);
-        var layer = new LayerSnapshot(ChildLayerId, null, "Walls", true);
-        var registration = new CapabilityTemplateRegistration(
-            Guid.NewGuid(), source, TemplateCapability.LayerStates);
-        var rules = new Dictionary<HierarchyScope, HierarchyViewportRuleSet>
-        {
-            [source] = new(source,
-                [new LayerVisibilityRule(
-                    new LayerReference(layer.Id, layer.FullPath),
-                    LayerVisibilityOverride.Hidden)], []),
-            [target] = new(target,
-                [new LayerVisibilityRule(
-                    new LayerReference(layer.Id, layer.FullPath),
-                    LayerVisibilityOverride.Visible)], []),
-        };
-        var link = new CapabilityTemplateLink(
-            Guid.NewGuid(), target, registration.Id, TemplateCapability.LayerStates, [],
-            new TemplateCapabilityPayload());
-
-        var resolved = ViewportAppearanceResolver.Resolve(
-            [target],
-            rules,
-            new Dictionary<Guid, LayerSnapshot> { [layer.Id] = layer },
-            new Dictionary<Guid, ModelObjectSnapshot>(),
-            [link],
-            new Dictionary<Guid, CapabilityTemplateRegistration> { [registration.Id] = registration });
-
-        Assert.Equal(LayerVisibilityOverride.Visible, resolved.Layers[layer.Id]);
-    }
-
-    [Fact]
-    public void MissingSheetTemplateSourceDetachesToItsLastResolvedValues()
-    {
-        var source = new HierarchyScope(HierarchyScopeKind.Sheet, TestSnapshots.SheetOneId);
-        var target = new HierarchyScope(HierarchyScopeKind.Sheet, TestSnapshots.SheetTwoId);
-        var registration = new CapabilityTemplateRegistration(
-            Guid.NewGuid(), source, TemplateCapability.LayerStates);
-        var frozenRule = new LayerVisibilityRule(
-            new LayerReference(ChildLayerId, "Walls"), LayerVisibilityOverride.Hidden);
-        var state = DocumentState.Empty() with
-        {
-            CapabilityTemplates = [registration],
-            CapabilityLinks =
-            [
-                new CapabilityTemplateLink(
-                    Guid.NewGuid(), target, registration.Id, TemplateCapability.LayerStates, [],
-                    new TemplateCapabilityPayload(LayerRules: [frozenRule])),
-            ],
-        };
-
-        var cleaned = state.RemoveTemplatesForMissingSources(
-            new HashSet<Guid> { TestSnapshots.SheetTwoId });
-
-        Assert.Empty(cleaned.TemplateRegistrations);
-        Assert.Empty(cleaned.TemplateLinks);
-        Assert.Equal(frozenRule,
-            Assert.Single(Assert.Single(cleaned.AppearanceRules).LayerRules));
+        Assert.Equal("Presentation appearance", change.NewState!.Name);
+        Assert.Equal(rule, Assert.Single(change.NewState.LayerRules));
+        Assert.Equal(objectRule, Assert.Single(change.NewState.ObjectDisplayRules));
     }
 
     [Fact]
@@ -268,10 +146,10 @@ public sealed class ViewportAppearanceTests
         var sheet = new HierarchyScope(HierarchyScopeKind.Sheet, TestSnapshots.SheetOneId);
         var detail = new HierarchyScope(HierarchyScopeKind.Detail, TestSnapshots.DetailOneId);
         var folderState = new AppearanceStateRecord(Guid.NewGuid(), TestSnapshots.ChildFolderId, 0,
-            "Folder basis", AppearanceStateKind.LayerState,
+            "Folder basis",
             [new LayerVisibilityRule(new LayerReference(layer.Id, layer.FullPath), LayerVisibilityOverride.Hidden)], []);
         var sheetState = new AppearanceStateRecord(Guid.NewGuid(), TestSnapshots.ChildFolderId, 1,
-            "Sheet basis", AppearanceStateKind.LayerState,
+            "Sheet basis",
             [new LayerVisibilityRule(new LayerReference(layer.Id, layer.FullPath), LayerVisibilityOverride.Visible)], []);
         var rules = new Dictionary<HierarchyScope, HierarchyViewportRuleSet>
         {
@@ -280,8 +158,8 @@ public sealed class ViewportAppearanceTests
         };
         var assignments = new[]
         {
-            new AppearanceStateAssignment(Guid.NewGuid(), folder, AppearanceStateKind.LayerState, folderState.Id),
-            new AppearanceStateAssignment(Guid.NewGuid(), sheet, AppearanceStateKind.LayerState, sheetState.Id),
+            new AppearanceStateAssignment(Guid.NewGuid(), folder, folderState.Id),
+            new AppearanceStateAssignment(Guid.NewGuid(), sheet, sheetState.Id),
         };
 
         var resolved = ViewportAppearanceResolver.Resolve(
@@ -303,10 +181,9 @@ public sealed class ViewportAppearanceTests
     public void ClearingAssignmentDoesNotChangeLocalOverrides()
     {
         var state = new AppearanceStateRecord(Guid.NewGuid(), TestSnapshots.ChildFolderId, 0,
-            "Walls", AppearanceStateKind.LayerState, [], []);
+            "Walls", [], []);
         var target = new HierarchyScope(HierarchyScopeKind.Sheet, TestSnapshots.SheetOneId);
-        var assignment = new AppearanceStateAssignment(Guid.NewGuid(), target,
-            AppearanceStateKind.LayerState, state.Id);
+        var assignment = new AppearanceStateAssignment(Guid.NewGuid(), target, state.Id);
         var local = new HierarchyViewportRuleSet(target,
             [new LayerVisibilityRule(new LayerReference(ChildLayerId, "Walls"), LayerVisibilityOverride.Visible)], []);
         var snapshot = TestSnapshots.Create() with
@@ -318,7 +195,7 @@ public sealed class ViewportAppearanceTests
 
         var plan = new AssignAppearanceStatePlanner().Plan(new AssignAppearanceStateRequest(
             snapshot.DocumentRuntimeSerialNumber, snapshot.Revision, target,
-            AppearanceStateKind.LayerState, null), snapshot);
+            null), snapshot);
 
         var change = Assert.IsType<SetAppearanceStateAssignmentChange>(Assert.Single(plan.Changes));
         Assert.Null(change.NewAssignment);
@@ -329,12 +206,10 @@ public sealed class ViewportAppearanceTests
         Guid layerId,
         string fullPath,
         Guid displayModeId,
-        string displayModeName,
-        bool includeChildren = false) => new(
+        string displayModeName) => new(
         new ObjectDisplaySelector(ObjectDisplaySelectorKind.Layer,
             LayerId: layerId,
-            LayerFullPath: fullPath,
-            IncludeChildLayers: includeChildren),
+            LayerFullPath: fullPath),
         displayModeId,
         displayModeName);
 }

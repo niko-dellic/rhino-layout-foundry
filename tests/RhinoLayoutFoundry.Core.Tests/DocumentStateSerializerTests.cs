@@ -306,24 +306,22 @@ public sealed class DocumentStateSerializerTests
     }
 
     [Fact]
-    public void VersionNineAppearanceTemplatesMigrateToStatesWithoutConsumingLocalOverrides()
+    public void VersionNineSplitAppearanceMetadataIsDiscardedWithoutConsumingLocalOverrides()
     {
         var source = new HierarchyScope(HierarchyScopeKind.Folder, WellKnownIds.UnorganizedFolderId);
         var target = new HierarchyScope(HierarchyScopeKind.Sheet, Guid.NewGuid());
         var layerId = Guid.NewGuid();
         var registration = new CapabilityTemplateRegistration(
-            Guid.NewGuid(), source, TemplateCapability.Layout | TemplateCapability.LayerStates);
+            Guid.NewGuid(), source, TemplateCapability.Layout);
         var sourceRule = new HierarchyViewportRuleSet(source,
             [new LayerVisibilityRule(new LayerReference(layerId, "Walls"), LayerVisibilityOverride.Hidden)], []);
         var localRule = new HierarchyViewportRuleSet(target,
             [new LayerVisibilityRule(new LayerReference(layerId, "Walls"), LayerVisibilityOverride.Visible)], []);
-        var link = new CapabilityTemplateLink(Guid.NewGuid(), target, registration.Id,
-            TemplateCapability.LayerStates, [], new TemplateCapabilityPayload());
         var state = DocumentState.Empty() with
         {
             ViewportRuleSets = [sourceRule, localRule],
             CapabilityTemplates = [registration],
-            CapabilityLinks = [link],
+            CapabilityLinks = [],
         };
         var payload = DocumentStateSerializer.Serialize(state)
             .Replace($"\"SchemaVersion\":{DocumentState.CurrentSchemaVersion}", "\"SchemaVersion\":9",
@@ -333,11 +331,9 @@ public sealed class DocumentStateSerializerTests
 
         var restored = DocumentStateSerializer.Deserialize(payload);
 
-        var migrated = Assert.Single(restored.AppearanceStates);
-        Assert.Equal(AppearanceStateKind.LayerState, migrated.Kind);
-        Assert.Equal(sourceRule.LayerRules, migrated.LayerRules);
-        Assert.Equal(target, Assert.Single(restored.StateAssignments).Target);
-        var restoredLocal = Assert.Single(restored.AppearanceRules.Where(item => item.Scope == target));
+        Assert.Empty(restored.AppearanceStates);
+        Assert.Empty(restored.StateAssignments);
+        var restoredLocal = Assert.Single(restored.AppearanceRules, item => item.Scope == target);
         Assert.Equal(localRule.LayerRules, restoredLocal.LayerRules);
         Assert.Empty(restored.TemplateLinks);
         Assert.Equal(TemplateCapability.Layout, Assert.Single(restored.TemplateRegistrations).Capabilities);
@@ -365,6 +361,16 @@ public sealed class DocumentStateSerializerTests
     {
         var payload = DocumentStateSerializer.Serialize(DocumentState.Empty())
             .Replace($"\"SchemaVersion\":{DocumentState.CurrentSchemaVersion}", "\"SchemaVersion\":99", StringComparison.Ordinal);
+
+        Assert.Throws<NotSupportedException>(() => DocumentStateSerializer.Deserialize(payload));
+    }
+
+    [Fact]
+    public void SplitAppearanceSchemaIsIntentionallyNotMigrated()
+    {
+        var payload = DocumentStateSerializer.Serialize(DocumentState.Empty())
+            .Replace($"\"SchemaVersion\":{DocumentState.CurrentSchemaVersion}", "\"SchemaVersion\":11",
+                StringComparison.Ordinal);
 
         Assert.Throws<NotSupportedException>(() => DocumentStateSerializer.Deserialize(payload));
     }

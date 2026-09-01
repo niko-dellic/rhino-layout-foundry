@@ -90,6 +90,26 @@ public sealed class ObserverBoardLayoutTests
     }
 
     [Fact]
+    public void AppearanceStatesArePlacedAsSelectableCardsInsideTheirFolder()
+    {
+        var snapshot = Snapshot();
+        var folderId = snapshot.Folders.Single(folder => folder.Name == "Plans").Id;
+        var state = new AppearanceStateRecord(
+            Guid.NewGuid(), folderId, 0, "Presentation", [], []);
+        snapshot = snapshot with { AppearanceStateResources = [state] };
+
+        var layout = new ObserverPlacementPlanner().Arrange(snapshot);
+        var card = Assert.Single(layout.AppearanceStates).Value;
+        var index = new ObserverSpatialIndex(layout);
+
+        Assert.Equal(state.Id, card.State.Id);
+        Assert.True(layout.Folders[folderId].Bounds.Contains(card.Bounds));
+        Assert.DoesNotContain(layout.Sheets.Values, sheet => sheet.Bounds.Intersects(card.Bounds));
+        Assert.Equal(state.Id, index.HitAppearanceState(card.Bounds.Center)?.State.Id);
+        Assert.Contains(index.QueryAppearanceStates(card.Bounds.Inflate(1)), item => item.State.Id == state.Id);
+    }
+
+    [Fact]
     public void SpatialIndexHitsAndQueriesIndividualDetailsInsideASheet()
     {
         var snapshot = Snapshot();

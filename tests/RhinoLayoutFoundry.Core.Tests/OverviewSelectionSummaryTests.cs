@@ -27,14 +27,13 @@ public sealed class OverviewSelectionSummaryTests
     [Fact]
     public void AppearanceStateKeysAreNamedAndCounted()
     {
-        var layerState = new OverviewNodeKey(OverviewNodeKind.LayerState, Guid.NewGuid());
-        var objectState = new OverviewNodeKey(OverviewNodeKind.ObjectDisplayState, Guid.NewGuid());
+        var firstState = new OverviewNodeKey(OverviewNodeKind.AppearanceState, Guid.NewGuid());
+        var secondState = new OverviewNodeKey(OverviewNodeKind.AppearanceState, Guid.NewGuid());
 
-        var summary = OverviewSelectionSummary.Create([layerState, objectState]);
+        var summary = OverviewSelectionSummary.Create([firstState, secondState]);
 
-        Assert.Equal("1 layer state · 1 object state selected", summary.DisplayText);
+        Assert.Equal("2 appearance states selected", summary.DisplayText);
         Assert.Equal(2, summary.TotalCount);
-        Assert.Equal(1, summary.LayerStateCount);
-        Assert.Equal(1, summary.ObjectDisplayStateCount);
+        Assert.Equal(2, summary.AppearanceStateCount);
     }
 }

@@ -26,20 +26,17 @@ internal sealed class SelectionInspectorDialog : Dialog
         _inspector = new SelectionInspectorPanel(contentMode);
         Title = contentMode switch
         {
-            SelectionInspectorContent.Layers => "Layout Foundry — Layer settings",
-            SelectionInspectorContent.ObjectModes => "Layout Foundry — Object display modes",
+            SelectionInspectorContent.Appearance => "Layout Foundry — Appearance",
             _ => "Layout Foundry — Properties",
         };
         MinimumSize = contentMode switch
         {
-            SelectionInspectorContent.Layers => new Size(720, 520),
-            SelectionInspectorContent.ObjectModes => new Size(760, 600),
+            SelectionInspectorContent.Appearance => new Size(720, 520),
             _ => new Size(420, 620),
         };
         Size = contentMode switch
         {
-            SelectionInspectorContent.Layers => new Size(820, 660),
-            SelectionInspectorContent.ObjectModes => new Size(880, 720),
+            SelectionInspectorContent.Appearance => new Size(820, 660),
             _ => new Size(460, 820),
         };
         Padding = new Padding(FoundryTheme.Space4);
