@@ -1123,7 +1123,7 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
             {
                 graphics.FillRectangle(
                     row.IsDraft
-                        ? FoundryTheme.WithAlpha(FoundryTheme.CanvasSubtleSurface, 135)
+                        ? FoundryTheme.HierarchyInlineEditorBackground
                         : FoundryTheme.WithAlpha(FoundryTheme.CanvasSubtleSurface, 190),
                     0,
                     y,
@@ -1136,9 +1136,11 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
             DrawNavigatorConnectors(graphics, row, y, disclosureX);
             var rowColor = destinationHighlighted
                 ? FoundryTheme.HierarchyDropForeground
-                : emphasized
-                    ? FoundryTheme.PrimaryText
-                    : FoundryTheme.WithAlpha(FoundryTheme.MutedText, 80);
+                : row.IsDraft
+                    ? FoundryTheme.HierarchyInlineEditorForeground
+                    : emphasized
+                        ? FoundryTheme.PrimaryText
+                        : FoundryTheme.WithAlpha(FoundryTheme.MutedText, 80);
             if (row.CanExpand)
             {
                 DrawOverlayText(
@@ -1160,7 +1162,7 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
             if (row.IsDraft)
             {
                 graphics.DrawRectangle(
-                    new Pen(FoundryTheme.SelectionAccent, 1),
+                    new Pen(FoundryTheme.HierarchyInlineEditorStroke, 1),
                     4,
                     y + 2,
                     NavigatorWidth - 8,

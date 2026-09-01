@@ -881,7 +881,7 @@ public sealed partial class LayoutFoundryPanel : Panel
         switch (kind)
         {
             case CreateResourceKind.Folder:
-                BeginInlineCreation(InlineDraftKind.Folder, destination);
+                BeginFolderCreation(destination);
                 break;
             case CreateResourceKind.Layout:
                 OpenCreateLayouts(destination);
@@ -892,6 +892,18 @@ public sealed partial class LayoutFoundryPanel : Panel
         }
 
         return Task.CompletedTask;
+    }
+
+    private void BeginFolderCreation(Guid? destinationFolderId)
+    {
+        if (_viewMode == FoundryPanelViewMode.Canvas)
+        {
+            _statusLabel.Text = string.Empty;
+            _observerView.BeginInlineFolderCreation(destinationFolderId);
+            return;
+        }
+
+        BeginInlineCreation(InlineDraftKind.Folder, destinationFolderId);
     }
 
     private void QueueAppearanceStateCreation(Guid? destinationFolderId)
@@ -1157,8 +1169,7 @@ public sealed partial class LayoutFoundryPanel : Panel
         _renameFolderMenuItem = new ButtonMenuItem { Text = "Rename Folder…" };
 
         _setCurrentMenuItem.Click += (_, _) => NavigateSelected();
-        _newFolderMenuItem.Click += (_, _) =>
-            BeginInlineCreation(InlineDraftKind.Folder, _contextDestinationFolderId);
+        _newFolderMenuItem.Click += (_, _) => BeginFolderCreation(_contextDestinationFolderId);
         _newPageMenuItem.Click += (_, _) => QueueOpenCreateLayouts(_contextDestinationFolderId);
         _newAppearanceStateMenuItem.Click += (_, _) =>
             QueueAppearanceStateCreation(_contextDestinationFolderId);

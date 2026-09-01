@@ -68,6 +68,7 @@ internal sealed class AppearanceStateEditorDialog : Dialog
         Size = new Size(760, 560);
         Padding = new Padding(FoundryTheme.Space4);
         BackgroundColor = FoundryTheme.PanelBackground;
+        _status.Visible = false;
 
         var close = new FoundryDialogButton("Cancel", FoundryDialogButtonStyle.Secondary, 84);
         close.Click += (_, _) => Close();
@@ -132,11 +133,12 @@ internal sealed class AppearanceStateEditorDialog : Dialog
         var name = StateName;
         if (name.Length == 0)
         {
-            _status.Text = "Enter a name.";
+            SetStatus("Enter a name.");
             _name.Focus();
             return;
         }
 
+        SetStatus(string.Empty);
         _save.Enabled = false;
         var result = _isNew
             ? await LayoutFoundryUiHost.CreateAppearanceStateAsync(
@@ -146,12 +148,18 @@ internal sealed class AppearanceStateEditorDialog : Dialog
         if (!result.Succeeded)
         {
             _save.Enabled = true;
-            _status.Text = string.Join(" ", result.Diagnostics.Select(item => item.Message));
+            SetStatus(string.Join(" ", result.Diagnostics.Select(item => item.Message)));
             return;
         }
 
         Changed = true;
         Close();
+    }
+
+    private void SetStatus(string message)
+    {
+        _status.Text = message;
+        _status.Visible = !string.IsNullOrWhiteSpace(message);
     }
 
     private static AppearanceStateEditorDialog ShowWithViewportPicking(
@@ -167,7 +175,7 @@ internal sealed class AppearanceStateEditorDialog : Dialog
         {
             var dialog = new AppearanceStateEditorDialog(snapshot, draft, isNew);
             if (pickedObjectIds.Count > 0) dialog._rules.SelectObjects(pickedObjectIds);
-            dialog._status.Text = pickerStatus;
+            dialog.SetStatus(pickerStatus);
             dialog.ShowModal(parent);
             if (!dialog.PickRequested) return dialog;
 
@@ -205,6 +213,7 @@ internal sealed class LocalAppearanceRulesDialog : Dialog
         Size = new Size(760, 540);
         Padding = new Padding(FoundryTheme.Space4);
         BackgroundColor = FoundryTheme.PanelBackground;
+        _status.Visible = false;
         _rules = new AppearanceRulesTable(snapshot, layerRules, objectRules);
         _rules.PickObjectsRequested += (_, _) =>
         {
@@ -258,7 +267,7 @@ internal sealed class LocalAppearanceRulesDialog : Dialog
         {
             var dialog = new LocalAppearanceRulesDialog(snapshot, draftLayers, draftObjects);
             if (pickedObjectIds.Count > 0) dialog._rules.SelectObjects(pickedObjectIds);
-            dialog._status.Text = pickerStatus;
+            dialog.SetStatus(pickerStatus);
             dialog.ShowModal(parent);
             if (!dialog.PickRequested) return dialog;
 
@@ -270,5 +279,11 @@ internal sealed class LocalAppearanceRulesDialog : Dialog
             pickedObjectIds = result.Succeeded ? result.ObjectIds : [];
             pickerStatus = result.Message;
         }
+    }
+
+    private void SetStatus(string message)
+    {
+        _status.Text = message;
+        _status.Visible = !string.IsNullOrWhiteSpace(message);
     }
 }

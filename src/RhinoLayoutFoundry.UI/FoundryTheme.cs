@@ -98,6 +98,12 @@ internal static class FoundryTheme
         ? Color.FromArgb(212, 212, 216, 255)
         : Color.FromArgb(82, 82, 91, 255);
 
+    internal static Color HierarchyInlineEditorBackground => SystemColors.Selection;
+
+    internal static Color HierarchyInlineEditorForeground => SystemColors.SelectionText;
+
+    internal static Color HierarchyInlineEditorStroke => WithAlpha(PrimaryText, 185);
+
     internal const double DefaultCanvasGridOpacity = 0.80;
 
     internal static Color CanvasGridColor => IsDarkMode
