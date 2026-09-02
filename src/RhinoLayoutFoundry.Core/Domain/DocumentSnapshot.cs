@@ -84,7 +84,25 @@ public sealed record DetailSnapshot(
     string Name,
     Guid DisplayModeId,
     string DisplayModeName,
-    Guid? LayerId = null);
+    Guid? LayerId = null,
+    DetailPageBounds? PageBounds = null);
+
+public sealed record DetailPageBounds(
+    double Left,
+    double Bottom,
+    double Right,
+    double Top)
+{
+    public double CenterX => (Left + Right) / 2;
+    public double CenterY => (Bottom + Top) / 2;
+    public bool IsValid =>
+        double.IsFinite(Left) &&
+        double.IsFinite(Bottom) &&
+        double.IsFinite(Right) &&
+        double.IsFinite(Top) &&
+        Right > Left &&
+        Top > Bottom;
+}
 
 public sealed record TitleBlockInstanceSnapshot(
     Guid InstanceObjectId,

@@ -81,6 +81,9 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
     private bool _draftLayoutPreviewInProgress;
     private bool _draftLayoutPreviewDirty;
     private long _draftLayoutPreviewVersion;
+    private bool _editSheetPreviewInProgress;
+    private bool _editSheetPreviewDirty;
+    private long _editSheetPreviewVersion;
 
     internal BatchCreateLayoutsDialog(DocumentSnapshot snapshot, Guid? preferredFolderId)
         : this(snapshot, preferredFolderId, null)
@@ -368,7 +371,10 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         Shown += (_, _) =>
         {
             _dialogShown = true;
-            QueueDraftLayoutPreview();
+            if (_isEditMode)
+                QueueEditSheetPreview();
+            else
+                QueueDraftLayoutPreview();
         };
         RefreshEditControlState();
         RefreshPreview();
@@ -1150,18 +1156,15 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
 
     private CreationDraft DraftFromSheet(SheetSnapshot sheet)
     {
-        var layout = sheet.Details.Count switch
-        {
-            0 => _layoutChoices[0],
-            1 => _layoutChoices[1],
-            2 => _layoutChoices[3],
-            4 => _layoutChoices[4],
-            _ => new LayoutChoice(
+        var builtInLayout = ExistingSheetLayoutClassifier.Classify(sheet.Details);
+        var layout = builtInLayout is { } kind
+            ? _layoutChoices.First(choice =>
+                choice.TemplateId is null && choice.BuiltInLayout == kind)
+            : new LayoutChoice(
                 $"Existing — {sheet.Details.Count} details",
                 BuiltInLayoutKind.Blank,
                 sheet.PageViewId,
-                null),
-        };
+                null);
         var modes = sheet.Details.Select(detail => detail.DisplayModeId).Distinct().ToArray();
         var pageMode = modes.Length == 1 ? modes[0] : (Guid?)null;
         var detailLayerIds = sheet.Details.Select(detail => detail.LayerId).Distinct().ToArray();
@@ -1608,6 +1611,122 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         }
     }
 
+    private void QueueEditSheetPreview()
+    {
+        if (!_dialogShown || !_isEditMode || _draftLayoutPreviewCancellation.IsCancellationRequested)
+            return;
+        _editSheetPreviewVersion++;
+        _editSheetPreviewDirty = true;
+        if (_editSheetPreviewInProgress) return;
+        _ = LoadEditSheetPreviewAsync();
+    }
+
+    private async Task LoadEditSheetPreviewAsync()
+    {
+        if (_editSheetPreviewInProgress) return;
+        _editSheetPreviewInProgress = true;
+        try
+        {
+            while (_editSheetPreviewDirty &&
+                   !_draftLayoutPreviewCancellation.IsCancellationRequested)
+            {
+                _editSheetPreviewDirty = false;
+                var version = _editSheetPreviewVersion;
+                var targets = TargetDraftIndices();
+                if (targets.Count != 1)
+                {
+                    ShowSharedEditStructure(targets);
+                    continue;
+                }
+
+                var draft = _drafts[targets[0]];
+                if (draft.ExistingPageViewId is not { } pageViewId ||
+                    !_snapshot.Sheets.TryGetValue(pageViewId, out var sheet))
+                {
+                    _layoutSelectorPreview.SetPagePreview(null, "The selected sheet is unavailable.");
+                    continue;
+                }
+
+                const int previewWidth = 640;
+                var previewHeight = Math.Clamp(
+                    (int)Math.Round(previewWidth * sheet.PageHeight / Math.Max(0.001, sheet.PageWidth)),
+                    180,
+                    900);
+                var key = new OverviewThumbnailKey(
+                    _snapshot.DocumentRuntimeSerialNumber,
+                    pageViewId,
+                    previewWidth,
+                    previewHeight,
+                    _snapshot.Revision + version,
+                    BackgroundArgb: PreviewBackgroundArgb(FoundryTheme.CanvasPreviewBackground));
+                _layoutSelectorPreview.SetPagePreview(null, "Rendering sheet preview…");
+                var result = await LayoutFoundryUiHost.CaptureThumbnailAsync(
+                    new OverviewThumbnailRequest(key, Priority: -1),
+                    _draftLayoutPreviewCancellation.Token);
+                if (_draftLayoutPreviewCancellation.IsCancellationRequested) return;
+                if (version != _editSheetPreviewVersion)
+                {
+                    _editSheetPreviewDirty = true;
+                    continue;
+                }
+                if (!result.Succeeded)
+                {
+                    _layoutSelectorPreview.SetPagePreview(
+                        null,
+                        $"Preview unavailable: {result.Error ?? "Rhino did not return an image."}");
+                    continue;
+                }
+
+                _layoutSelectorPreview.SetPagePreview(
+                    new Bitmap(result.PngBytes!),
+                    null,
+                    overlayDetails: false);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Dialog shutdown owns cancellation.
+        }
+        catch (Exception exception)
+        {
+            _layoutSelectorPreview.SetPagePreview(null, $"Preview unavailable: {exception.Message}");
+        }
+        finally
+        {
+            _editSheetPreviewInProgress = false;
+            if (_editSheetPreviewDirty &&
+                !_draftLayoutPreviewCancellation.IsCancellationRequested)
+                _ = LoadEditSheetPreviewAsync();
+        }
+    }
+
+    private void ShowSharedEditStructure(IReadOnlyList<int> targets)
+    {
+        if (targets.Count == 0)
+        {
+            _layoutSelectorPreview.SetPagePreview(null, null);
+            return;
+        }
+
+        var first = _drafts[targets[0]];
+        var sameLayout = targets.All(index =>
+            LayoutGroupKey.For(_drafts[index].Layout) == LayoutGroupKey.For(first.Layout));
+        var sameTitleBlock = targets.All(index => _drafts[index].TitleBlock == first.TitleBlock);
+        if (!sameLayout || !sameTitleBlock)
+        {
+            _layoutSelectorPreview.SetPagePreview(
+                null,
+                "Selected sheets use different layouts or title blocks.");
+            return;
+        }
+
+        var selection = Math.Max(0, Array.IndexOf(_layoutChoices, first.Layout));
+        _layoutSelectorPreview.SetSelection(selection);
+        _layoutSelectorPreview.SetPaper(first.Paper);
+        _layoutSelectorPreview.SetTitleBlock(first.TitleBlock);
+        _layoutSelectorPreview.SetPagePreview(null, null);
+    }
+
     private async Task LoadNamedViewPreviewsAsync()
     {
         foreach (var choice in _namedViewChoices.Where(choice => choice.Name is not null))
@@ -1961,7 +2080,10 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         _layoutSelectorPreview.SetDetailStates(states);
         _layoutSelectorPreview.ToolTip =
             "Choose a numbered detail to set its named view and display mode.";
-        QueueDraftLayoutPreview();
+        if (_isEditMode)
+            QueueEditSheetPreview();
+        else
+            QueueDraftLayoutPreview();
     }
 
     private static Guid? EffectiveDisplayMode(CreationDraft draft, int detailIndex)
@@ -2151,6 +2273,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         try
         {
             _layoutPreviewTray.SelectedIndex = Math.Max(0, Array.IndexOf(_layoutChoices, draft.Layout));
+            UpdateLayoutSelector();
             _widthStepper.Value = draft.Paper.Width;
             _heightStepper.Value = draft.Paper.Height;
             _unitDropDown.SelectedIndex = UnitIndex(draft.Paper.UnitSystem);
@@ -3647,6 +3770,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         private TitleBlockChoice? _titleBlock;
         private Bitmap? _pagePreview;
         private string? _pagePreviewMessage;
+        private bool _overlayPagePreviewDetails = true;
 
         internal LayoutSelectionDrawable(LayoutChoice[] choices, int selectedIndex)
             : base(true)
@@ -3698,12 +3822,16 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             Invalidate();
         }
 
-        internal void SetPagePreview(Bitmap? preview, string? message)
+        internal void SetPagePreview(
+            Bitmap? preview,
+            string? message,
+            bool overlayDetails = true)
         {
             if (!ReferenceEquals(_pagePreview, preview))
                 _pagePreview?.Dispose();
             _pagePreview = preview;
             _pagePreviewMessage = message;
+            _overlayPagePreviewDetails = overlayDetails;
             Invalidate();
         }
 
@@ -3712,6 +3840,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             _pagePreview?.Dispose();
             _pagePreview = null;
             _pagePreviewMessage = null;
+            _overlayPagePreviewDetails = true;
         }
 
         private void OnPaint(object? sender, PaintEventArgs eventArgs)
@@ -3741,6 +3870,12 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                         page,
                         page.Y + Math.Max(10, (page.Height - 12) / 2));
                 }
+            }
+            if (_pagePreview is not null && !_overlayPagePreviewDetails)
+            {
+                if (HasFocus)
+                    graphics.DrawRectangle(new Pen(FoundryTheme.PrimaryText, 2), page);
+                return;
             }
             var details = PreviewDetailBounds(page);
             for (var detailIndex = 0; detailIndex < details.Count; detailIndex++)

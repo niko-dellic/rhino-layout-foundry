@@ -70,7 +70,8 @@ internal sealed class RhinoDocumentSnapshotProvider : IDocumentSnapshotProvider
                             : detail.DescriptiveTitle,
                         detail.Viewport.DisplayMode.Id,
                         detail.Viewport.DisplayMode.LocalName,
-                        document.Layers[detail.Attributes.LayerIndex]?.Id))
+                        document.Layers[detail.Attributes.LayerIndex]?.Id,
+                        PageBounds(detail)))
                     .ToArray();
                 var titleBlock = record?.TitleBlock;
                 var titleBlockName = titleBlock is null
@@ -277,6 +278,14 @@ internal sealed class RhinoDocumentSnapshotProvider : IDocumentSnapshotProvider
             state.AppearanceStates,
             state.StateAssignments,
             state.DedicatedDetailLayerId);
+    }
+
+    private static DetailPageBounds? PageBounds(DetailViewObject detail)
+    {
+        var bounds = detail.DetailGeometry.GetBoundingBox(true);
+        return bounds.IsValid
+            ? new DetailPageBounds(bounds.Min.X, bounds.Min.Y, bounds.Max.X, bounds.Max.Y)
+            : null;
     }
 
     private static SheetTemplateRecipe RefreshDocumentBackedTemplate(

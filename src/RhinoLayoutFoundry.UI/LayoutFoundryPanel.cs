@@ -1832,6 +1832,7 @@ public sealed partial class LayoutFoundryPanel : Panel
         }
 
         _isLoaded = true;
+        AttachNativeClipboardShortcuts();
         ApplyResponsiveLayout();
         LayoutFoundryUiHost.OverviewChanged += OnOverviewChanged;
         LayoutFoundryUiHost.Selection.Changed += OnSharedSelectionChanged;
@@ -1852,6 +1853,7 @@ public sealed partial class LayoutFoundryPanel : Panel
         }
 
         _isLoaded = false;
+        DetachNativeClipboardShortcuts();
         _layoutPollTimer.Stop();
         _invalidationTimer.Stop();
         _responsiveTimer.Stop();
@@ -1859,6 +1861,10 @@ public sealed partial class LayoutFoundryPanel : Panel
         LayoutFoundryUiHost.OverviewChanged -= OnOverviewChanged;
         LayoutFoundryUiHost.Selection.Changed -= OnSharedSelectionChanged;
     }
+
+    partial void AttachNativeClipboardShortcuts();
+
+    partial void DetachNativeClipboardShortcuts();
 
     private void OnLayoutPoll(object? sender, EventArgs eventArgs)
     {
