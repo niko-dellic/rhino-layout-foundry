@@ -234,12 +234,14 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             Content = _layoutGroupChips,
         };
         _previewGrid = CreatePreviewGrid();
-        _countLabel = new Label { Font = SystemFonts.Bold(13), TextColor = FoundryTheme.PrimaryText };
+        _countLabel = new Label { Font = SystemFonts.Default(11), TextColor = FoundryTheme.SecondaryText };
         _selectionHint = FoundryTheme.MutedLabel();
+        _selectionHint.Font = SystemFonts.Default(11);
         _clearSelectionButton = new FoundryToolbarIconButton(
             FoundryViewIcons.ClearSelection(),
             "Clear row selection and edit all layouts");
         _clearSelectionButton.Enabled = false;
+        _clearSelectionButton.Visible = false;
         _clearSelectionButton.Click += (_, _) => ClearPreviewSelection();
         _status = FoundryTheme.MutedLabel();
         _status.Wrap = WrapMode.Word;
@@ -344,18 +346,24 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                 Header(_isEditMode, _editTargets.Length),
                 new StackLayoutItem(CreateLayoutsTab(), true),
                 _status,
-                new TableLayout
+                new StackLayout
                 {
-                    Rows = { new TableRow(new TableCell(null, true), cancel, _createButton) },
-                    Spacing = new Size(FoundryTheme.Space2, 0),
+                    Orientation = Orientation.Horizontal,
+                    VerticalContentAlignment = VerticalAlignment.Center,
+                    Spacing = FoundryTheme.Space2,
+                    Items =
+                    {
+                        _countLabel,
+                        _selectionHint,
+                        new StackLayoutItem(null, true),
+                        cancel,
+                        _createButton,
+                    },
                 },
             },
         };
         Shown += (_, _) =>
         {
-            // Keep the preview's requested size independent from the dialog's
-            // constraint pass. The containing pane scrolls when space is tight.
-            _layoutSelectorPreview.SetAvailableHeight(340);
             _dialogShown = true;
             _ = LoadNamedViewPreviewsAsync();
         };
@@ -368,60 +376,65 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
 
     private Control CreateLayoutsTab()
     {
-        const int upperPaneHeight = 360;
+        const int defaultSettingsPaneWidth = 500;
+        const int minimumSettingsPaneWidth = 300;
+        const int maximumSettingsPaneWidth = 680;
+        const int defaultUpperPaneHeight = 360;
+        const int minimumUpperPaneHeight = 220;
+        const int minimumTablePaneHeight = 180;
+        var settingsPaneWidth = defaultSettingsPaneWidth;
+        var upperPaneHeight = defaultUpperPaneHeight;
+        var settingsPaneCollapsed = false;
+        var upperPaneCollapsed = false;
         var settingsPane = new Scrollable
         {
             Border = BorderType.None,
             ExpandContentWidth = true,
-            ExpandContentHeight = false,
+            // AppKit anchors a shorter scroll document at its lower edge.
+            // Filling the viewport keeps collapsed accordion rows pinned to top.
+            ExpandContentHeight = true,
             Content = new FoundryAccordion(
                 new FoundryAccordionItem("Batch", CreateBatchEditor(), isExpanded: true),
                 new FoundryAccordionItem("Page size", CreatePaperEditor(), isExpanded: true),
                 new FoundryAccordionItem("Layout", CreateLayoutEditor(), isExpanded: true)),
         };
-        var previewPane = new Scrollable
+        var previewPane = new Panel
         {
-            Border = BorderType.None,
-            ExpandContentWidth = false,
-            ExpandContentHeight = false,
             Content = CreateSheetPreview(),
         };
-        return new StackLayout
+        var settingsPaneHost = new Panel
         {
-            Padding = new Padding(0, FoundryTheme.Space3, 0, 0),
+            Width = defaultSettingsPaneWidth,
+            Content = settingsPane,
+        };
+        var settingsResizeHandle = new FoundryPaneResizeHandle(
+            FoundryPaneResizeAxis.Horizontal,
+            "settings");
+        var upperPane = new Panel
+        {
+            Height = defaultUpperPaneHeight,
+            Content = new StackLayout
+            {
+                Orientation = Orientation.Horizontal,
+                VerticalContentAlignment = VerticalAlignment.Stretch,
+                Spacing = 0,
+                Items =
+                {
+                    settingsPaneHost,
+                    settingsResizeHandle,
+                    new StackLayoutItem(previewPane, true),
+                },
+            },
+        };
+        var workspaceResizeHandle = new FoundryPaneResizeHandle(
+            FoundryPaneResizeAxis.Vertical,
+            "settings and preview");
+        var tablePane = new StackLayout
+        {
             Spacing = FoundryTheme.Space3,
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Items =
             {
-                new Scrollable
-                {
-                    Border = BorderType.None,
-                    ExpandContentWidth = false,
-                    ExpandContentHeight = false,
-                    Height = upperPaneHeight,
-                    Content = new StackLayout
-                    {
-                        Orientation = Orientation.Horizontal,
-                        VerticalContentAlignment = VerticalAlignment.Stretch,
-                        Spacing = FoundryTheme.Space3,
-                        Items =
-                        {
-                            new Panel
-                            {
-                                Width = 500,
-                                Height = upperPaneHeight,
-                                Content = settingsPane,
-                            },
-                            new Panel
-                            {
-                                Width = 460,
-                                Height = upperPaneHeight,
-                                Content = previewPane,
-                            },
-                        },
-                    },
-                },
-                _layoutGroupChipScroll,
                 new StackLayout
                 {
                     Orientation = Orientation.Horizontal,
@@ -429,15 +442,76 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                     Spacing = FoundryTheme.Space2,
                     Items =
                     {
-                        _countLabel,
-                        _selectionHint,
-                        new StackLayoutItem(null, true),
+                        new StackLayoutItem(_layoutGroupChipScroll, true),
                         _clearSelectionButton,
                     },
                 },
                 new StackLayoutItem(_previewGrid, true),
             },
         };
+        var layoutRoot = new StackLayout
+        {
+            Padding = new Padding(0, FoundryTheme.Space3, 0, 0),
+            Spacing = 0,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            Items =
+            {
+                upperPane,
+                workspaceResizeHandle,
+                new StackLayoutItem(tablePane, true),
+            },
+        };
+
+        settingsResizeHandle.ResizeRequested += (_, eventArgs) =>
+        {
+            if (settingsPaneCollapsed)
+            {
+                settingsPaneCollapsed = false;
+                settingsPaneHost.Visible = true;
+                settingsResizeHandle.IsCollapsed = false;
+            }
+
+            settingsPaneWidth = Math.Clamp(
+                settingsPaneWidth + eventArgs.Delta,
+                minimumSettingsPaneWidth,
+                maximumSettingsPaneWidth);
+            settingsPaneHost.Width = settingsPaneWidth;
+        };
+        settingsResizeHandle.CollapseToggleRequested += (_, _) =>
+        {
+            settingsPaneCollapsed = !settingsPaneCollapsed;
+            settingsPaneHost.Visible = !settingsPaneCollapsed;
+            settingsPaneHost.Width = settingsPaneCollapsed ? 1 : settingsPaneWidth;
+            settingsResizeHandle.IsCollapsed = settingsPaneCollapsed;
+        };
+        workspaceResizeHandle.ResizeRequested += (_, eventArgs) =>
+        {
+            if (upperPaneCollapsed)
+            {
+                upperPaneCollapsed = false;
+                upperPane.Visible = true;
+                workspaceResizeHandle.IsCollapsed = false;
+            }
+
+            var availableHeight = layoutRoot.ClientSize.Height;
+            var maximumHeight = availableHeight > 1
+                ? Math.Max(minimumUpperPaneHeight, availableHeight - minimumTablePaneHeight)
+                : defaultUpperPaneHeight;
+            upperPaneHeight = Math.Clamp(
+                upperPaneHeight + eventArgs.Delta,
+                minimumUpperPaneHeight,
+                maximumHeight);
+            upperPane.Height = upperPaneHeight;
+        };
+        workspaceResizeHandle.CollapseToggleRequested += (_, _) =>
+        {
+            upperPaneCollapsed = !upperPaneCollapsed;
+            upperPane.Visible = !upperPaneCollapsed;
+            upperPane.Height = upperPaneCollapsed ? 1 : upperPaneHeight;
+            workspaceResizeHandle.IsCollapsed = upperPaneCollapsed;
+        };
+
+        return layoutRoot;
     }
 
     private Control CreateBatchEditor()
@@ -523,11 +597,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         return editor;
     }
 
-    private Control CreateSheetPreview() => new Panel
-    {
-        Width = 428,
-        Content = _layoutSelectorPreview,
-    };
+    private Control CreateSheetPreview() => _layoutSelectorPreview;
 
     private Control CreateSheetDefaultsEditor()
     {
@@ -635,7 +705,6 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         {
             AllowMultipleSelection = true,
             AllowEmptySelection = true,
-            Height = 260,
             ToolTip = "Select one or more rows to edit only those layouts. Clear the selection to edit all layouts.",
         };
         grid.Columns.Add(TextColumn("#", row => row.Index, 44));
@@ -661,8 +730,28 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                 ? FoundryTheme.ContentBackground
                 : FoundryTheme.HierarchyFolderBackground;
             eventArgs.ForegroundColor = FoundryTheme.PrimaryText;
+            if (_isEditMode && eventArgs.Item is CreationPreviewRow row &&
+                PreviewPropertyForColumn(grid, eventArgs.Column) is { } property &&
+                row.ChangedProperties.HasFlag(property))
+            {
+                eventArgs.BackgroundColor = FoundryTheme.WarningSurface;
+                eventArgs.ForegroundColor = FoundryTheme.WarningAccent;
+                eventArgs.Font = SystemFonts.Bold(11);
+            }
         };
         return grid;
+    }
+
+    private static PreviewChangedProperty? PreviewPropertyForColumn(GridView grid, GridColumn column)
+    {
+        if (ReferenceEquals(column, grid.Columns[1])) return PreviewChangedProperty.Name;
+        if (ReferenceEquals(column, grid.Columns[2])) return PreviewChangedProperty.Destination;
+        if (ReferenceEquals(column, grid.Columns[4])) return PreviewChangedProperty.Paper;
+        if (ReferenceEquals(column, grid.Columns[6])) return PreviewChangedProperty.DetailLayer;
+        if (ReferenceEquals(column, grid.Columns[7])) return PreviewChangedProperty.DisplayMode;
+        if (ReferenceEquals(column, grid.Columns[8])) return PreviewChangedProperty.TitleBlock;
+        if (ReferenceEquals(column, grid.Columns[9])) return PreviewChangedProperty.AppearanceState;
+        return null;
     }
 
     private BatchCreateSheetsRequest Request()
@@ -822,6 +911,25 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                         ? _snapshot.Layers.GetValueOrDefault(layerId) ?? "Unavailable layer"
                         : "Active layer"
                 : DetailLayerSummary(sheet);
+            var changedProperties = PreviewChangedProperty.None;
+            if (targeted && change is not null)
+            {
+                if (change.NewNames.ContainsKey(sheet.PageViewId))
+                    changedProperties |= PreviewChangedProperty.Name;
+                if (change.DestinationFolderId is not null)
+                    changedProperties |= PreviewChangedProperty.Destination;
+                if (change.PaperWidth is not null || change.PaperHeight is not null ||
+                    change.PaperUnitSystem is not null)
+                    changedProperties |= PreviewChangedProperty.Paper;
+                if (change.ChangeDetailLayer)
+                    changedProperties |= PreviewChangedProperty.DetailLayer;
+                if (change.DetailDisplayModeId is not null)
+                    changedProperties |= PreviewChangedProperty.DisplayMode;
+                if (change.ChangeTitleBlock)
+                    changedProperties |= PreviewChangedProperty.TitleBlock;
+                if (change.ChangeAppearanceState)
+                    changedProperties |= PreviewChangedProperty.AppearanceState;
+            }
             return new CreationPreviewRow(
                 draft.DraftId,
                 LayoutGroupKey.For(draft.Layout),
@@ -836,7 +944,8 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                 detailLayer,
                 mode,
                 titleBlock,
-                CapabilityTemplateLabel(appearanceStateId, _appearanceStateByLabel));
+                CapabilityTemplateLabel(appearanceStateId, _appearanceStateByLabel),
+                changedProperties);
         }).ToArray();
         EnsureActiveGroupExists();
         _visiblePreviewRows.Clear();
@@ -1669,6 +1778,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                 : $"No rows selected — property changes apply to {ActiveGroupLabel()}."
             : $"{selectedCount} selected — property changes apply only to selected rows.";
         _clearSelectionButton.Enabled = selectedCount > 0;
+        _clearSelectionButton.Visible = selectedCount > 0;
     }
 
     private void EnsureActiveGroupExists()
@@ -2387,7 +2497,21 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         string DetailLayer,
         string DisplayMode,
         string TitleBlock,
-        string AppearanceState);
+        string AppearanceState,
+        PreviewChangedProperty ChangedProperties = PreviewChangedProperty.None);
+
+    [Flags]
+    private enum PreviewChangedProperty
+    {
+        None = 0,
+        Name = 1 << 0,
+        Destination = 1 << 1,
+        Paper = 1 << 2,
+        DetailLayer = 1 << 3,
+        DisplayMode = 1 << 4,
+        TitleBlock = 1 << 5,
+        AppearanceState = 1 << 6,
+    }
 
     private sealed record DetailPreviewState(
         string Label,
@@ -3484,8 +3608,6 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
 
     private sealed class LayoutSelectionDrawable : Drawable
     {
-        private const int PreviewWidth = 428;
-        private const int MinimumPreviewHeight = 240;
         private readonly LayoutChoice[] _choices;
         private readonly Font _detailFont = SystemFonts.Bold(7);
         private readonly Font _detailMetaFont = SystemFonts.Default(6);
@@ -3495,7 +3617,6 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         private int _keyboardDetailIndex = -1;
         private PaperRecipe _paper = new(594, 420, "Millimeters");
         private TitleBlockChoice? _titleBlock;
-        private int _availableHeight = 420;
 
         internal LayoutSelectionDrawable(LayoutChoice[] choices, int selectedIndex)
             : base(true)
@@ -3503,9 +3624,11 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             _choices = choices;
             _selectedIndex = Math.Clamp(selectedIndex, 0, Math.Max(0, choices.Length - 1));
             CanFocus = true;
-            UpdatePreviewSize();
+            Size = new Size(428, 320);
+            MinimumSize = new Size(180, 140);
             BackgroundColor = FoundryTheme.CanvasSurface;
             Paint += OnPaint;
+            SizeChanged += (_, _) => Invalidate();
             MouseDown += OnMouseDown;
             MouseMove += OnMouseMove;
             MouseLeave += OnMouseLeave;
@@ -3536,16 +3659,6 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         internal void SetPaper(PaperRecipe paper)
         {
             _paper = paper;
-            UpdatePreviewSize();
-            Invalidate();
-        }
-
-        internal void SetAvailableHeight(int availableHeight)
-        {
-            var next = Math.Max(MinimumPreviewHeight, availableHeight);
-            if (_availableHeight == next) return;
-            _availableHeight = next;
-            UpdatePreviewSize();
             Invalidate();
         }
 
@@ -3715,17 +3828,6 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             return TitleBlockPreviewTray.PageBounds(
                 _paper,
                 new RectangleF(0, 0, Math.Max(1, Width), Math.Max(1, Height)));
-        }
-
-        private void UpdatePreviewSize()
-        {
-            var ratio = Math.Max(0.001, _paper.Height) / Math.Max(0.001, _paper.Width);
-            var height = Math.Clamp(
-                (int)Math.Round(PreviewWidth * ratio),
-                MinimumPreviewHeight,
-                _availableHeight);
-            Size = new Size(PreviewWidth, height);
-            MinimumSize = Size;
         }
 
         private RectangleF DetailContentBounds(RectangleF page)
