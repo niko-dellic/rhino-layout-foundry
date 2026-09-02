@@ -599,6 +599,7 @@ public sealed partial class LayoutFoundryPanel : Panel
 
                 return new Label
                 {
+                    Font = FoundryTheme.HierarchyTableFont,
                     VerticalAlignment = VerticalAlignment.Center,
                     TextAlignment = TextAlignment.Left,
                 };
@@ -661,7 +662,11 @@ public sealed partial class LayoutFoundryPanel : Panel
                     return picker;
                 }
 
-                return new Label { VerticalAlignment = VerticalAlignment.Center };
+                return new Label
+                {
+                    Font = FoundryTheme.HierarchyTableFont,
+                    VerticalAlignment = VerticalAlignment.Center,
+                };
             },
             ConfigureCell = (eventArgs, control) =>
             {

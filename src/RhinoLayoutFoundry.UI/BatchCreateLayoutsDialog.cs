@@ -402,7 +402,12 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             table.Rows.Add(new TableRow(new Label { Text = "Quantity" }, new FoundryFormField(_quantityStepper)));
         else
             table.Rows.Add(new TableRow(new TableCell(_renameChangeCheck, true)));
-        table.Rows.Add(new TableRow(_patternHelpLabel,
+        table.Rows.Add(new TableRow(new StackLayout
+        {
+            Orientation = Orientation.Horizontal,
+            VerticalContentAlignment = VerticalAlignment.Center,
+            Items = { new StackLayoutItem(null, true), _patternHelpLabel },
+        },
             new TableCell(new FoundryFormField(_patternBox), true)));
         table.Rows.Add(new TableRow(new Label { Text = "Start / step" }, new StackLayout
         {
@@ -430,7 +435,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
     {
         var editor = new StackLayout
         {
-            Spacing = FoundryTheme.Space3,
+            Spacing = FoundryTheme.Space2,
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
         };
         editor.Items.Add(CreateTitleBlockEditor());
@@ -439,18 +444,17 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                 "Existing detail arrangements and cameras are retained."));
         else
         {
-            editor.Items.Add(SectionLabel("Detail layout"));
             editor.Items.Add(new Panel { Width = 280, Content = _layoutPickerTrigger });
-            editor.Items.Add(new FoundryHelpLabel(
+            var appearanceStateHelp = new FoundryToolbarIconButton(
+                FoundryViewIcons.Help(),
+                "About appearance states");
+            appearanceStateHelp.Click += (_, _) => new FoundryHelpDialog(
                 "Appearance State",
-                "Appearance-state sources are independent from the page layout and title-block choices.",
-                emphasized: true)
-            {
-                Width = 280,
-            });
-            editor.Items.Add(new Panel { Width = 280, Content = _appearanceStatePicker });
+                "Choose the saved appearance state that supplies visibility and display overrides for the new sheets.",
+                "This source is independent from the selected page layout and title block. “Inherit appearance state from folder” uses the destination folder’s assignment.")
+                .ShowModal(this);
+            editor.Items.Add(PickerWithHelp(_appearanceStatePicker, appearanceStateHelp));
         }
-        editor.Items.Add(SectionLabel("Sheet defaults"));
         editor.Items.Add(CreateSheetDefaultsEditor());
         return editor;
     }
@@ -469,19 +473,22 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
 
     private Control CreateSheetDefaultsEditor()
     {
+        var sheetDisplayModeHelp = new FoundryToolbarIconButton(
+            FoundryViewIcons.Help(),
+            "About sheet display modes");
+        sheetDisplayModeHelp.Click += (_, _) => new FoundryHelpDialog(
+            "Sheet display mode",
+            "Sets the default display mode for every detail created on the sheet.",
+            "An individual detail can override this default. “Use layout/template setting” keeps the display mode defined by the selected layout or template.")
+            .ShowModal(this);
+
         var modeEditor = new StackLayout
         {
             Spacing = FoundryTheme.Space1,
             Items =
             {
                 _displayModeChangeCheck,
-                new FoundryHelpLabel(
-                    "Sheet display mode",
-                    "Each detail inherits this display mode unless it has its own override.")
-                {
-                    Width = 280,
-                },
-                new Panel { Width = 280, Content = _displayModePicker },
+                PickerWithHelp(_displayModePicker, sheetDisplayModeHelp),
             },
         };
         if (_isEditMode) return modeEditor;
@@ -1874,12 +1881,21 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         Content = Card(title, content),
     };
 
-    private static Label SectionLabel(string text) => new()
+    private static Control PickerWithHelp(Control picker, FoundryToolbarIconButton helpButton)
     {
-        Text = text,
-        Font = SystemFonts.Bold(10),
-        TextColor = FoundryTheme.PrimaryText,
-    };
+        picker.Width = 260;
+        return new Panel
+        {
+            Width = 296,
+            Content = new StackLayout
+            {
+                Orientation = Orientation.Horizontal,
+                VerticalContentAlignment = VerticalAlignment.Center,
+                Spacing = FoundryTheme.Space1,
+                Items = { new StackLayoutItem(picker, true), helpButton },
+            },
+        };
+    }
 
     private static GridColumn TextColumn(
         string header,

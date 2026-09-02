@@ -19,7 +19,7 @@ internal sealed class FoundryBadgeCell<T> : DrawableCell
 {
     private const float BadgeHeight = 20;
     private const float HorizontalPadding = 8;
-    private readonly Font _font = SystemFonts.Bold(8);
+    private readonly Font _font = FoundryTheme.HierarchyTableBadgeFont;
     private readonly Func<T, string> _textSelector;
     private readonly Func<T, FoundryBadgeTone> _toneSelector;
 

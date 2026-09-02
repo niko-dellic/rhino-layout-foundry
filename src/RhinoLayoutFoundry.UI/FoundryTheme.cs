@@ -6,6 +6,8 @@ namespace RhinoLayoutFoundry.UI;
 
 internal static class FoundryTheme
 {
+    private const float HierarchyTableFontSize = 11;
+
     internal const int Space1 = 4;
     internal const int Space2 = 8;
     internal const int Space3 = 12;
@@ -98,9 +100,17 @@ internal static class FoundryTheme
         ? Color.FromArgb(212, 212, 216, 255)
         : Color.FromArgb(82, 82, 91, 255);
 
-    internal static Color HierarchyInlineEditorBackground => SystemColors.Selection;
+    internal static Color HierarchyInlineEditorRowBackground => SystemColors.Selection;
 
-    internal static Color HierarchyInlineEditorForeground => SystemColors.SelectionText;
+    internal static Color HierarchyInlineEditorRowForeground => SystemColors.SelectionText;
+
+    internal static Color HierarchyInlineEditorBackground => InputBackground;
+
+    internal static Color HierarchyInlineEditorForeground => PrimaryText;
+
+    internal static Color HierarchyInlineEditorSelectionBackground => SystemColors.Selection;
+
+    internal static Color HierarchyInlineEditorSelectionForeground => SystemColors.SelectionText;
 
     internal static Color HierarchyInlineEditorStroke => WithAlpha(PrimaryText, 185);
 
@@ -147,7 +157,9 @@ internal static class FoundryTheme
 
     internal static Font EmptyTitleFont => SystemFonts.Bold(13);
 
-    internal static Font HierarchyTableFont => SystemFonts.Default(9);
+    internal static Font HierarchyTableFont => SystemFonts.Default(HierarchyTableFontSize);
+
+    internal static Font HierarchyTableBadgeFont => SystemFonts.Bold(HierarchyTableFontSize);
 
     internal static Label MutedLabel(string text = "")
     {

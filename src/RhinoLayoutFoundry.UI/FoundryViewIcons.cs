@@ -61,6 +61,15 @@ internal static class FoundryViewIcons
         graphics.DrawLine(pen, 9.25f, 9.25f, 14, 14);
     });
 
+    internal static Icon Help() => NewIcon(graphics =>
+    {
+        var color = FoundryTheme.PrimaryText;
+        var pen = new Pen(color, Emphasis);
+        graphics.DrawArc(pen, new RectangleF(4.5f, 2, 7, 7), 205, 220);
+        graphics.DrawLine(pen, 8, 8, 8, 10.5f);
+        graphics.FillEllipse(color, 7.25f, 12, 1.5f, 1.5f);
+    });
+
     internal static Icon ThumbnailStack() => NewIcon(graphics =>
     {
         var color = FoundryTheme.PrimaryText;

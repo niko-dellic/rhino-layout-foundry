@@ -76,6 +76,7 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
     private PointF _navigatorPointer;
     private NavigatorFolderDraft? _navigatorFolderDraft;
     private bool _navigatorFolderDraftCommitPending;
+    private bool _suppressNextNavigatorDraftTextInput;
     private readonly HashSet<Guid> _collapsedNavigatorFolders = [];
     private readonly HashSet<Guid> _expandedNavigatorSheets = [];
     private int _namedViewsScrollRow;
@@ -305,6 +306,7 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
             "New Folder",
             SelectAll: true);
         _navigatorFolderDraftCommitPending = false;
+        _suppressNextNavigatorDraftTextInput = false;
         EnsureNavigatorDraftVisible();
         Invalidate();
         Application.Instance.AsyncInvoke(() =>
@@ -320,6 +322,7 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
     {
         _navigatorFolderDraft = null;
         _navigatorFolderDraftCommitPending = false;
+        _suppressNextNavigatorDraftTextInput = false;
         Invalidate();
     }
 
@@ -327,6 +330,7 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
     {
         if (_navigatorFolderDraft is null) return;
         _navigatorFolderDraftCommitPending = false;
+        _suppressNextNavigatorDraftTextInput = false;
         Focus();
         Invalidate();
     }
@@ -1123,7 +1127,7 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
             {
                 graphics.FillRectangle(
                     row.IsDraft
-                        ? FoundryTheme.HierarchyInlineEditorBackground
+                        ? FoundryTheme.HierarchyInlineEditorRowBackground
                         : FoundryTheme.WithAlpha(FoundryTheme.CanvasSubtleSurface, 190),
                     0,
                     y,
@@ -1137,7 +1141,7 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
             var rowColor = destinationHighlighted
                 ? FoundryTheme.HierarchyDropForeground
                 : row.IsDraft
-                    ? FoundryTheme.HierarchyInlineEditorForeground
+                    ? FoundryTheme.HierarchyInlineEditorRowForeground
                     : emphasized
                         ? FoundryTheme.PrimaryText
                         : FoundryTheme.WithAlpha(FoundryTheme.MutedText, 80);
@@ -1152,21 +1156,19 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
                     row.IsExpanded ? "▾" : "▸");
             }
             DrawNavigatorIcon(graphics, row, rowColor, disclosureX + 14, y + 3);
-            DrawOverlayText(
-                graphics,
-                _sheetFont,
-                rowColor,
-                disclosureX + 36,
-                y + 5,
-                row.Label);
             if (row.IsDraft)
             {
-                graphics.DrawRectangle(
-                    new Pen(FoundryTheme.HierarchyInlineEditorStroke, 1),
-                    4,
-                    y + 2,
-                    NavigatorWidth - 8,
-                    NavigatorRowHeight - 4);
+                DrawNavigatorDraftEditor(graphics, row, disclosureX + 36, y);
+            }
+            else
+            {
+                DrawOverlayText(
+                    graphics,
+                    _sheetFont,
+                    rowColor,
+                    disclosureX + 36,
+                    y + 5,
+                    row.Label);
             }
         }
 
@@ -1197,6 +1199,54 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
         }
 
         DrawNavigatorDragPreview(graphics);
+    }
+
+    private void DrawNavigatorDraftEditor(
+        Graphics graphics,
+        CanvasNavigatorRow row,
+        float textX,
+        float rowY)
+    {
+        var fieldBounds = new RectangleF(
+            textX - 2,
+            rowY + 2,
+            Math.Max(1, NavigatorWidth - textX - 2),
+            NavigatorRowHeight - 4);
+        graphics.FillRectangle(FoundryTheme.HierarchyInlineEditorBackground, fieldBounds);
+        graphics.DrawRectangle(
+            new Pen(FoundryTheme.HierarchyInlineEditorStroke, 1),
+            fieldBounds);
+
+        var label = FitText(graphics, _sheetFont, row.Label, fieldBounds.Width - 8);
+        var labelX = fieldBounds.Left + 4;
+        var labelY = rowY + 5;
+        var selectAll = _navigatorFolderDraft is { } draft &&
+                        draft.Id == row.Key.Id &&
+                        draft.SelectAll;
+        var textColor = FoundryTheme.HierarchyInlineEditorForeground;
+        var measured = graphics.MeasureString(_sheetFont, label);
+        if (selectAll && label.Length > 0)
+        {
+            graphics.FillRectangle(
+                FoundryTheme.HierarchyInlineEditorSelectionBackground,
+                labelX,
+                rowY + 4,
+                Math.Min(measured.Width + 2, fieldBounds.Right - labelX - 3),
+                NavigatorRowHeight - 8);
+            textColor = FoundryTheme.HierarchyInlineEditorSelectionForeground;
+        }
+
+        DrawOverlayText(graphics, _sheetFont, textColor, labelX, labelY, label);
+        if (!selectAll)
+        {
+            var caretX = Math.Min(fieldBounds.Right - 4, labelX + measured.Width + 1);
+            graphics.DrawLine(
+                new Pen(FoundryTheme.HierarchyInlineEditorForeground, 1),
+                caretX,
+                rowY + 4,
+                caretX,
+                rowY + NavigatorRowHeight - 4);
+        }
     }
 
     private void DrawNavigatorDragPreview(Graphics graphics)
@@ -2422,6 +2472,7 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
     {
         if (_navigatorFolderDraft is { } draft)
         {
+            _suppressNextNavigatorDraftTextInput = false;
             if (eventArgs.Key == Keys.Enter)
             {
                 RequestNavigatorFolderDraftCommit();
@@ -2449,6 +2500,19 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
                 return;
             }
 
+            if (eventArgs.IsChar &&
+                !eventArgs.Modifiers.HasFlag(Keys.Application) &&
+                !eventArgs.Modifiers.HasFlag(Keys.Control) &&
+                !char.IsControl(eventArgs.KeyChar))
+            {
+                AppendNavigatorFolderDraftText(eventArgs.KeyChar.ToString());
+                _suppressNextNavigatorDraftTextInput = true;
+            }
+
+            // While the canvas draft owns keyboard focus, no key should reach
+            // Rhino's command pipeline. TextInput remains as a fallback for
+            // composed input that has no character-bearing key-down event.
+            eventArgs.Handled = true;
             return;
         }
 
@@ -2560,8 +2624,20 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
 
     private void OnTextInput(object? sender, TextInputEventArgs eventArgs)
     {
-        if (_navigatorFolderDraft is not { } draft || string.IsNullOrEmpty(eventArgs.Text)) return;
-        var name = draft.SelectAll ? eventArgs.Text : draft.Name + eventArgs.Text;
+        if (_navigatorFolderDraft is null || string.IsNullOrEmpty(eventArgs.Text)) return;
+        if (_suppressNextNavigatorDraftTextInput)
+        {
+            _suppressNextNavigatorDraftTextInput = false;
+            return;
+        }
+
+        AppendNavigatorFolderDraftText(eventArgs.Text);
+    }
+
+    private void AppendNavigatorFolderDraftText(string text)
+    {
+        if (_navigatorFolderDraft is not { } draft || string.IsNullOrEmpty(text)) return;
+        var name = draft.SelectAll ? text : draft.Name + text;
         _navigatorFolderDraft = draft with { Name = name, SelectAll = false };
         EnsureNavigatorDraftVisible();
         Invalidate();
