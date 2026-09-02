@@ -72,11 +72,15 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
     private Form? _titleBlockGallery;
     private Scrollable? _titleBlockGalleryScroll;
     private readonly CancellationTokenSource _namedViewPreviewCancellation = new();
+    private readonly CancellationTokenSource _draftLayoutPreviewCancellation = new();
     private readonly HashSet<NamedViewThumbnailKey> _pendingNamedViewPreviews = [];
     private bool _updatingPaper;
     private bool _updatingEditors;
     private bool _updatingPreviewSelection;
     private bool _dialogShown;
+    private bool _draftLayoutPreviewInProgress;
+    private bool _draftLayoutPreviewDirty;
+    private long _draftLayoutPreviewVersion;
 
     internal BatchCreateLayoutsDialog(DocumentSnapshot snapshot, Guid? preferredFolderId)
         : this(snapshot, preferredFolderId, null)
@@ -155,13 +159,11 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         _displayModePicker = new FilteredPicker(
             new[] { InheritDisplayMode }.Concat(snapshot.DisplayModes.Values),
             "Search display modes");
-        _displayModePicker.Width = _isEditMode ? 156 : 280;
         _displayModePicker.Text = InheritDisplayMode;
         _appearanceStateByLabel = AppearanceStateChoices(snapshot);
         _appearanceStatePicker = new FilteredPicker(
             new[] { NoAppearanceState }.Concat(_appearanceStateByLabel.Keys),
             "Search appearance states");
-        _appearanceStatePicker.Width = _isEditMode ? 156 : 280;
         _appearanceStatePicker.Text = NoAppearanceState;
         _destinationChangeCheck = new FoundryCheckBox("Destination");
         _renameChangeCheck = new FoundryCheckBox("Name / pattern");
@@ -192,9 +194,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         _detailLayerModeControl = new FoundryTextSegmentedControl(
             ["Dedicated", "Active", "Other"],
             selectedIndex: 0,
-            segmentWidth: 68,
-            leadingLabel: _isEditMode ? null : "Detail layer",
-            leadingLabelWidth: _isEditMode ? 0 : 76)
+            segmentWidth: 68)
         {
             ToolTip = "Foundry tracks this layer by identity, so it can be renamed or moved in the layer hierarchy.",
         };
@@ -205,7 +205,6 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         };
         _detailLayerPickerHost = new Panel
         {
-            Width = _isEditMode ? 224 : 280,
             Content = new FoundryFormField(_detailLayerDropDown),
             Visible = false,
         };
@@ -214,9 +213,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         _titleBlockModeControl = new FoundryTextSegmentedControl(
             ["None", "Right", "Bottom"],
             selectedIndex: 0,
-            segmentWidth: 62,
-            leadingLabel: _isEditMode ? null : "Title block",
-            leadingLabelWidth: _isEditMode ? 0 : 76);
+            segmentWidth: 62);
         _layoutSelectorPreview.SetTitleBlock(_titleBlockChoices[0]);
         _namedViewPreviewTray = new NamedViewPreviewTray(_namedViewChoices, selectedIndex: 0);
         _namedViewPreviewTray.PreviewsChanged += (_, _) => RefreshDetailAssignments();
@@ -323,13 +320,19 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             HideLayoutGallery();
             HideTitleBlockGallery();
         };
-        Closed += (_, _) =>
+        Closed += async (_, _) =>
         {
             _namedViewPreviewCancellation.Cancel();
+            _draftLayoutPreviewCancellation.Cancel();
             CloseLayoutGallery();
             CloseTitleBlockGallery();
             _namedViewPreviewTray.DisposePreviews();
+            _layoutSelectorPreview.DisposePagePreview();
             _namedViewPreviewCancellation.Dispose();
+            _draftLayoutPreviewCancellation.Dispose();
+            await LayoutFoundryUiHost.CompleteDraftLayoutThumbnailSessionAsync(
+                _snapshot.DocumentRuntimeSerialNumber,
+                restoreOriginalModifiedState: !Succeeded);
         };
         LocationChanged += (_, _) =>
         {
@@ -365,7 +368,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         Shown += (_, _) =>
         {
             _dialogShown = true;
-            _ = LoadNamedViewPreviewsAsync();
+            QueueDraftLayoutPreview();
         };
         RefreshEditControlState();
         RefreshPreview();
@@ -386,17 +389,21 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         var upperPaneHeight = defaultUpperPaneHeight;
         var settingsPaneCollapsed = false;
         var upperPaneCollapsed = false;
+        var settingsContent = new FoundryAccordion(
+            new FoundryAccordionItem("Batch", CreateBatchEditor(), isExpanded: true),
+            new FoundryAccordionItem("Page size", CreatePaperEditor(), isExpanded: true),
+            new FoundryAccordionItem("Layout", CreateLayoutEditor(), isExpanded: true));
         var settingsPane = new Scrollable
         {
             Border = BorderType.None,
-            ExpandContentWidth = true,
+            // The content width is synchronized explicitly below. Eto/AppKit's
+            // automatic expansion remembers the largest measured child width,
+            // which prevents fields from contracting after this pane is widened.
+            ExpandContentWidth = false,
             // AppKit anchors a shorter scroll document at its lower edge.
             // Filling the viewport keeps collapsed accordion rows pinned to top.
             ExpandContentHeight = true,
-            Content = new FoundryAccordion(
-                new FoundryAccordionItem("Batch", CreateBatchEditor(), isExpanded: true),
-                new FoundryAccordionItem("Page size", CreatePaperEditor(), isExpanded: true),
-                new FoundryAccordionItem("Layout", CreateLayoutEditor(), isExpanded: true)),
+            Content = settingsContent,
         };
         var previewPane = new Panel
         {
@@ -410,6 +417,16 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         var settingsResizeHandle = new FoundryPaneResizeHandle(
             FoundryPaneResizeAxis.Horizontal,
             "settings");
+        void FitSettingsContentToViewport()
+        {
+            var viewportWidth = settingsPane.ClientSize.Width;
+            if (viewportWidth <= 1) return;
+            settingsContent.MinimumSize = new Size(viewportWidth, 0);
+            settingsContent.Width = viewportWidth;
+            settingsContent.Invalidate();
+        }
+        settingsPane.SizeChanged += (_, _) =>
+            Application.Instance.AsyncInvoke(FitSettingsContentToViewport);
         var upperPane = new Panel
         {
             Height = defaultUpperPaneHeight,
@@ -476,6 +493,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                 minimumSettingsPaneWidth,
                 maximumSettingsPaneWidth);
             settingsPaneHost.Width = settingsPaneWidth;
+            Application.Instance.AsyncInvoke(FitSettingsContentToViewport);
         };
         settingsResizeHandle.CollapseToggleRequested += (_, _) =>
         {
@@ -483,6 +501,8 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             settingsPaneHost.Visible = !settingsPaneCollapsed;
             settingsPaneHost.Width = settingsPaneCollapsed ? 1 : settingsPaneWidth;
             settingsResizeHandle.IsCollapsed = settingsPaneCollapsed;
+            if (!settingsPaneCollapsed)
+                Application.Instance.AsyncInvoke(FitSettingsContentToViewport);
         };
         workspaceResizeHandle.ResizeRequested += (_, eventArgs) =>
         {
@@ -559,48 +579,16 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
 
     private Control CreateLayoutEditor()
     {
-        var editor = new StackLayout
-        {
-            Spacing = FoundryTheme.Space1,
-            HorizontalContentAlignment = HorizontalAlignment.Stretch,
-        };
-        editor.Items.Add(CreateTitleBlockEditor());
-        if (!_isEditMode)
-        {
-            editor.Items.Add(new Panel { Width = 280, Content = _layoutPickerTrigger });
-            var appearanceStateHelp = new FoundryToolbarIconButton(
-                FoundryViewIcons.Help(),
-                "About appearance states");
-            appearanceStateHelp.Click += (_, _) => new FoundryHelpDialog(
+        var appearanceStateHelp = new FoundryToolbarIconButton(
+            FoundryViewIcons.Help(),
+            "About appearance states");
+        appearanceStateHelp.Click += (_, _) => new FoundryHelpDialog(
                 "Appearance State",
-                "Applies a saved appearance state independently of the page layout and title block. “Inherit appearance state from folder” uses the destination folder’s assignment.")
-                .ShowModal(this);
-            editor.Items.Add(PickerWithHelp(_appearanceStatePicker, appearanceStateHelp));
-        }
-        else
-        {
-            var appearanceStateHelp = new FoundryToolbarIconButton(
-                FoundryViewIcons.Help(),
-                "About appearance states");
-            appearanceStateHelp.Click += (_, _) => new FoundryHelpDialog(
-                    "Appearance State",
-                    "Assigns a saved appearance state directly to the selected layouts. Choosing “Inherit appearance state from folder” removes the direct assignment.")
-                .ShowModal(this);
-            editor.Items.Add(new TableLayout
-            {
-                Spacing = new Size(FoundryTheme.Space1, 0),
-                Rows = { new TableRow(_appearanceStateChangeCheck,
-                    new TableCell(PickerWithHelp(_appearanceStatePicker, appearanceStateHelp, 192), true)) },
-            });
-        }
-        editor.Items.Add(CreateSheetDefaultsEditor());
-        return editor;
-    }
+                _isEditMode
+                    ? "Assigns a saved appearance state directly to the selected layouts. Choosing “Inherit appearance state from folder” removes the direct assignment."
+                    : "Applies a saved appearance state independently of the page layout and title block. “Inherit appearance state from folder” uses the destination folder’s assignment.")
+            .ShowModal(this);
 
-    private Control CreateSheetPreview() => _layoutSelectorPreview;
-
-    private Control CreateSheetDefaultsEditor()
-    {
         var sheetDisplayModeHelp = new FoundryToolbarIconButton(
             FoundryViewIcons.Help(),
             "About sheet display modes");
@@ -609,44 +597,33 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             "Sets the default display mode for every detail. Individual details can override it; “Use layout/template setting” keeps the selected layout or template’s setting.")
             .ShowModal(this);
 
-        var modeEditor = new StackLayout
+        var table = new TableLayout
         {
-            Spacing = FoundryTheme.Space1,
+            Spacing = new Size(FoundryTheme.Space2, FoundryTheme.Space1),
         };
-        if (_isEditMode)
-            modeEditor.Items.Add(new TableLayout
-            {
-                Spacing = new Size(FoundryTheme.Space1, 0),
-                Rows = { new TableRow(_displayModeChangeCheck,
-                    new TableCell(PickerWithHelp(_displayModePicker, sheetDisplayModeHelp, 192), true)) },
-            });
-        else
-            modeEditor.Items.Add(PickerWithHelp(_displayModePicker, sheetDisplayModeHelp));
-        var detailLayerEditor = new StackLayout
-        {
-            Spacing = FoundryTheme.Space1,
-            Items =
-            {
-                _isEditMode
-                    ? new TableLayout
-                    {
-                        Spacing = new Size(FoundryTheme.Space1, 0),
-                        Rows = { new TableRow(_detailLayerChangeCheck, _detailLayerModeControl) },
-                    }
-                    : new Panel { Width = _detailLayerModeControl.Width, Content = _detailLayerModeControl },
-                _detailLayerPickerHost,
-            },
-        };
-        return new StackLayout
-        {
-            Spacing = FoundryTheme.Space1,
-            Items =
-            {
-                modeEditor,
-                detailLayerEditor,
-            },
-        };
+        table.Rows.Add(new TableRow(
+            LayoutFieldKey("Title block", _titleBlockChangeCheck),
+            new TableCell(_titleBlockModeControl, true)));
+        if (!_isEditMode)
+            table.Rows.Add(new TableRow(
+                new Label { Text = "Detail layout" },
+                new TableCell(_layoutPickerTrigger, true)));
+        table.Rows.Add(new TableRow(
+            LayoutFieldKey("Appearance state", _appearanceStateChangeCheck),
+            new TableCell(PickerWithHelp(_appearanceStatePicker, appearanceStateHelp), true)));
+        table.Rows.Add(new TableRow(
+            LayoutFieldKey("Sheet display mode", _displayModeChangeCheck),
+            new TableCell(PickerWithHelp(_displayModePicker, sheetDisplayModeHelp), true)));
+        table.Rows.Add(new TableRow(
+            LayoutFieldKey("Detail layer", _detailLayerChangeCheck),
+            new TableCell(_detailLayerModeControl, true)));
+        table.Rows.Add(new TableRow(
+            new Panel(),
+            new TableCell(_detailLayerPickerHost, true)));
+        return table;
     }
+
+    private Control CreateSheetPreview() => _layoutSelectorPreview;
 
     private Control CreatePaperEditor()
     {
@@ -678,26 +655,8 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         return editor;
     }
 
-    private Control CreateTitleBlockEditor()
-    {
-        var editor = new StackLayout
-        {
-            Spacing = FoundryTheme.Space1,
-            HorizontalContentAlignment = HorizontalAlignment.Stretch,
-        };
-        var titleBlock = new Panel { Width = _titleBlockModeControl.Width, Content = _titleBlockModeControl };
-        if (_isEditMode)
-            editor.Items.Add(new StackLayout
-            {
-                Orientation = Orientation.Horizontal,
-                VerticalContentAlignment = VerticalAlignment.Center,
-                Spacing = FoundryTheme.Space1,
-                Items = { _titleBlockChangeCheck, titleBlock },
-            });
-        else
-            editor.Items.Add(titleBlock);
-        return editor;
-    }
+    private Control LayoutFieldKey(string label, FoundryCheckBox editCheck) =>
+        _isEditMode ? editCheck : new Label { Text = label };
 
     private GridView CreatePreviewGrid()
     {
@@ -1560,6 +1519,95 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         _titleBlockGalleryScroll.ScrollPosition = new Point(0, target);
     }
 
+    private void QueueDraftLayoutPreview()
+    {
+        if (!_dialogShown || _isEditMode || _draftLayoutPreviewCancellation.IsCancellationRequested)
+            return;
+        _draftLayoutPreviewVersion++;
+        _draftLayoutPreviewDirty = true;
+        if (_draftLayoutPreviewInProgress) return;
+        _ = LoadDraftLayoutPreviewAsync();
+    }
+
+    private async Task LoadDraftLayoutPreviewAsync()
+    {
+        if (_draftLayoutPreviewInProgress) return;
+        _draftLayoutPreviewInProgress = true;
+        try
+        {
+            while (_draftLayoutPreviewDirty &&
+                   !_draftLayoutPreviewCancellation.IsCancellationRequested)
+            {
+                _draftLayoutPreviewDirty = false;
+                var version = _draftLayoutPreviewVersion;
+                var targetIndex = TargetDraftIndices().FirstOrDefault(-1);
+                if (targetIndex < 0 || targetIndex >= _drafts.Count)
+                {
+                    _layoutSelectorPreview.SetPagePreview(null, null);
+                    return;
+                }
+
+                var plan = new BatchCreateSheetsPlanner().Plan(Request(), _snapshot);
+                var changes = plan.Changes.OfType<CreateSheetFromTemplateChange>().ToArray();
+                if (!plan.CanApply || targetIndex >= changes.Length)
+                {
+                    var message = plan.Diagnostics.FirstOrDefault(item =>
+                        item.Severity == DiagnosticSeverity.Error)?.Message ??
+                        "The draft is not ready to preview.";
+                    _layoutSelectorPreview.SetPagePreview(null, message);
+                    return;
+                }
+
+                var draft = _drafts[targetIndex];
+                const int previewWidth = 640;
+                var previewHeight = Math.Clamp(
+                    (int)Math.Round(previewWidth * draft.Paper.Height / Math.Max(0.001, draft.Paper.Width)),
+                    180,
+                    900);
+                var key = new DraftLayoutThumbnailKey(
+                    _snapshot.DocumentRuntimeSerialNumber,
+                    draft.DraftId,
+                    previewWidth,
+                    previewHeight,
+                    version,
+                    PreviewBackgroundArgb(FoundryTheme.CanvasPreviewBackground));
+                _layoutSelectorPreview.SetPagePreview(null, "Rendering preview…");
+                var result = await LayoutFoundryUiHost.CaptureDraftLayoutThumbnailAsync(
+                    new DraftLayoutThumbnailRequest(key, changes[targetIndex]),
+                    _draftLayoutPreviewCancellation.Token);
+                if (_draftLayoutPreviewCancellation.IsCancellationRequested) return;
+                if (version != _draftLayoutPreviewVersion)
+                {
+                    _draftLayoutPreviewDirty = true;
+                    continue;
+                }
+                if (!result.Succeeded)
+                {
+                    _layoutSelectorPreview.SetPagePreview(
+                        null,
+                        $"Preview unavailable: {result.Error ?? "Rhino did not return an image."}");
+                    continue;
+                }
+                _layoutSelectorPreview.SetPagePreview(new Bitmap(result.PngBytes!), null);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Dialog shutdown owns cancellation.
+        }
+        catch (Exception exception)
+        {
+            _layoutSelectorPreview.SetPagePreview(null, $"Preview unavailable: {exception.Message}");
+        }
+        finally
+        {
+            _draftLayoutPreviewInProgress = false;
+            if (_draftLayoutPreviewDirty &&
+                !_draftLayoutPreviewCancellation.IsCancellationRequested)
+                _ = LoadDraftLayoutPreviewAsync();
+        }
+    }
+
     private async Task LoadNamedViewPreviewsAsync()
     {
         foreach (var choice in _namedViewChoices.Where(choice => choice.Name is not null))
@@ -1898,32 +1946,12 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                 : displayModeValues[0] is { } displayModeId
                     ? _snapshot.DisplayModes.GetValueOrDefault(displayModeId) ?? "Unavailable mode"
                     : "Rhino default";
-            var previewAppearance = ResolvePreviewAppearance(_drafts[targets[0]], detailIndex);
-            var preview = mixedNamedViews || mixedDisplayModes
-                ? null
-                : _namedViewPreviewTray.PreviewFor(
-                    namedViewValues[0], displayModeValues[0], previewAppearance);
-            if (_dialogShown && !mixedNamedViews && !string.IsNullOrWhiteSpace(namedViewValues[0]) &&
-                !_namedViewPreviewTray.HasPreview(
-                    namedViewValues[0]!, displayModeValues[0], previewAppearance) &&
-                !_namedViewPreviewTray.HasPreviewFailure(
-                    namedViewValues[0]!, displayModeValues[0], previewAppearance))
-                _ = LoadNamedViewPreviewAsync(
-                    namedViewValues[0]!, displayModeValues[0], previewAppearance);
-            var previewMessage = _dialogShown && preview is null &&
-                                 !mixedNamedViews && !mixedDisplayModes &&
-                                 !string.IsNullOrWhiteSpace(namedViewValues[0])
-                ? _namedViewPreviewTray.HasPreviewFailure(
-                    namedViewValues[0]!, displayModeValues[0], previewAppearance)
-                    ? "Preview unavailable"
-                    : "Loading preview…"
-                : null;
             states[detailIndex] = new DetailPreviewState(
                 details[detailIndex],
                 namedViewLabel,
                 displayModeLabel,
-                preview,
-                previewMessage,
+                null,
+                null,
                 namedViewValues.Any(value => !string.IsNullOrWhiteSpace(value)),
                 displayModeValues.Any(value => value is not null),
                 mixedNamedViews,
@@ -1933,6 +1961,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         _layoutSelectorPreview.SetDetailStates(states);
         _layoutSelectorPreview.ToolTip =
             "Choose a numbered detail to set its named view and display mode.";
+        QueueDraftLayoutPreview();
     }
 
     private static Guid? EffectiveDisplayMode(CreationDraft draft, int detailIndex)
@@ -2274,19 +2303,18 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
 
     private static Control PickerWithHelp(
         Control picker,
-        FoundryToolbarIconButton helpButton,
-        int width = 296)
+        FoundryToolbarIconButton helpButton)
     {
-        picker.Width = width - FoundryTheme.Space1 - 32;
-        return new Panel
+        return new StackLayout
         {
-            Width = width,
-            Content = new StackLayout
+            Orientation = Orientation.Horizontal,
+            VerticalContentAlignment = VerticalAlignment.Center,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            Spacing = FoundryTheme.Space1,
+            Items =
             {
-                Orientation = Orientation.Horizontal,
-                VerticalContentAlignment = VerticalAlignment.Center,
-                Spacing = FoundryTheme.Space1,
-                Items = { new StackLayoutItem(picker, true), helpButton },
+                new StackLayoutItem(picker, true),
+                helpButton,
             },
         };
     }
@@ -3617,6 +3645,8 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         private int _keyboardDetailIndex = -1;
         private PaperRecipe _paper = new(594, 420, "Millimeters");
         private TitleBlockChoice? _titleBlock;
+        private Bitmap? _pagePreview;
+        private string? _pagePreviewMessage;
 
         internal LayoutSelectionDrawable(LayoutChoice[] choices, int selectedIndex)
             : base(true)
@@ -3668,17 +3698,50 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             Invalidate();
         }
 
+        internal void SetPagePreview(Bitmap? preview, string? message)
+        {
+            if (!ReferenceEquals(_pagePreview, preview))
+                _pagePreview?.Dispose();
+            _pagePreview = preview;
+            _pagePreviewMessage = message;
+            Invalidate();
+        }
+
+        internal void DisposePagePreview()
+        {
+            _pagePreview?.Dispose();
+            _pagePreview = null;
+            _pagePreviewMessage = null;
+        }
+
         private void OnPaint(object? sender, PaintEventArgs eventArgs)
         {
             var graphics = eventArgs.Graphics;
             graphics.AntiAlias = true;
             var page = PageBounds();
-            TitleBlockPreviewTray.DrawTitleBlock(
-                graphics,
-                _titleBlock ?? new TitleBlockChoice(false, null, null, "None", null),
-                _paper,
-                page,
-                showEmptyMarker: false);
+            if (_pagePreview is { } pagePreview)
+            {
+                graphics.DrawImage(pagePreview, page);
+            }
+            else
+            {
+                TitleBlockPreviewTray.DrawTitleBlock(
+                    graphics,
+                    _titleBlock ?? new TitleBlockChoice(false, null, null, "None", null),
+                    _paper,
+                    page,
+                    showEmptyMarker: false);
+                if (!string.IsNullOrWhiteSpace(_pagePreviewMessage))
+                {
+                    DrawCentered(
+                        graphics,
+                        _detailMetaFont,
+                        FoundryTheme.MutedText,
+                        _pagePreviewMessage,
+                        page,
+                        page.Y + Math.Max(10, (page.Height - 12) / 2));
+                }
+            }
             var details = PreviewDetailBounds(page);
             for (var detailIndex = 0; detailIndex < details.Count; detailIndex++)
             {
@@ -3687,7 +3750,25 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                 var highlighted = interactive &&
                                   (detailIndex == _hoveredDetailIndex || detailIndex == _keyboardDetailIndex);
                 var state = interactive ? _detailStates[detailIndex] : null;
-                if (state?.NamedViewPreview is { } namedViewPreview)
+                if (_pagePreview is not null)
+                {
+                    if (interactive)
+                    {
+                        graphics.FillRectangle(
+                            FoundryTheme.WithAlpha(FoundryTheme.CanvasSurface, 175),
+                            detail.X, detail.Y, detail.Width, Math.Min(24, detail.Height));
+                        if (detail.Height >= 30)
+                            graphics.FillRectangle(
+                                FoundryTheme.WithAlpha(FoundryTheme.CanvasSurface, 165),
+                                detail.X, detail.Bottom - 17, detail.Width, 17);
+                    }
+                }
+                else if (!string.IsNullOrWhiteSpace(_pagePreviewMessage))
+                {
+                    // Keep the sheet-level render status visible instead of
+                    // covering it with the schematic detail surfaces.
+                }
+                else if (state?.NamedViewPreview is { } namedViewPreview)
                 {
                     graphics.DrawImage(namedViewPreview, detail);
                     graphics.FillRectangle(

@@ -2558,7 +2558,7 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
                 .ToArray());
     }
 
-    private static Guid CreateDetail(
+    internal static Guid CreateDetail(
         RhinoDoc document,
         RhinoPageView page,
         DetailSlotRecipe slot,
@@ -2710,7 +2710,7 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
         }
     }
 
-    private static Guid? CreateTitleBlock(
+    internal static Guid? CreateTitleBlock(
         RhinoDoc document,
         RhinoPageView page,
         TitleBlockTemplateRecipe titleBlock,
@@ -3144,7 +3144,7 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
         }
     }
 
-    private static UnitSystem ParseUnitSystem(string value) =>
+    internal static UnitSystem ParseUnitSystem(string value) =>
         Enum.TryParse<UnitSystem>(value, true, out var result)
             ? result
             : throw new InvalidOperationException($"Page unit system '{value}' is not supported.");

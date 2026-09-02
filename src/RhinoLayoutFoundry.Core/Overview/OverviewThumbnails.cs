@@ -1,4 +1,5 @@
 using RhinoLayoutFoundry.Core.Domain;
+using RhinoLayoutFoundry.Core.Operations;
 
 namespace RhinoLayoutFoundry.Core.Overview;
 
@@ -89,6 +90,38 @@ public interface INamedViewThumbnailProvider
     Task<NamedViewThumbnailResult> CaptureAsync(
         NamedViewThumbnailRequest request,
         CancellationToken cancellationToken);
+}
+
+public readonly record struct DraftLayoutThumbnailKey(
+    uint DocumentRuntimeSerialNumber,
+    Guid DraftId,
+    int Width,
+    int Height,
+    long ContentVersion,
+    uint BackgroundArgb = 0);
+
+public sealed record DraftLayoutThumbnailRequest(
+    DraftLayoutThumbnailKey Key,
+    CreateSheetFromTemplateChange Change);
+
+public sealed record DraftLayoutThumbnailResult(
+    DraftLayoutThumbnailKey Key,
+    byte[]? PngBytes,
+    string? Error = null)
+{
+    public bool Succeeded => PngBytes is { Length: > 0 } && Error is null;
+}
+
+public interface IDraftLayoutThumbnailProvider
+{
+    Task<DraftLayoutThumbnailResult> CaptureAsync(
+        DraftLayoutThumbnailRequest request,
+        CancellationToken cancellationToken);
+
+    Task CompleteSessionAsync(
+        uint documentRuntimeSerialNumber,
+        bool restoreOriginalModifiedState,
+        CancellationToken cancellationToken = default);
 }
 
 public sealed class OverviewThumbnailRequestQueue

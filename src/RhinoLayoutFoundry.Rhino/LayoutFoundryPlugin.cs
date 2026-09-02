@@ -41,6 +41,7 @@ public sealed class LayoutFoundryPlugin : PlugIn
                 () => LayoutFoundryUiHost.NotifyOverviewChanged(OverviewInvalidation.All)),
             new RhinoDocumentThumbnailProvider(),
             new RhinoNamedViewThumbnailProvider(),
+            new RhinoDraftLayoutThumbnailProvider(_stateStore),
             new RhinoMutationCapabilityProvider(),
             new RhinoTemplateCaptureContextProvider(),
             new RhinoDocumentObserverSnapshotProvider(_stateStore, _revisionTracker),

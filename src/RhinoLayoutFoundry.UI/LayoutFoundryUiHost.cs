@@ -19,6 +19,7 @@ public static class LayoutFoundryUiHost
     private static ILayoutPackageService? _layoutPackageService;
     private static IDocumentThumbnailProvider? _thumbnailProvider;
     private static INamedViewThumbnailProvider? _namedViewThumbnailProvider;
+    private static IDraftLayoutThumbnailProvider? _draftLayoutThumbnailProvider;
     private static IMutationCapabilityProvider? _capabilityProvider;
     private static ITemplateCaptureContextProvider? _templateCaptureContextProvider;
     private static IDocumentObserverSnapshotProvider? _observerSnapshotProvider;
@@ -43,6 +44,7 @@ public static class LayoutFoundryUiHost
         ILayoutPackageService layoutPackageService,
         IDocumentThumbnailProvider thumbnailProvider,
         INamedViewThumbnailProvider namedViewThumbnailProvider,
+        IDraftLayoutThumbnailProvider draftLayoutThumbnailProvider,
         IMutationCapabilityProvider capabilityProvider,
         ITemplateCaptureContextProvider templateCaptureContextProvider,
         IDocumentObserverSnapshotProvider observerSnapshotProvider,
@@ -59,6 +61,8 @@ public static class LayoutFoundryUiHost
         _thumbnailProvider = thumbnailProvider ?? throw new ArgumentNullException(nameof(thumbnailProvider));
         _namedViewThumbnailProvider = namedViewThumbnailProvider ??
             throw new ArgumentNullException(nameof(namedViewThumbnailProvider));
+        _draftLayoutThumbnailProvider = draftLayoutThumbnailProvider ??
+            throw new ArgumentNullException(nameof(draftLayoutThumbnailProvider));
         _capabilityProvider = capabilityProvider ?? throw new ArgumentNullException(nameof(capabilityProvider));
         _templateCaptureContextProvider = templateCaptureContextProvider ??
             throw new ArgumentNullException(nameof(templateCaptureContextProvider));
@@ -254,7 +258,30 @@ public static class LayoutFoundryUiHost
                Task.FromResult(new NamedViewThumbnailResult(
                    request.Key,
                    null,
-                   "Foundry is not connected to a named-view thumbnail provider."));
+               "Foundry is not connected to a named-view thumbnail provider."));
+    }
+
+    public static Task<DraftLayoutThumbnailResult> CaptureDraftLayoutThumbnailAsync(
+        DraftLayoutThumbnailRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        return _draftLayoutThumbnailProvider?.CaptureAsync(request, cancellationToken) ??
+               Task.FromResult(new DraftLayoutThumbnailResult(
+                   request.Key,
+                   null,
+                   "Foundry is not connected to a draft-layout thumbnail provider."));
+    }
+
+    public static Task CompleteDraftLayoutThumbnailSessionAsync(
+        uint documentRuntimeSerialNumber,
+        bool restoreOriginalModifiedState,
+        CancellationToken cancellationToken = default)
+    {
+        return _draftLayoutThumbnailProvider?.CompleteSessionAsync(
+                   documentRuntimeSerialNumber,
+                   restoreOriginalModifiedState,
+                   cancellationToken) ??
+               Task.CompletedTask;
     }
 
     public static FoundryMutationCapabilities CaptureMutationCapabilities()
@@ -1528,6 +1555,7 @@ public static class LayoutFoundryUiHost
         _layoutPackageService = null;
         _thumbnailProvider = null;
         _namedViewThumbnailProvider = null;
+        _draftLayoutThumbnailProvider = null;
         _capabilityProvider = null;
         _templateCaptureContextProvider = null;
         _observerSnapshotProvider = null;
