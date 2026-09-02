@@ -9,7 +9,8 @@ public sealed record DocumentOverview(
     IReadOnlyList<FolderOverview> Folders,
     IReadOnlyList<SheetOverview> Sheets,
     IReadOnlyList<OverviewIssue>? Diagnostics = null,
-    IReadOnlyList<AppearanceStateOverview>? AppearanceStateResources = null)
+    IReadOnlyList<AppearanceStateOverview>? AppearanceStateResources = null,
+    DocumentFileDates? FileDates = null)
 {
     public static DocumentOverview NoDocument { get; } = new(
         null,
@@ -22,6 +23,10 @@ public sealed record DocumentOverview(
     public IReadOnlyList<OverviewIssue> Issues => Diagnostics ?? [];
     public IReadOnlyList<AppearanceStateOverview> AppearanceStates => AppearanceStateResources ?? [];
 }
+
+public sealed record DocumentFileDates(
+    DateTimeOffset CreatedUtc,
+    DateTimeOffset LastModifiedUtc);
 
 public sealed record FolderOverview(
     Guid Id,

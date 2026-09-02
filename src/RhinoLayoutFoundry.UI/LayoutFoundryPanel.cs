@@ -260,7 +260,8 @@ public sealed partial class LayoutFoundryPanel : Panel
         _displayModeCell = CreateDisplayModeCell();
         _appearanceStateCell = CreateAppearanceStateCell();
         (_treeGrid, _layoutsColumn, _printColumn, _templateColumn, _paperColumn, _detailsColumn,
-            _displayModeColumn, _appearanceStateColumn, _notesColumn, _statusColumn) = CreateTreeGrid();
+            _displayModeColumn, _appearanceStateColumn, _notesColumn, _, _, _statusColumn) =
+            CreateTreeGrid();
         CreateHierarchyContextMenu();
         _toolbarSurface = FoundryTheme.Surface(
             CreateToolbarContent(),
@@ -414,12 +415,13 @@ public sealed partial class LayoutFoundryPanel : Panel
     private (TreeGridView TreeGrid, GridColumn LayoutsColumn, GridColumn PrintColumn,
         GridColumn TemplateColumn,
         GridColumn PaperColumn, GridColumn DetailsColumn, GridColumn DisplayModeColumn,
-        GridColumn AppearanceStateColumn, GridColumn NotesColumn, GridColumn StatusColumn) CreateTreeGrid()
+        GridColumn AppearanceStateColumn, GridColumn NotesColumn, GridColumn CreatedColumn,
+        GridColumn LastModifiedColumn, GridColumn StatusColumn) CreateTreeGrid()
     {
         var treeGrid = new TreeGridView
         {
             AllowMultipleSelection = true,
-            AllowColumnReordering = false,
+            AllowColumnReordering = true,
             AllowDrop = true,
             ShowHeader = true,
             RowHeight = 24,
@@ -505,6 +507,28 @@ public sealed partial class LayoutFoundryPanel : Panel
             Sortable = false,
         };
         treeGrid.Columns.Add(notesColumn);
+        var createdColumn = new GridColumn
+        {
+            HeaderText = "Created",
+            DataCell = new TextBoxCell
+            {
+                Binding = Binding.Property<HierarchyTreeItem, string>(item => item.CreatedText),
+            },
+            Width = 150,
+            Sortable = false,
+        };
+        treeGrid.Columns.Add(createdColumn);
+        var lastModifiedColumn = new GridColumn
+        {
+            HeaderText = "Last modified",
+            DataCell = new TextBoxCell
+            {
+                Binding = Binding.Property<HierarchyTreeItem, string>(item => item.LastModifiedText),
+            },
+            Width = 150,
+            Sortable = false,
+        };
+        treeGrid.Columns.Add(lastModifiedColumn);
         var statusColumn = new GridColumn
         {
             HeaderText = "Status",
@@ -517,7 +541,8 @@ public sealed partial class LayoutFoundryPanel : Panel
         treeGrid.Columns.Add(statusColumn);
 
         return (treeGrid, layoutsColumn, printColumn, templateColumn, paperColumn, detailsColumn,
-            displayModeColumn, appearanceStateColumn, notesColumn, statusColumn);
+            displayModeColumn, appearanceStateColumn, notesColumn, createdColumn,
+            lastModifiedColumn, statusColumn);
     }
 
     private void OnHierarchyCellFormatting(
@@ -1896,7 +1921,8 @@ public sealed partial class LayoutFoundryPanel : Panel
                 preferredSelection,
                 _usesMacSafeHierarchy,
                 _inlineDraft?.Id,
-                _hierarchyExpansion))
+                _hierarchyExpansion,
+                renderOverview.FileDates))
             .ToArray();
         _renderedTreeItems = items;
         var visibleItems = Flatten(items).ToDictionary(item => item.Node.Key);
@@ -3761,9 +3787,11 @@ public sealed partial class LayoutFoundryPanel : Panel
             OverviewNodeKey preferredSelection,
             bool useMacSafeSingleColumn,
             Guid? inlineDraftId,
-            HierarchyExpansionState expansionState)
+            HierarchyExpansionState expansionState,
+            DocumentFileDates? fileDates)
         {
             Node = node;
+            _fileDates = fileDates;
             Presentation = OverviewRowPresentation.Create(node, useMacSafeSingleColumn: false);
             IsInlineDraft = inlineDraftId == node.Key.Id;
             RowIcon = node.IsDocumentRoot
@@ -3789,7 +3817,8 @@ public sealed partial class LayoutFoundryPanel : Panel
                     preferredSelection,
                     useMacSafeSingleColumn,
                     inlineDraftId,
-                    expansionState));
+                    expansionState,
+                    fileDates));
             }
 
             Expanded = expansionState.Resolve(
@@ -3800,6 +3829,8 @@ public sealed partial class LayoutFoundryPanel : Panel
         }
 
         public OverviewTreeNode Node { get; }
+
+        private readonly DocumentFileDates? _fileDates;
 
         public OverviewRowPresentation Presentation { get; }
 
@@ -3906,6 +3937,18 @@ public sealed partial class LayoutFoundryPanel : Panel
                     .Trim();
             }
         }
+
+        public string CreatedText => Node.IsDocumentRoot
+            ? FormatFileDate(_fileDates?.CreatedUtc)
+            : "—";
+
+        public string LastModifiedText => Node.IsDocumentRoot
+            ? FormatFileDate(_fileDates?.LastModifiedUtc)
+            : "—";
+
+        private static string FormatFileDate(DateTimeOffset? value) => value is { } timestamp
+            ? timestamp.ToLocalTime().ToString("g")
+            : "—";
 
         private ViewportAppearanceSummary? AppearanceSummary() =>
             Node.Folder?.Appearance ?? Node.Sheet?.Appearance ?? Node.Detail?.Appearance;

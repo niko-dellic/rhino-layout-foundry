@@ -26,7 +26,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
     private readonly DropDown _destinationDropDown;
     private readonly NumericStepper _quantityStepper;
     private readonly TextBox _patternBox;
-    private readonly FoundryHelpLabel _patternHelpLabel;
+    private readonly FoundryToolbarIconButton _patternHelpButton;
     private readonly NumericStepper _startStepper;
     private readonly NumericStepper _stepStepper;
     private readonly LayoutPreviewTray _layoutPreviewTray;
@@ -114,10 +114,10 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             Text = _isEditMode ? string.Empty : "Page {index}",
             PlaceholderText = _isEditMode ? "Example: A-{index:000}" : string.Empty,
         };
-        _patternHelpLabel = new FoundryHelpLabel(
-            "Name / pattern",
-            "Combine ordinary text with naming wildcards such as {index}, {project}, or {folder}.");
-        _patternHelpLabel.HelpRequested += (_, _) => new NamingPatternHelpDialog().ShowModal(this);
+        _patternHelpButton = new FoundryToolbarIconButton(
+            FoundryViewIcons.Help(),
+            "Show naming-pattern wildcards");
+        _patternHelpButton.Click += (_, _) => new NamingPatternHelpDialog().ShowModal(this);
         _startStepper = IntegerStepper(
             _isEditMode ? 1 : FirstAvailablePageNumber(snapshot), -999999, 999999);
         _stepStepper = IntegerStepper(1, -999999, 999999);
@@ -402,13 +402,17 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             table.Rows.Add(new TableRow(new Label { Text = "Quantity" }, new FoundryFormField(_quantityStepper)));
         else
             table.Rows.Add(new TableRow(new TableCell(_renameChangeCheck, true)));
-        table.Rows.Add(new TableRow(new StackLayout
+        table.Rows.Add(new TableRow(new Label { Text = "Name / pattern" }, new StackLayout
         {
             Orientation = Orientation.Horizontal,
             VerticalContentAlignment = VerticalAlignment.Center,
-            Items = { new StackLayoutItem(null, true), _patternHelpLabel },
-        },
-            new TableCell(new FoundryFormField(_patternBox), true)));
+            Spacing = FoundryTheme.Space1,
+            Items =
+            {
+                new StackLayoutItem(new FoundryFormField(_patternBox), true),
+                _patternHelpButton,
+            },
+        }));
         table.Rows.Add(new TableRow(new Label { Text = "Start / step" }, new StackLayout
         {
             Orientation = Orientation.Horizontal,
@@ -450,8 +454,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                 "About appearance states");
             appearanceStateHelp.Click += (_, _) => new FoundryHelpDialog(
                 "Appearance State",
-                "Choose the saved appearance state that supplies visibility and display overrides for the new sheets.",
-                "This source is independent from the selected page layout and title block. “Inherit appearance state from folder” uses the destination folder’s assignment.")
+                "Applies a saved appearance state independently of the page layout and title block. “Inherit appearance state from folder” uses the destination folder’s assignment.")
                 .ShowModal(this);
             editor.Items.Add(PickerWithHelp(_appearanceStatePicker, appearanceStateHelp));
         }
@@ -478,8 +481,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             "About sheet display modes");
         sheetDisplayModeHelp.Click += (_, _) => new FoundryHelpDialog(
             "Sheet display mode",
-            "Sets the default display mode for every detail created on the sheet.",
-            "An individual detail can override this default. “Use layout/template setting” keeps the display mode defined by the selected layout or template.")
+            "Sets the default display mode for every detail. Individual details can override it; “Use layout/template setting” keeps the selected layout or template’s setting.")
             .ShowModal(this);
 
         var modeEditor = new StackLayout

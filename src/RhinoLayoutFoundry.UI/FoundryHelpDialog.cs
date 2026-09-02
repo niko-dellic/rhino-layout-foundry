@@ -9,7 +9,7 @@ internal sealed class FoundryHelpDialog : Dialog
     internal FoundryHelpDialog(string title, params string[] paragraphs)
     {
         Title = title;
-        MinimumSize = new Size(460, 230);
+        MinimumSize = new Size(420, 180);
         Resizable = false;
         Padding = new Padding(FoundryTheme.Space4);
         BackgroundColor = FoundryTheme.PanelBackground;
@@ -20,12 +20,14 @@ internal sealed class FoundryHelpDialog : Dialog
 
         var explanation = new StackLayout
         {
+            Width = 388,
             Spacing = FoundryTheme.Space2,
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
         };
         foreach (var paragraph in paragraphs.Where(text => !string.IsNullOrWhiteSpace(text)))
         {
             var label = FoundryTheme.MutedLabel(paragraph);
+            label.Width = 388;
             label.Wrap = WrapMode.Word;
             explanation.Items.Add(label);
         }
@@ -36,12 +38,6 @@ internal sealed class FoundryHelpDialog : Dialog
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Items =
             {
-                new Label
-                {
-                    Text = title,
-                    Font = SystemFonts.Bold(17),
-                    TextColor = FoundryTheme.PrimaryText,
-                },
                 explanation,
                 new StackLayoutItem(null, true),
                 new StackLayout

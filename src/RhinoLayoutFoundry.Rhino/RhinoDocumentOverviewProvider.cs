@@ -168,7 +168,36 @@ internal sealed class RhinoDocumentOverviewProvider : IDocumentOverviewProvider
                 OverviewIssueSeverity.Warning,
                 item.Message,
                 item.EntityId)).ToArray(),
-            stateOverviews);
+            stateOverviews,
+            CaptureFileDates(document));
+    }
+
+    private static DocumentFileDates? CaptureFileDates(RhinoDoc document)
+    {
+        if (string.IsNullOrWhiteSpace(document.Path))
+        {
+            return null;
+        }
+
+        try
+        {
+            var file = new FileInfo(document.Path);
+            if (!file.Exists)
+            {
+                return null;
+            }
+
+            file.Refresh();
+            return new DocumentFileDates(
+                new DateTimeOffset(file.CreationTimeUtc),
+                new DateTimeOffset(file.LastWriteTimeUtc));
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or
+            System.Security.SecurityException or ArgumentException or NotSupportedException)
+        {
+            return null;
+        }
     }
 
     private static AppearanceStateBindingOverview? Binding(
