@@ -34,6 +34,7 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
     private readonly Dictionary<Guid, PreviewEntry> _previews = [];
     private readonly Dictionary<string, NamedViewPreviewEntry> _namedViewPreviews =
         new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<Guid, float> _assignmentBadgeDesiredWidths = [];
     private readonly UITimer _navigatorDragTimer;
     private readonly UITimer _navigatorHoverTimer;
     private readonly UITimer _cameraInputFrameTimer;
@@ -46,6 +47,8 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
     private ObserverCanvasPresentation _presentation = ObserverCanvasPresentation.Empty;
     private HashSet<Guid> _drawableFolderIds = [];
     private ObserverPackingMode _packingMode = ObserverPackingMode.NestedFolders;
+    private ObserverAppearancePresentationMode _appearancePresentationMode =
+        ObserverAppearancePresentationMode.Cards;
     private ObserverCamera _camera = ObserverCamera.Default;
     private Color _gridColor = FoundryTheme.CanvasGridColor;
     private double _gridOpacity = FoundryTheme.DefaultCanvasGridOpacity;
@@ -61,7 +64,6 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
     private ObserverPoint _contextWorld;
     private bool _spaceHeld;
     private bool _navigatorVisible = true;
-    private bool _dependencyConnectionsVisible;
     private bool _namedViewsVisible;
     private bool _namedViewsThumbnailMode;
     private CanvasNavigatorRow[] _navigatorRows = [];
@@ -170,6 +172,7 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
     internal ObserverBoardLayout BoardLayout => _layout;
     internal ObserverSnapshot Snapshot => _snapshot;
     internal ObserverPackingMode PackingMode => _packingMode;
+    internal ObserverAppearancePresentationMode AppearancePresentationMode => _appearancePresentationMode;
     internal ObserverCanvasPresentation Presentation => _presentation;
     internal Color GridColor => _gridColor;
     internal double GridOpacity => _gridOpacity;
@@ -186,7 +189,8 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
     {
         if (_packingMode == packingMode) return;
         _packingMode = packingMode;
-        _layout = new ObserverPlacementPlanner().Arrange(_snapshot, _packingMode);
+        _layout = new ObserverPlacementPlanner().Arrange(
+            _snapshot, _packingMode, _appearancePresentationMode);
         _spatialIndex = new ObserverSpatialIndex(_layout);
         RefreshPresentation();
         if (fit && !_layout.Bounds.IsEmpty) FitAll();
@@ -196,7 +200,8 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
     internal void SetSnapshot(ObserverSnapshot snapshot, bool fit)
     {
         _snapshot = snapshot ?? ObserverSnapshot.NoDocument;
-        _layout = new ObserverPlacementPlanner().Arrange(_snapshot, _packingMode);
+        _layout = new ObserverPlacementPlanner().Arrange(
+            _snapshot, _packingMode, _appearancePresentationMode);
         _spatialIndex = new ObserverSpatialIndex(_layout);
         RefreshPresentation();
         var folderIds = _snapshot.Folders.Select(folder => folder.Id).ToHashSet();
@@ -246,11 +251,14 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
         Invalidate();
     }
 
-    internal void SetDependencyConnectionsVisible(bool visible)
+    internal void SetAppearancePresentationMode(ObserverAppearancePresentationMode mode)
     {
-        if (_dependencyConnectionsVisible == visible) return;
-        _dependencyConnectionsVisible = visible;
-        Invalidate();
+        if (_appearancePresentationMode == mode) return;
+        _appearancePresentationMode = mode;
+        _layout = new ObserverPlacementPlanner().Arrange(
+            _snapshot, _packingMode, _appearancePresentationMode);
+        _spatialIndex = new ObserverSpatialIndex(_layout);
+        RefreshPresentation();
     }
 
     internal void SetNamedViewsVisible(bool visible)
@@ -492,13 +500,17 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
                 DrawSheet(graphics, card, viewport, tier, eventArgs.ClipRectangle);
         }
 
-        foreach (var card in _spatialIndex.QueryAppearanceStates(visibleWorld))
-            DrawAppearanceState(graphics, card, viewport);
+        if (_appearancePresentationMode != ObserverAppearancePresentationMode.AssignmentBadges)
+        {
+            foreach (var card in _spatialIndex.QueryAppearanceStates(visibleWorld))
+                DrawAppearanceState(graphics, card, viewport);
+        }
 
         foreach (var summary in _presentation.FolderSummaries)
             DrawFolderSummary(graphics, summary, viewport);
 
         DrawDependencyConnections(graphics, viewport);
+        DrawAssignmentBadges(graphics, viewport);
 
         if (_lassoWorld is { } lasso)
         {
@@ -602,7 +614,7 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
         ObserverAppearanceStateCard card,
         ObserverSize viewport)
     {
-        var bounds = ScreenRect(card.Bounds, viewport);
+        var bounds = ScreenRect(PreviewBounds(card.Bounds, card.State.Id), viewport);
         if (bounds.Width < 8 || bounds.Height < 8) return;
         var key = new OverviewNodeKey(OverviewNodeKind.AppearanceState, card.State.Id);
         var selected = _selection.Contains(key);
@@ -1029,67 +1041,280 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
 
     private void DrawDependencyConnections(Graphics graphics, ObserverSize viewport)
     {
-        if (!_dependencyConnectionsVisible || _snapshot.StateAssignments.Count == 0)
+        if (_appearancePresentationMode != ObserverAppearancePresentationMode.CardsWithConnections ||
+            _snapshot.StateAssignments.Count == 0)
             return;
 
-        using var halo = new Pen(FoundryTheme.WithAlpha(FoundryTheme.CanvasBackground, 205), 3);
-        using var line = new Pen(FoundryTheme.WithAlpha(FoundryTheme.MutedText, 150), 1);
+        using var halo = new Pen(FoundryTheme.WithAlpha(FoundryTheme.CanvasBackground, 235), 4.5f);
+        using var line = new Pen(FoundryTheme.WithAlpha(FoundryTheme.PrimaryText, 195), 1.5f);
         foreach (var assignment in _snapshot.StateAssignments)
         {
             if (!_layout.AppearanceStates.TryGetValue(assignment.StateId, out var stateCard)) continue;
-            var sourceBounds = ScreenRect(stateCard.Bounds, viewport);
-            var start = new PointF(sourceBounds.Right, sourceBounds.Top + sourceBounds.Height / 2f);
-            if (!TryAssignmentTargetPoint(assignment.Target, viewport, out var end)) continue;
-            var direction = end.X >= start.X ? 1 : -1;
-            var elbowX = direction > 0
-                ? Math.Max(start.X + 14, (start.X + end.X) / 2f)
-                : Math.Min(start.X - 14, (start.X + end.X) / 2f);
-            void Segment(Pen pen)
+            var sourceBounds = ScreenRect(PreviewBounds(stateCard.Bounds, stateCard.State.Id), viewport);
+            if (!TryConnectionTargetBounds(assignment.Target, viewport, out var targetBounds)) continue;
+            var (sourcePort, targetPort) = ClosestConnectionPorts(
+                sourceBounds,
+                targetBounds,
+                assignment.Target.Kind == HierarchyScopeKind.Folder);
+            var points = OrthogonalConnectionPath(sourcePort, targetPort);
+            void DrawPath(Pen pen)
             {
-                graphics.DrawLine(pen, start.X, start.Y, elbowX, start.Y);
-                graphics.DrawLine(pen, elbowX, start.Y, elbowX, end.Y);
-                graphics.DrawLine(pen, elbowX, end.Y, end.X, end.Y);
+                for (var index = 1; index < points.Count; index++)
+                    graphics.DrawLine(pen, points[index - 1], points[index]);
             }
-            Segment(halo);
-            Segment(line);
-            graphics.FillEllipse(FoundryTheme.MutedText, start.X - 2, start.Y - 2, 4, 4);
-            graphics.FillEllipse(FoundryTheme.MutedText, end.X - 2, end.Y - 2, 4, 4);
+            DrawPath(halo);
+            DrawPath(line);
+            var endpointColor = FoundryTheme.WithAlpha(FoundryTheme.PrimaryText, 220);
+            graphics.FillEllipse(endpointColor,
+                sourcePort.Point.X - 2.5f, sourcePort.Point.Y - 2.5f, 5, 5);
+            graphics.FillEllipse(endpointColor,
+                targetPort.Point.X - 2.5f, targetPort.Point.Y - 2.5f, 5, 5);
         }
     }
 
-    private bool TryAssignmentTargetPoint(
+    private bool TryConnectionTargetBounds(
         HierarchyScope target,
         ObserverSize viewport,
-        out PointF point)
+        out RectangleF bounds)
     {
-        point = default;
-        RectangleF bounds;
+        bounds = default;
         if (target.Kind == HierarchyScopeKind.Folder &&
-            _layout.Folders.TryGetValue(target.Id, out var folder))
+            _layout.Folders.TryGetValue(target.Id, out var folder) &&
+            FolderHasDrawableDescendant(folder.Folder.Id))
         {
             bounds = ScreenRect(PreviewBounds(folder.Bounds, folder.Folder.Id), viewport);
+            return true;
         }
-        else if (target.Kind == HierarchyScopeKind.Sheet &&
-                 _layout.Sheets.TryGetValue(target.Id, out var sheet))
+        if (target.Kind == HierarchyScopeKind.Sheet &&
+            _layout.Sheets.TryGetValue(target.Id, out var sheet) &&
+            _presentation.TierForSheet(sheet.Sheet.PageViewId) != ObserverCanvasLodTier.Folder)
         {
             bounds = ScreenRect(PreviewBounds(sheet.Bounds, sheet.Sheet.PageViewId), viewport);
+            return true;
         }
-        else if (target.Kind == HierarchyScopeKind.Detail)
+        if (target.Kind != HierarchyScopeKind.Detail) return false;
+        var owner = _layout.Sheets.Values.FirstOrDefault(card =>
+            card.Sheet.Details.Any(detail => detail.DetailViewportId == target.Id));
+        if (owner is null ||
+            _presentation.TierForSheet(owner.Sheet.PageViewId) != ObserverCanvasLodTier.Detail)
+            return false;
+        var detail = owner.Sheet.Details.First(item => item.DetailViewportId == target.Id);
+        bounds = ScreenRect(DetailWorldRect(
+            PreviewBounds(owner.Bounds, owner.Sheet.PageViewId), detail.NormalizedBounds), viewport);
+        return true;
+    }
+
+    private static (ConnectionPort Source, ConnectionPort Target) ClosestConnectionPorts(
+        RectangleF sourceBounds,
+        RectangleF targetBounds,
+        bool targetUsesNearestPerimeterPoint)
+    {
+        var sourceCenter = new PointF(
+            sourceBounds.Left + sourceBounds.Width / 2,
+            sourceBounds.Top + sourceBounds.Height / 2);
+        var sourcePorts = EdgePorts(sourceBounds, sourceCenter, projectToReference: false);
+        var targetPorts = EdgePorts(
+            targetBounds,
+            sourceCenter,
+            projectToReference: targetUsesNearestPerimeterPoint);
+        var closest = sourcePorts
+            .SelectMany(source => targetPorts.Select(target => new
+            {
+                Source = source,
+                Target = target,
+                Distance = Math.Abs(source.Point.X - target.Point.X) +
+                           Math.Abs(source.Point.Y - target.Point.Y),
+            }))
+            .OrderBy(candidate => candidate.Distance)
+            .Select(candidate => (candidate.Source, candidate.Target))
+            .First();
+        if (targetUsesNearestPerimeterPoint && targetBounds.Contains(sourceCenter))
         {
-            var owner = _layout.Sheets.Values.FirstOrDefault(card =>
-                card.Sheet.Details.Any(detail => detail.DetailViewportId == target.Id));
-            var detail = owner?.Sheet.Details.FirstOrDefault(item => item.DetailViewportId == target.Id);
-            if (owner is null || detail is null) return false;
-            bounds = ScreenRect(DetailWorldRect(
-                PreviewBounds(owner.Bounds, owner.Sheet.PageViewId), detail.NormalizedBounds), viewport);
+            closest.Target = closest.Target with
+            {
+                Normal = new PointF(-closest.Target.Normal.X, -closest.Target.Normal.Y),
+            };
+        }
+        return closest;
+    }
+
+    private static IReadOnlyList<ConnectionPort> EdgePorts(
+        RectangleF bounds,
+        PointF reference,
+        bool projectToReference)
+    {
+        var middleX = bounds.Left + bounds.Width / 2;
+        var middleY = bounds.Top + bounds.Height / 2;
+        var projectedX = projectToReference
+            ? Math.Clamp(reference.X, bounds.Left, bounds.Right)
+            : middleX;
+        var projectedY = projectToReference
+            ? Math.Clamp(reference.Y, bounds.Top, bounds.Bottom)
+            : middleY;
+        return
+        [
+            new ConnectionPort(new PointF(bounds.Left, projectedY), new PointF(-1, 0)),
+            new ConnectionPort(new PointF(bounds.Right, projectedY), new PointF(1, 0)),
+            new ConnectionPort(new PointF(projectedX, bounds.Top), new PointF(0, -1)),
+            new ConnectionPort(new PointF(projectedX, bounds.Bottom), new PointF(0, 1)),
+        ];
+    }
+
+    private static IReadOnlyList<PointF> OrthogonalConnectionPath(
+        ConnectionPort source,
+        ConnectionPort target)
+    {
+        const float clearance = 14;
+        var sourceOutside = new PointF(
+            source.Point.X + source.Normal.X * clearance,
+            source.Point.Y + source.Normal.Y * clearance);
+        var targetOutside = new PointF(
+            target.Point.X + target.Normal.X * clearance,
+            target.Point.Y + target.Normal.Y * clearance);
+        var points = new List<PointF> { source.Point, sourceOutside };
+        if (source.Normal.X != 0 && target.Normal.X != 0)
+        {
+            var middleX = (sourceOutside.X + targetOutside.X) / 2;
+            points.Add(new PointF(middleX, sourceOutside.Y));
+            points.Add(new PointF(middleX, targetOutside.Y));
+        }
+        else if (source.Normal.Y != 0 && target.Normal.Y != 0)
+        {
+            var middleY = (sourceOutside.Y + targetOutside.Y) / 2;
+            points.Add(new PointF(sourceOutside.X, middleY));
+            points.Add(new PointF(targetOutside.X, middleY));
+        }
+        else if (source.Normal.X != 0)
+        {
+            points.Add(new PointF(targetOutside.X, sourceOutside.Y));
         }
         else
         {
-            return false;
+            points.Add(new PointF(sourceOutside.X, targetOutside.Y));
         }
-        point = new PointF(bounds.Left, bounds.Top + bounds.Height / 2f);
-        return true;
+        points.Add(targetOutside);
+        points.Add(target.Point);
+        return points.Where((point, index) => index == 0 || point != points[index - 1]).ToArray();
     }
+
+    private void DrawAssignmentBadges(Graphics graphics, ObserverSize viewport)
+    {
+        if (_appearancePresentationMode != ObserverAppearancePresentationMode.AssignmentBadges)
+            return;
+        foreach (var badge in VisibleAssignmentBadges(viewport, graphics))
+        {
+            var state = _snapshot.AppearanceStates.LastOrDefault(item => item.Id == badge.StateId);
+            if (state is null) continue;
+            var selected = _selection.Contains(
+                new OverviewNodeKey(OverviewNodeKind.AppearanceState, state.Id));
+            using var path = GraphicsPath.GetRoundRect(badge.ScreenBounds, 5);
+            graphics.FillPath(
+                selected ? FoundryTheme.SelectionAccent : FoundryTheme.CanvasOverlayBackground,
+                path);
+            graphics.DrawPath(
+                new Pen(selected ? FoundryTheme.SelectionAccent : FoundryTheme.CanvasBorder, 1),
+                path);
+            var foreground = selected ? Colors.White : FoundryTheme.PrimaryText;
+            FoundryHierarchyIcons.DrawAppearanceState(
+                graphics,
+                foreground,
+                new RectangleF(
+                    badge.ScreenBounds.Left + 5,
+                    badge.ScreenBounds.Top + 4,
+                    14,
+                    14));
+            if (badge.ScreenBounds.Width > 30)
+            {
+                graphics.DrawText(
+                    _smallFont,
+                    foreground,
+                    badge.ScreenBounds.Left + 23,
+                    badge.ScreenBounds.Top + 5,
+                    FitText(
+                        graphics,
+                        _smallFont,
+                        state.Name,
+                        Math.Max(8, badge.ScreenBounds.Width - 28)));
+            }
+        }
+    }
+
+    private IReadOnlyList<AssignmentBadge> VisibleAssignmentBadges(
+        ObserverSize viewport,
+        Graphics? graphics = null)
+    {
+        if (_appearancePresentationMode != ObserverAppearancePresentationMode.AssignmentBadges)
+            return [];
+        var states = _snapshot.AppearanceStates.ToDictionary(item => item.Id);
+        var result = new List<AssignmentBadge>();
+        foreach (var assignment in _snapshot.StateAssignments)
+        {
+            if (!states.TryGetValue(assignment.StateId, out var state) ||
+                !TryAssignmentTargetBounds(assignment.Target, viewport, out var targetBounds))
+                continue;
+            const float height = 22;
+            if (graphics is not null)
+                _assignmentBadgeDesiredWidths[state.Id] =
+                    graphics.MeasureString(_smallFont, state.Name).Width + 31;
+            var desiredWidth = _assignmentBadgeDesiredWidths.GetValueOrDefault(
+                state.Id,
+                31 + state.Name.Length * 5.5f);
+            var availableWidth = Math.Max(0, targetBounds.Width - 12);
+            var width = availableWidth >= 34
+                ? Math.Min(availableWidth, Math.Max(34, desiredWidth))
+                : 24;
+            result.Add(new AssignmentBadge(
+                assignment.StateId,
+                new RectangleF(
+                    targetBounds.Right - width - 6,
+                    targetBounds.Top + 6,
+                    width,
+                    height)));
+        }
+        return result;
+    }
+
+    private bool TryAssignmentTargetBounds(
+        HierarchyScope target,
+        ObserverSize viewport,
+        out RectangleF bounds)
+    {
+        bounds = default;
+        if (target.Kind == HierarchyScopeKind.Folder &&
+            _layout.Folders.TryGetValue(target.Id, out var folder) &&
+            FolderHasDrawableDescendant(folder.Folder.Id))
+        {
+            bounds = ScreenRect(PreviewBounds(folder.Bounds, folder.Folder.Id), viewport);
+            bounds.Height = (float)Math.Min(
+                bounds.Height,
+                Math.Max(22, ObserverPlacementPlanner.FolderHeaderHeight * _camera.Zoom));
+            return bounds.Width >= 30 && bounds.Height >= 18;
+        }
+        if (target.Kind == HierarchyScopeKind.Sheet &&
+            _layout.Sheets.TryGetValue(target.Id, out var sheet) &&
+            _presentation.TierForSheet(sheet.Sheet.PageViewId) != ObserverCanvasLodTier.Folder)
+        {
+            bounds = ScreenRect(PreviewBounds(sheet.Bounds, sheet.Sheet.PageViewId), viewport);
+            return bounds.Width >= 30 && bounds.Height >= 18;
+        }
+        if (target.Kind != HierarchyScopeKind.Detail) return false;
+        var owner = _layout.Sheets.Values.FirstOrDefault(card =>
+            card.Sheet.Details.Any(detail => detail.DetailViewportId == target.Id));
+        if (owner is null ||
+            _presentation.TierForSheet(owner.Sheet.PageViewId) != ObserverCanvasLodTier.Detail)
+            return false;
+        var detail = owner.Sheet.Details.First(item => item.DetailViewportId == target.Id);
+        bounds = ScreenRect(
+            DetailWorldRect(
+                PreviewBounds(owner.Bounds, owner.Sheet.PageViewId),
+                detail.NormalizedBounds),
+            viewport);
+        return bounds.Width >= 30 && bounds.Height >= 18;
+    }
+
+    private AssignmentBadge? HitAssignmentBadge(PointF screenPoint) =>
+        VisibleAssignmentBadges(ViewportSize())
+            .LastOrDefault(badge => badge.ScreenBounds.Contains(screenPoint));
 
     private void DrawNavigator(Graphics graphics, ObserverSize viewport)
     {
@@ -2032,6 +2257,17 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
 
         _hasCanvasPastePoint = true;
 
+        var assignmentBadge = HitAssignmentBadge(eventArgs.Location);
+        if (assignmentBadge is not null)
+        {
+            SelectKey(
+                new OverviewNodeKey(OverviewNodeKind.AppearanceState, assignmentBadge.StateId),
+                eventArgs.Modifiers);
+            _dragMode = DragMode.None;
+            eventArgs.Handled = true;
+            return;
+        }
+
         var folderSummary = HitFolderSummaryAtScreen(eventArgs.Location);
         if (folderSummary is not null)
         {
@@ -2052,10 +2288,15 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
         var appearanceState = _spatialIndex.HitAppearanceState(_pressWorld);
         if (appearanceState is not null)
         {
-            SelectKey(
-                new OverviewNodeKey(OverviewNodeKind.AppearanceState, appearanceState.State.Id),
-                eventArgs.Modifiers);
-            _dragMode = DragMode.None;
+            var stateKey = new OverviewNodeKey(
+                OverviewNodeKind.AppearanceState,
+                appearanceState.State.Id);
+            if (!_selection.Contains(stateKey) || IsAdditive(eventArgs.Modifiers))
+                SelectKey(stateKey, eventArgs.Modifiers);
+            _dragMode = _packingMode == ObserverPackingMode.NestedFolders &&
+                        _appearancePresentationMode != ObserverAppearancePresentationMode.AssignmentBadges
+                ? DragMode.AppearanceStates
+                : DragMode.None;
             eventArgs.Handled = true;
             return;
         }
@@ -2296,6 +2537,33 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
                     $"Move {selectedSheetIds.Length} observer layout{(selectedSheetIds.Length == 1 ? string.Empty : "s")}"));
             }
         }
+        else if (_dragMode == DragMode.AppearanceStates &&
+                 Distance(_pressScreen, Point(eventArgs.Location)) > 4)
+        {
+            var selectedStateIds = SelectedAppearanceStateIds();
+            var destination = HitFolderBody(releaseWorld);
+            if (destination is not null && selectedStateIds.Any(stateId =>
+                    _layout.AppearanceStates.TryGetValue(stateId, out var card) &&
+                    card.State.FolderId != destination.Folder.Id))
+            {
+                HierarchyMoveRequested?.Invoke(this, new ObserverHierarchyMoveRequestedEventArgs(
+                    destination.Folder.Id,
+                    [],
+                    [],
+                    selectedStateIds));
+            }
+            else
+            {
+                var state = new ObserverPlacementPlanner().MoveAppearanceStates(
+                    _snapshot,
+                    _layout,
+                    selectedStateIds,
+                    _dragWorldDelta);
+                BoardStateRequested?.Invoke(this, new ObserverBoardStateRequestedEventArgs(
+                    state,
+                    $"Move {selectedStateIds.Length} appearance state{(selectedStateIds.Length == 1 ? string.Empty : "s")}"));
+            }
+        }
         else if (_dragMode == DragMode.Folder && _dragFolderId is { } folderId &&
                  Distance(_pressScreen, Point(eventArgs.Location)) > 4)
         {
@@ -2344,6 +2612,15 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
             keys.AddRange(_spatialIndex.QueryAppearanceStates(lasso)
                 .Where(card => crossing || lasso.Contains(card.Bounds))
                 .Select(card => new OverviewNodeKey(OverviewNodeKind.AppearanceState, card.State.Id)));
+
+            var lassoScreenBounds = ScreenRect(lasso, ViewportSize());
+            keys.AddRange(VisibleAssignmentBadges(ViewportSize())
+                .Where(badge => crossing
+                    ? badge.ScreenBounds.Intersects(lassoScreenBounds)
+                    : lassoScreenBounds.Contains(badge.ScreenBounds))
+                .Select(badge => new OverviewNodeKey(
+                    OverviewNodeKind.AppearanceState,
+                    badge.StateId)));
 
             var lassoScreen = _camera.WorldToScreen(lasso, ViewportSize());
             keys.AddRange(_presentation.FolderSummaries
@@ -2396,6 +2673,16 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
         }
 
         var world = _camera.ScreenToWorld(Point(eventArgs.Location), ViewportSize());
+        var assignmentBadge = HitAssignmentBadge(eventArgs.Location);
+        if (assignmentBadge is not null)
+        {
+            SelectKey(
+                new OverviewNodeKey(OverviewNodeKind.AppearanceState, assignmentBadge.StateId),
+                eventArgs.Modifiers);
+            Application.Instance.AsyncInvoke(FocusSelection);
+            eventArgs.Handled = true;
+            return;
+        }
         var appearanceState = _spatialIndex.HitAppearanceState(world);
         if (appearanceState is not null)
         {
@@ -2695,6 +2982,13 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
     private void SelectAt(ObserverPoint world, Keys modifiers, bool preserveExistingIfHit)
     {
         var screen = _camera.WorldToScreen(world, ViewportSize());
+        var assignmentBadge = HitAssignmentBadge(new PointF((float)screen.X, (float)screen.Y));
+        if (assignmentBadge is not null)
+        {
+            var badgeKey = new OverviewNodeKey(OverviewNodeKind.AppearanceState, assignmentBadge.StateId);
+            if (!preserveExistingIfHit || !_selection.Contains(badgeKey)) SelectKey(badgeKey, modifiers);
+            return;
+        }
         var summary = HitFolderSummaryAtScreen(new PointF((float)screen.X, (float)screen.Y));
         if (summary is not null)
         {
@@ -2867,6 +3161,13 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
             else if (key.Kind == OverviewNodeKind.AppearanceState &&
                      _layout.AppearanceStates.TryGetValue(key.Id, out var stateCard))
                 bounds = ObserverRect.Union(bounds, stateCard.Bounds);
+            else if (key.Kind == OverviewNodeKind.AppearanceState &&
+                     _appearancePresentationMode == ObserverAppearancePresentationMode.AssignmentBadges)
+            {
+                foreach (var assignment in _snapshot.StateAssignments.Where(item => item.StateId == key.Id))
+                    if (TryAssignmentTargetWorldBounds(assignment.Target, out var targetBounds))
+                        bounds = ObserverRect.Union(bounds, targetBounds);
+            }
             else if (key.Kind == OverviewNodeKind.Detail)
             {
                 var owner = _layout.Sheets.Values.FirstOrDefault(candidate =>
@@ -2901,6 +3202,14 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
         if (selectedSheets.Length > 0)
             state = new ObserverPlacementPlanner().MoveSheets(
                 _snapshot with { CanvasState = state }, _layout, selectedSheets, delta);
+        var selectedStates = SelectedAppearanceStateIds()
+            .Where(stateId => _layout.AppearanceStates.TryGetValue(stateId, out var card) &&
+                              !selectedFolders.Any(folderId =>
+                                  IsFolderDescendant(card.State.FolderId, folderId)))
+            .ToArray();
+        if (selectedStates.Length > 0)
+            state = new ObserverPlacementPlanner().MoveAppearanceStates(
+                _snapshot with { CanvasState = state }, _layout, selectedStates, delta);
         if (!ObserverCanvasStateComparer.ContentEquals(state, _snapshot.CanvasState))
             BoardStateRequested?.Invoke(this, new ObserverBoardStateRequestedEventArgs(
                 state,
@@ -2914,10 +3223,20 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
             .Distinct()
             .ToArray();
 
+    private Guid[] SelectedAppearanceStateIds()
+        => _selection
+            .Where(key => key.Kind == OverviewNodeKind.AppearanceState)
+            .Select(key => key.Id)
+            .Distinct()
+            .ToArray();
+
     private ObserverRect PreviewBounds(ObserverRect bounds, Guid id)
     {
         if (_dragMode == DragMode.Sheets &&
             _selection.Contains(new OverviewNodeKey(OverviewNodeKind.Sheet, id)))
+            return bounds.Translate(_dragWorldDelta);
+        if (_dragMode == DragMode.AppearanceStates &&
+            _selection.Contains(new OverviewNodeKey(OverviewNodeKind.AppearanceState, id)))
             return bounds.Translate(_dragWorldDelta);
         if (_dragMode == DragMode.Folder && _dragFolderId is { } draggedFolderId)
         {
@@ -2926,8 +3245,39 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
             if (_layout.Sheets.TryGetValue(id, out var card) &&
                 IsFolderDescendant(card.Sheet.FolderId, draggedFolderId))
                 return bounds.Translate(_dragWorldDelta);
+            if (_layout.AppearanceStates.TryGetValue(id, out var stateCard) &&
+                IsFolderDescendant(stateCard.State.FolderId, draggedFolderId))
+                return bounds.Translate(_dragWorldDelta);
         }
         return bounds;
+    }
+
+    private bool TryAssignmentTargetWorldBounds(HierarchyScope target, out ObserverRect bounds)
+    {
+        bounds = new ObserverRect();
+        if (target.Kind == HierarchyScopeKind.Folder &&
+            _layout.Folders.TryGetValue(target.Id, out var folder) &&
+            FolderHasDrawableDescendant(folder.Folder.Id))
+        {
+            bounds = folder.Bounds;
+            return true;
+        }
+        if (target.Kind == HierarchyScopeKind.Sheet &&
+            _layout.Sheets.TryGetValue(target.Id, out var sheet) &&
+            _presentation.TierForSheet(sheet.Sheet.PageViewId) != ObserverCanvasLodTier.Folder)
+        {
+            bounds = sheet.Bounds;
+            return true;
+        }
+        if (target.Kind != HierarchyScopeKind.Detail) return false;
+        var owner = _layout.Sheets.Values.FirstOrDefault(card =>
+            card.Sheet.Details.Any(detail => detail.DetailViewportId == target.Id));
+        if (owner is null ||
+            _presentation.TierForSheet(owner.Sheet.PageViewId) != ObserverCanvasLodTier.Detail)
+            return false;
+        var detail = owner.Sheet.Details.First(item => item.DetailViewportId == target.Id);
+        bounds = DetailWorldRect(owner.Bounds, detail.NormalizedBounds);
+        return true;
     }
 
     private bool IsFolderDescendant(Guid folderId, Guid ancestorId)
@@ -3093,6 +3443,28 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
             }
         }
 
+        if (_appearancePresentationMode == ObserverAppearancePresentationMode.AssignmentBadges)
+        {
+            foreach (var assignment in _snapshot.StateAssignments)
+            {
+                Guid? current = assignment.Target.Kind switch
+                {
+                    HierarchyScopeKind.Folder => assignment.Target.Id,
+                    HierarchyScopeKind.Sheet => _snapshot.Sheets
+                        .FirstOrDefault(sheet => sheet.PageViewId == assignment.Target.Id)?.FolderId,
+                    HierarchyScopeKind.Detail => _snapshot.Sheets
+                        .FirstOrDefault(sheet => sheet.Details.Any(detail =>
+                            detail.DetailViewportId == assignment.Target.Id))?.FolderId,
+                    _ => null,
+                };
+                while (current is { } folderId && folders.TryGetValue(folderId, out var folder))
+                {
+                    if (!result.Add(folderId)) break;
+                    current = folder.ParentId;
+                }
+            }
+        }
+
         return result;
     }
 
@@ -3166,10 +3538,15 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
         Sheets,
         CompactSheet,
         Folder,
+        AppearanceStates,
         Detail,
         Lasso,
         NamedView,
     }
+
+    private sealed record AssignmentBadge(Guid StateId, RectangleF ScreenBounds);
+
+    private readonly record struct ConnectionPort(PointF Point, PointF Normal);
 }
 
 internal sealed class ObserverHierarchyPlacementRequestedEventArgs : EventArgs

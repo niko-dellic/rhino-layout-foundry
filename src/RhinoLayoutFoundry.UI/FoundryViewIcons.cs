@@ -144,6 +144,34 @@ internal static class FoundryViewIcons
         graphics.DrawEllipse(new Pen(color, Emphasis), 9.75f, 10.25f, 4, 4);
     });
 
+    internal static Icon AppearanceCards() => NewIcon(graphics =>
+    {
+        var color = FoundryTheme.PrimaryText;
+        var pen = new Pen(color, Emphasis);
+        graphics.DrawRectangle(pen, 2, 3, 12, 10);
+        graphics.DrawLine(new Pen(color, Hairline), 5, 6, 11, 6);
+        graphics.DrawLine(new Pen(color, Hairline), 5, 9, 9, 9);
+    });
+
+    internal static Icon AppearanceConnections() => NewIcon(graphics =>
+    {
+        var color = FoundryTheme.PrimaryText;
+        var pen = new Pen(color, Emphasis);
+        graphics.DrawRectangle(pen, 1.5f, 2.5f, 5, 4);
+        graphics.DrawRectangle(pen, 9.5f, 9.5f, 5, 4);
+        graphics.DrawLine(pen, 6.5f, 4.5f, 11.5f, 4.5f);
+        graphics.DrawLine(pen, 11.5f, 4.5f, 11.5f, 9.5f);
+    });
+
+    internal static Icon AppearanceBadges() => NewIcon(graphics =>
+    {
+        var color = FoundryTheme.PrimaryText;
+        var pen = new Pen(color, Emphasis);
+        graphics.DrawRectangle(pen, 1.5f, 3, 13, 10);
+        graphics.DrawRectangle(new Pen(color, Hairline), 8, 5.5f, 5, 3.5f);
+        graphics.FillEllipse(color, 3.5f, 6, 2, 2);
+    });
+
     internal static Icon SceneCursor() => NewIcon(graphics =>
     {
         var color = FoundryTheme.PrimaryText;
@@ -413,6 +441,13 @@ internal static class FoundryViewIcons
         var pen = new Pen(FoundryTheme.PrimaryText, Emphasis);
         graphics.DrawLine(pen, 4, 6, 8, 10);
         graphics.DrawLine(pen, 8, 10, 12, 6);
+    });
+
+    internal static Icon ChevronRight() => NewIcon(graphics =>
+    {
+        var pen = new Pen(FoundryTheme.PrimaryText, Emphasis);
+        graphics.DrawLine(pen, 6, 4, 10, 8);
+        graphics.DrawLine(pen, 10, 8, 6, 12);
     });
 
     private static Icon ZoomGlyph(bool includePlus) => NewIcon(graphics =>

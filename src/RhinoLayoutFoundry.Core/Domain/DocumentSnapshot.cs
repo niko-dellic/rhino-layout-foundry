@@ -25,7 +25,8 @@ public sealed record DocumentSnapshot(
     IReadOnlyList<CapabilityTemplateRegistration>? CapabilityTemplates = null,
     IReadOnlyList<CapabilityTemplateLink>? CapabilityLinks = null,
     IReadOnlyList<AppearanceStateRecord>? AppearanceStateResources = null,
-    IReadOnlyList<AppearanceStateAssignment>? AppearanceStateAssignments = null)
+    IReadOnlyList<AppearanceStateAssignment>? AppearanceStateAssignments = null,
+    Guid? DedicatedDetailLayerId = null)
 {
     public IReadOnlyList<SheetTemplateRecipe> Templates => SheetTemplates ?? [];
     public IReadOnlyDictionary<string, string> Metadata =>
@@ -82,7 +83,8 @@ public sealed record DetailSnapshot(
     Guid DetailViewportId,
     string Name,
     Guid DisplayModeId,
-    string DisplayModeName);
+    string DisplayModeName,
+    Guid? LayerId = null);
 
 public sealed record TitleBlockInstanceSnapshot(
     Guid InstanceObjectId,

@@ -69,7 +69,8 @@ internal sealed class RhinoDocumentSnapshotProvider : IDocumentSnapshotProvider
                             ? detail.Viewport.Name
                             : detail.DescriptiveTitle,
                         detail.Viewport.DisplayMode.Id,
-                        detail.Viewport.DisplayMode.LocalName))
+                        detail.Viewport.DisplayMode.LocalName,
+                        document.Layers[detail.Attributes.LayerIndex]?.Id))
                     .ToArray();
                 var titleBlock = record?.TitleBlock;
                 var titleBlockName = titleBlock is null
@@ -274,7 +275,8 @@ internal sealed class RhinoDocumentSnapshotProvider : IDocumentSnapshotProvider
             state.TemplateRegistrations,
             state.TemplateLinks,
             state.AppearanceStates,
-            state.StateAssignments);
+            state.StateAssignments,
+            state.DedicatedDetailLayerId);
     }
 
     private static SheetTemplateRecipe RefreshDocumentBackedTemplate(

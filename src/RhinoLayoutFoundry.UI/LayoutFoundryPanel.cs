@@ -57,6 +57,7 @@ public sealed partial class LayoutFoundryPanel : Panel
     private readonly Control _managementView;
     private readonly ThumbnailFoundryPanel _thumbnailView;
     private readonly Control _thumbnailDensityControl;
+    private readonly Control _canvasAppearanceControl;
     private readonly ObserverFoundryPanel _observerView;
     private readonly Panel _viewHost;
     private readonly Control _panelShell;
@@ -283,6 +284,8 @@ public sealed partial class LayoutFoundryPanel : Panel
         _thumbnailDensityControl = _thumbnailView.DensityControl;
         _thumbnailDensityControl.Visible = false;
         _observerView = new ObserverFoundryPanel();
+        _canvasAppearanceControl = _observerView.AppearancePresentationControl;
+        _canvasAppearanceControl.Visible = false;
         _observerView.ExitFullscreenRequested += (_, _) => ExitFullscreen();
         _thumbnailView.DeleteSelectionRequested += OnDeleteSelectionRequested;
         _observerView.DeleteSelectionRequested += OnDeleteSelectionRequested;
@@ -863,6 +866,7 @@ public sealed partial class LayoutFoundryPanel : Panel
         _thumbnailViewButton.Checked = mode == FoundryPanelViewMode.Thumbnail;
         _canvasViewButton.Checked = mode == FoundryPanelViewMode.Canvas;
         _thumbnailDensityControl.Visible = mode == FoundryPanelViewMode.Thumbnail;
+        _canvasAppearanceControl.Visible = mode == FoundryPanelViewMode.Canvas;
         _fullscreenButton.Checked = _fullscreenWindow is not null;
         _fullscreenButton.ToolTip = _fullscreenWindow is null
             ? $"Expand {ViewModeLabel(mode)} to a maximized workspace"
@@ -1175,6 +1179,7 @@ public sealed partial class LayoutFoundryPanel : Panel
                 BackgroundColor = FoundryTheme.CanvasBorder,
             },
             _viewModeButtonGroup,
+            _canvasAppearanceControl,
             _thumbnailDensityControl,
             new StackLayoutItem(_statusLabel, expand: true),
             _summaryLabel,

@@ -28,12 +28,13 @@ public sealed class BatchUpdateSheetsPlannerTests
         var snapshot = EnrichedSnapshot();
         var request = new BatchUpdateSheetsRequest(42, 1,
             [TestSnapshots.SheetOneId, TestSnapshots.SheetTwoId],
-            "L-{index:00}", 3, 1, 11, 17, "Inches", TestSnapshots.DisplayModeTwoId);
+            "L-{index:00}", 3, 1, 11, 17, "Inches", TestSnapshots.DisplayModeTwoId,
+            IndexMode: RhinoLayoutFoundry.Core.Naming.NamingIndexMode.GlobalPosition);
         var plan = new BatchUpdateSheetsPlanner().Plan(request, snapshot);
 
         Assert.True(plan.CanApply);
         var change = (BatchUpdateSheetsChange)plan.Changes.Single();
-        Assert.Equal("L-03", change.NewNames[TestSnapshots.SheetOneId]);
+        Assert.Equal("L-01", change.NewNames[TestSnapshots.SheetOneId]);
         Assert.Equal(11d, change.PaperWidth);
         Assert.Equal(TestSnapshots.DisplayModeTwoId, change.DetailDisplayModeId);
     }
@@ -117,6 +118,82 @@ public sealed class BatchUpdateSheetsPlannerTests
         Assert.True(plan.CanApply);
         var change = Assert.IsType<BatchUpdateSheetsChange>(Assert.Single(plan.Changes));
         Assert.Equal("P02", change.AppendRevision!.Code);
+    }
+
+    [Fact]
+    public void DestinationAndAppearanceStateAreStagedTogether()
+    {
+        var stateId = Guid.Parse("60000000-0000-0000-0000-000000000010");
+        var snapshot = EnrichedSnapshot() with
+        {
+            AppearanceStateResources =
+            [
+                new AppearanceStateRecord(stateId, TestSnapshots.RootFolderId, 0, "Print", [], []),
+            ],
+        };
+        var plan = new BatchUpdateSheetsPlanner().Plan(new BatchUpdateSheetsRequest(
+            42, 1, [TestSnapshots.SheetOneId], null, 1, 1,
+            null, null, null, null,
+            DestinationFolderId: TestSnapshots.OtherFolderId,
+            ChangeAppearanceState: true,
+            AppearanceStateId: stateId), snapshot);
+
+        Assert.True(plan.CanApply);
+        var change = Assert.IsType<BatchUpdateSheetsChange>(Assert.Single(plan.Changes));
+        Assert.Equal(TestSnapshots.OtherFolderId, change.DestinationFolderId);
+        Assert.True(change.ChangeAppearanceState);
+        Assert.Equal(stateId, change.AppearanceStateId);
+    }
+
+    [Fact]
+    public void MissingDestinationAndAppearanceStateBlockApply()
+    {
+        var plan = new BatchUpdateSheetsPlanner().Plan(new BatchUpdateSheetsRequest(
+            42, 1, [TestSnapshots.SheetOneId], null, 1, 1,
+            null, null, null, null,
+            DestinationFolderId: Guid.NewGuid(),
+            ChangeAppearanceState: true,
+            AppearanceStateId: Guid.NewGuid()), EnrichedSnapshot());
+
+        Assert.False(plan.CanApply);
+        Assert.Contains(plan.Diagnostics, item => item.Code == "batch.destination_missing");
+        Assert.Contains(plan.Diagnostics, item => item.Code == "batch.appearance_state_missing");
+    }
+
+    [Fact]
+    public void DetailLayerCanBeChangedByStableLayerIdentity()
+    {
+        var layerId = Guid.Parse("60000000-0000-0000-0000-000000000020");
+        var snapshot = EnrichedSnapshot() with
+        {
+            LayerNames = new Dictionary<Guid, string> { [layerId] = "Documentation::Details" },
+        };
+        var plan = new BatchUpdateSheetsPlanner().Plan(new BatchUpdateSheetsRequest(
+            42, 1, [TestSnapshots.SheetOneId], null, 1, 1,
+            null, null, null, null,
+            ChangeDetailLayer: true,
+            UseDedicatedDetailLayer: false,
+            DetailLayerId: layerId), snapshot);
+
+        Assert.True(plan.CanApply);
+        var change = Assert.IsType<BatchUpdateSheetsChange>(Assert.Single(plan.Changes));
+        Assert.True(change.ChangeDetailLayer);
+        Assert.False(change.UseDedicatedDetailLayer);
+        Assert.Equal(layerId, change.DetailLayerId);
+    }
+
+    [Fact]
+    public void MissingDetailLayerBlocksApply()
+    {
+        var plan = new BatchUpdateSheetsPlanner().Plan(new BatchUpdateSheetsRequest(
+            42, 1, [TestSnapshots.SheetOneId], null, 1, 1,
+            null, null, null, null,
+            ChangeDetailLayer: true,
+            UseDedicatedDetailLayer: false,
+            DetailLayerId: Guid.NewGuid()), EnrichedSnapshot());
+
+        Assert.False(plan.CanApply);
+        Assert.Contains(plan.Diagnostics, item => item.Code == "batch.detail_layer_missing");
     }
 
     private static DocumentSnapshot EnrichedSnapshot()

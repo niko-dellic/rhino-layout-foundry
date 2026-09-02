@@ -44,6 +44,25 @@ public sealed class ObserverCanvasStatePlannerTests
         Assert.Contains(plan.Diagnostics, item => item.Code == "observer.invalid_placement");
     }
 
+    [Fact]
+    public void NonFiniteAppearanceStatePlacementIsRejected()
+    {
+        var snapshot = Snapshot();
+        var state = snapshot.Canvas with
+        {
+            AppearanceStatePlacements = new Dictionary<Guid, ObserverPointRecord>
+            {
+                [Guid.NewGuid()] = new(0, double.PositiveInfinity),
+            },
+        };
+
+        var plan = new SetObserverCanvasStatePlanner().Plan(
+            new SetObserverCanvasStateRequest(10, 5, state), snapshot);
+
+        Assert.False(plan.CanApply);
+        Assert.Contains(plan.Diagnostics, item => item.Code == "observer.invalid_placement");
+    }
+
     private static DocumentSnapshot Snapshot()
     {
         var root = Guid.NewGuid();

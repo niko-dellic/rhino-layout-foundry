@@ -19,7 +19,14 @@ public sealed record BatchUpdateSheetsRequest(
     Guid? TitleBlockSourceInstanceObjectId = null,
     IReadOnlyList<SheetRevisionRecord>? ReplaceRevisionSchedule = null,
     SheetRevisionRecord? AppendRevision = null,
-    BuiltInTitleBlockKind? BuiltInTitleBlock = null);
+    BuiltInTitleBlockKind? BuiltInTitleBlock = null,
+    NamingIndexMode IndexMode = NamingIndexMode.PreserveCurrent,
+    Guid? DestinationFolderId = null,
+    bool ChangeAppearanceState = false,
+    Guid? AppearanceStateId = null,
+    bool ChangeDetailLayer = false,
+    bool UseDedicatedDetailLayer = true,
+    Guid? DetailLayerId = null);
 
 public sealed class BatchUpdateSheetsPlanner : IOperationPlanner<BatchUpdateSheetsRequest>
 {
@@ -44,6 +51,14 @@ public sealed class BatchUpdateSheetsPlanner : IOperationPlanner<BatchUpdateShee
         foreach (var id in ids.Where(id => !snapshot.Sheets.ContainsKey(id)))
             diagnostics.Add(new Diagnostic("batch.sheet_missing", DiagnosticSeverity.Error,
                 "An included layout no longer exists.", id));
+        if (request.DestinationFolderId is { } destinationId && !snapshot.Folders.ContainsKey(destinationId))
+            diagnostics.Add(Error("batch.destination_missing", "The destination folder no longer exists."));
+        if (request.ChangeAppearanceState && request.AppearanceStateId is { } appearanceStateId &&
+            snapshot.AppearanceStates.All(state => state.Id != appearanceStateId))
+            diagnostics.Add(Error("batch.appearance_state_missing", "The selected appearance state is unavailable."));
+        if (request.ChangeDetailLayer && !request.UseDedicatedDetailLayer &&
+            request.DetailLayerId is { } detailLayerId && !snapshot.Layers.ContainsKey(detailLayerId))
+            diagnostics.Add(Error("batch.detail_layer_missing", "The selected detail layer is unavailable."));
 
         var changesPaper = request.PaperWidth is not null || request.PaperHeight is not null ||
                            !string.IsNullOrWhiteSpace(request.PaperUnitSystem);
@@ -87,49 +102,84 @@ public sealed class BatchUpdateSheetsPlanner : IOperationPlanner<BatchUpdateShee
         if (request.AppendRevision is { } revision && RevisionIsEmpty(revision))
             diagnostics.Add(Error("batch.revision_empty", "Enter at least one revision value."));
 
+        var finalPlacement = FinalPlacement(snapshot, ids, request.DestinationFolderId);
         var pattern = request.NamingPattern?.Trim();
         var newNames = new Dictionary<Guid, string>();
         var namingBindings = new Dictionary<Guid, SheetNamingBinding>();
+        var namingBindingRemovals = new HashSet<Guid>();
         if (!string.IsNullOrWhiteSpace(pattern))
         {
-            if (request.Step == 0)
-                diagnostics.Add(Error("batch.step_zero", "The naming step cannot be zero."));
             var items = ids.Where(snapshot.Sheets.ContainsKey).Select(id =>
             {
                 var sheet = snapshot.Sheets[id];
-                var folder = snapshot.Folders.GetValueOrDefault(sheet.FolderId)?.Name ?? string.Empty;
-                var tokens = new Dictionary<string, string>(snapshot.Metadata, StringComparer.OrdinalIgnoreCase)
-                {
-                    ["folder"] = sheet.FolderId == snapshot.RootFolderId ? string.Empty : folder,
-                    ["view"] = sheet.Details.FirstOrDefault()?.Name ?? string.Empty,
-                    ["tag"] = sheet.Tags.FirstOrDefault() ?? string.Empty,
-                };
-                foreach (var pair in sheet.Metadata) tokens[pair.Key] = pair.Value;
-                return new NamingItem(id, sheet.Name, tokens);
+                return new NamingItem(id, sheet.Name,
+                    BatchCreateSheetsPlanner.SheetTokens(snapshot, sheet, finalPlacement[id].FolderId));
             }).ToArray();
-            var preview = NamingEngine.Preview(new NamingRequest(pattern, items, request.Start, request.Step));
+            var candidates = snapshot.Sheets.Values.Select(sheet =>
+            {
+                var placement = finalPlacement.GetValueOrDefault(
+                    sheet.PageViewId, (sheet.FolderId, sheet.Order));
+                return new NamingIndexCandidate(
+                    new NamingItem(sheet.PageViewId, sheet.Name,
+                        BatchCreateSheetsPlanner.SheetTokens(snapshot, sheet, placement.FolderId)),
+                    placement.FolderId,
+                    placement.Order,
+                    ids.Contains(sheet.PageViewId),
+                    sheet.NamingBinding?.Index);
+            }).ToArray();
+            var indices = NamingIndexing.Resolve(
+                pattern,
+                1,
+                1,
+                request.IndexMode,
+                snapshot.RootFolderId,
+                snapshot.Folders,
+                candidates);
+            var included = ids.ToHashSet();
+            var availableNaming = NamingIndexing.PreviewAvailable(
+                pattern,
+                items,
+                indices,
+                snapshot.Sheets.Values
+                    .Where(sheet => !included.Contains(sheet.PageViewId))
+                    .Select(sheet => sheet.Name));
+            var preview = availableNaming.Preview;
+            indices = availableNaming.Indices;
             diagnostics.AddRange(preview.Diagnostics);
             foreach (var entry in preview.Entries)
             {
                 newNames[entry.SheetId] = entry.ProposedName;
-                var sheetIndex = Array.FindIndex(items, item => item.SheetId == entry.SheetId);
                 var sheet = snapshot.Sheets[entry.SheetId];
                 namingBindings[entry.SheetId] = LinkedSheetNaming.Attach(
                     pattern,
-                    request.Start + sheetIndex * request.Step,
+                    indices[entry.SheetId],
                     entry.ProposedName,
                     sheet);
             }
-            var included = ids.ToHashSet();
-            var existing = snapshot.Sheets.Values.Where(sheet => !included.Contains(sheet.PageViewId))
-                .Select(sheet => sheet.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            foreach (var entry in preview.Entries.Where(entry => existing.Contains(entry.ProposedName)))
-                diagnostics.Add(new Diagnostic("batch.name_exists", DiagnosticSeverity.Error,
-                    $"A layout named '{entry.ProposedName}' already exists.", entry.SheetId));
+        }
+        else if (request.DestinationFolderId is { } linkedDestination)
+        {
+            var folderOverrides = ids.Where(snapshot.Sheets.ContainsKey)
+                .ToDictionary(id => id, _ => linkedDestination);
+            var linked = LinkedSheetNaming.Preview(
+                snapshot,
+                folderOverrides,
+                affectedSheetIds: ids.ToHashSet());
+            diagnostics.AddRange(linked.Diagnostics);
+            if (linked.Change is { } linkedChange)
+            {
+                foreach (var pair in linkedChange.NewNames) newNames[pair.Key] = pair.Value;
+                foreach (var pair in linkedChange.NewBindings)
+                {
+                    if (pair.Value is null) namingBindingRemovals.Add(pair.Key);
+                    else namingBindings[pair.Key] = pair.Value;
+                }
+            }
         }
 
         if (string.IsNullOrWhiteSpace(pattern) && !changesPaper && request.DetailDisplayModeId is null &&
-            !request.ChangeTitleBlock && request.ReplaceRevisionSchedule is null && request.AppendRevision is null)
+            !request.ChangeTitleBlock && request.ReplaceRevisionSchedule is null && request.AppendRevision is null &&
+            request.DestinationFolderId is null && !request.ChangeAppearanceState && !request.ChangeDetailLayer)
             diagnostics.Add(Error("batch.no_changes", "Choose at least one property to change."));
 
         IReadOnlyList<OperationChange> changes = diagnostics.Any(item => item.Severity == DiagnosticSeverity.Error)
@@ -146,7 +196,14 @@ public sealed class BatchUpdateSheetsPlanner : IOperationPlanner<BatchUpdateShee
                 request.ReplaceRevisionSchedule,
                 request.AppendRevision,
                 request.BuiltInTitleBlock,
-                namingBindings.Count == 0 ? null : namingBindings)];
+                namingBindings.Count == 0 ? null : namingBindings,
+                namingBindingRemovals.Count == 0 ? null : namingBindingRemovals,
+                request.DestinationFolderId,
+                request.ChangeAppearanceState,
+                request.AppearanceStateId,
+                request.ChangeDetailLayer,
+                request.UseDedicatedDetailLayer,
+                request.DetailLayerId)];
         if (changes.Count > 0)
             diagnostics.Add(new Diagnostic("batch.undo_unavailable", DiagnosticSeverity.Warning,
                 "Rhino does not expose native Undo for these layout properties. Foundry restores every before-value if Apply fails."));
@@ -160,4 +217,24 @@ public sealed class BatchUpdateSheetsPlanner : IOperationPlanner<BatchUpdateShee
     private static bool RevisionIsEmpty(SheetRevisionRecord revision) =>
         new[] { revision.Code, revision.Date, revision.Description, revision.IssuedBy, revision.CheckedBy }
             .All(string.IsNullOrWhiteSpace);
+
+    private static IReadOnlyDictionary<Guid, (Guid FolderId, int Order)> FinalPlacement(
+        DocumentSnapshot snapshot,
+        IReadOnlyList<Guid> targetIds,
+        Guid? destinationFolderId)
+    {
+        var result = snapshot.Sheets.Values.ToDictionary(
+            sheet => sheet.PageViewId,
+            sheet => (sheet.FolderId, sheet.Order));
+        if (destinationFolderId is not { } destination) return result;
+        var nextOrder = snapshot.Sheets.Values.Where(sheet => sheet.FolderId == destination)
+            .Select(sheet => sheet.Order).DefaultIfEmpty(-1).Max() + 1;
+        foreach (var id in targetIds.Where(snapshot.Sheets.ContainsKey))
+        {
+            var sheet = snapshot.Sheets[id];
+            if (sheet.FolderId == destination) continue;
+            result[id] = (destination, nextOrder++);
+        }
+        return result;
+    }
 }

@@ -72,10 +72,19 @@ internal sealed class RhinoNamedViewThumbnailProvider : INamedViewThumbnailProvi
         if (view is null)
             return Failure(request, "No standard Rhino viewport is available for preview capture.");
         using var previous = new ViewInfo(view.ActiveViewport);
+        var previousDisplayModeId = view.ActiveViewport.DisplayMode.Id;
+        DisplayModeDescription? requestedDisplayMode = null;
         try
         {
             if (!document.NamedViews.RestoreWithAspectRatio(namedViewIndex, view.ActiveViewport))
                 return Failure(request, "Rhino could not restore the named view for preview capture.");
+            if (request.Key.DisplayModeId is { } displayModeId)
+            {
+                requestedDisplayMode = DisplayModeDescription.GetDisplayMode(displayModeId);
+                if (requestedDisplayMode is null)
+                    return Failure(request, "The requested display mode is unavailable.");
+                view.ActiveViewport.DisplayMode = requestedDisplayMode;
+            }
 
             var capture = new ViewCapture
             {
@@ -98,6 +107,10 @@ internal sealed class RhinoNamedViewThumbnailProvider : INamedViewThumbnailProvi
         finally
         {
             view.ActiveViewport.SetViewProjection(previous.Viewport, false);
+            using var previousDisplayMode = DisplayModeDescription.GetDisplayMode(previousDisplayModeId);
+            if (previousDisplayMode is not null)
+                view.ActiveViewport.DisplayMode = previousDisplayMode;
+            requestedDisplayMode?.Dispose();
         }
     }
 

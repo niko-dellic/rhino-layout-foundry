@@ -110,6 +110,79 @@ public sealed class ObserverBoardLayoutTests
     }
 
     [Fact]
+    public void AppearanceStateCardsCanBeMovedAndPersistManualPlacement()
+    {
+        var snapshot = Snapshot();
+        var folderId = snapshot.Folders.Single(folder => folder.Name == "Plans").Id;
+        var firstState = new AppearanceStateRecord(Guid.NewGuid(), folderId, 0, "Presentation", [], []);
+        var secondState = new AppearanceStateRecord(Guid.NewGuid(), folderId, 1, "Diagram", [], []);
+        snapshot = snapshot with { AppearanceStateResources = [firstState, secondState] };
+        var planner = new ObserverPlacementPlanner();
+        var before = planner.Arrange(snapshot);
+
+        var canvasState = planner.MoveAppearanceStates(
+            snapshot,
+            before,
+            [firstState.Id, secondState.Id],
+            new ObserverPoint(75, -20));
+        var after = planner.Arrange(snapshot with { CanvasState = canvasState });
+
+        Assert.Equal(2, canvasState.StatePlacements.Count);
+        foreach (var stateId in new[] { firstState.Id, secondState.Id })
+        {
+            Assert.True(after.AppearanceStates[stateId].HasManualPlacement);
+            Assert.Equal(before.AppearanceStates[stateId].Bounds.X + 75,
+                after.AppearanceStates[stateId].Bounds.X);
+            Assert.Equal(before.AppearanceStates[stateId].Bounds.Y - 20,
+                after.AppearanceStates[stateId].Bounds.Y);
+        }
+    }
+
+    [Fact]
+    public void MovingParentFolderMovesAppearanceStateCards()
+    {
+        var snapshot = NestedSnapshot();
+        var folderId = snapshot.Folders.Single(folder => folder.Name == "Details").Id;
+        var appearanceState = new AppearanceStateRecord(
+            Guid.NewGuid(), folderId, 0, "Presentation", [], []);
+        snapshot = snapshot with { AppearanceStateResources = [appearanceState] };
+        var planner = new ObserverPlacementPlanner();
+        var before = planner.Arrange(snapshot);
+
+        var state = planner.MoveFolder(snapshot, snapshot.RootFolderId, new ObserverPoint(80, 35));
+        var after = planner.Arrange(snapshot with { CanvasState = state });
+
+        Assert.Equal(before.AppearanceStates[appearanceState.Id].Bounds.X + 80,
+            after.AppearanceStates[appearanceState.Id].Bounds.X);
+        Assert.Equal(before.AppearanceStates[appearanceState.Id].Bounds.Y + 35,
+            after.AppearanceStates[appearanceState.Id].Bounds.Y);
+    }
+
+    [Fact]
+    public void AssignmentBadgeModeDoesNotCreateOrReserveAppearanceStateCards()
+    {
+        var snapshot = Snapshot();
+        var folderId = snapshot.Folders.Single(folder => folder.Name == "Plans").Id;
+        var appearanceState = new AppearanceStateRecord(
+            Guid.NewGuid(), folderId, 0, "Presentation", [], []);
+        snapshot = snapshot with { AppearanceStateResources = [appearanceState] };
+        var planner = new ObserverPlacementPlanner();
+
+        var cards = planner.Arrange(
+            snapshot,
+            ObserverPackingMode.NestedFolders,
+            ObserverAppearancePresentationMode.Cards);
+        var badges = planner.Arrange(
+            snapshot,
+            ObserverPackingMode.NestedFolders,
+            ObserverAppearancePresentationMode.AssignmentBadges);
+
+        Assert.Single(cards.AppearanceStates);
+        Assert.Empty(badges.AppearanceStates);
+        Assert.True(badges.Folders[folderId].Bounds.Width < cards.Folders[folderId].Bounds.Width);
+    }
+
+    [Fact]
     public void SpatialIndexHitsAndQueriesIndividualDetailsInsideASheet()
     {
         var snapshot = Snapshot();
@@ -216,6 +289,9 @@ public sealed class ObserverBoardLayoutTests
         var snapshot = NestedSnapshot();
         var nestedFolder = snapshot.Folders.Single(folder => folder.ParentId != snapshot.RootFolderId && folder.ParentId is not null);
         var nestedSheet = snapshot.Sheets.Single(sheet => sheet.FolderId == nestedFolder.Id);
+        var appearanceState = new AppearanceStateRecord(
+            Guid.NewGuid(), nestedFolder.Id, 0, "Presentation", [], []);
+        snapshot = snapshot with { AppearanceStateResources = [appearanceState] };
         var state = snapshot.CanvasState with
         {
             FolderOrigins = new Dictionary<Guid, ObserverPointRecord>
@@ -226,6 +302,10 @@ public sealed class ObserverBoardLayoutTests
             {
                 [nestedSheet.PageViewId] = new(30, 40),
             },
+            AppearanceStatePlacements = new Dictionary<Guid, ObserverPointRecord>
+            {
+                [appearanceState.Id] = new(50, 60),
+            },
         };
         snapshot = snapshot with { CanvasState = state };
         var parent = snapshot.Folders.Single(folder => folder.Id == nestedFolder.ParentId);
@@ -234,6 +314,7 @@ public sealed class ObserverBoardLayoutTests
 
         Assert.False(tidy.FolderOrigins.ContainsKey(nestedFolder.Id));
         Assert.False(tidy.SheetPlacements.ContainsKey(nestedSheet.PageViewId));
+        Assert.False(tidy.StatePlacements.ContainsKey(appearanceState.Id));
     }
 
     [Fact]

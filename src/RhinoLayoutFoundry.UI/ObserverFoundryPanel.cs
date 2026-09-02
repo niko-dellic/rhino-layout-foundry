@@ -19,7 +19,10 @@ public sealed class ObserverFoundryPanel : Panel
     private readonly SelectionInspectorPanel _inspector;
     private readonly FoundryToolbarIconButton _nestedPackingButton;
     private readonly FoundryToolbarIconButton _compactPackingButton;
-    private readonly FoundryToolbarIconButton _dependencyLinesButton;
+    private readonly FoundryToolbarIconButton _appearanceCardsButton;
+    private readonly FoundryToolbarIconButton _appearanceConnectionsButton;
+    private readonly FoundryToolbarIconButton _appearanceBadgesButton;
+    private readonly FoundryToolbarButtonGroup _appearancePresentationGroup;
     private readonly FoundryToolbarIconButton _gridAppearanceButton;
     private readonly CanvasGridTray _gridAppearanceTray;
     private readonly PixelLayout _canvasOverlay;
@@ -54,6 +57,8 @@ public sealed class ObserverFoundryPanel : Panel
 
     internal void FocusContent() => _canvas.Focus();
 
+    internal Control AppearancePresentationControl => _appearancePresentationGroup;
+
     public ObserverFoundryPanel()
     {
         BackgroundColor = FoundryTheme.PanelBackground;
@@ -82,9 +87,20 @@ public sealed class ObserverFoundryPanel : Panel
         _compactPackingButton = ToolbarToggleButton(
             FoundryViewIcons.CompactPacking(),
             "Hide folder containers and tightly pack every layout");
-        _dependencyLinesButton = ToolbarToggleButton(
-            FoundryViewIcons.NamedViews(),
-            "Show or hide appearance-state dependency connections");
+        _appearanceCardsButton = ToolbarToggleButton(
+            FoundryViewIcons.AppearanceCards(),
+            "Show appearance states as standalone cards");
+        _appearanceCardsButton.Checked = true;
+        _appearanceConnectionsButton = ToolbarToggleButton(
+            FoundryViewIcons.AppearanceConnections(),
+            "Show appearance-state cards with assignment connections");
+        _appearanceBadgesButton = ToolbarToggleButton(
+            FoundryViewIcons.AppearanceBadges(),
+            "Show direct appearance-state assignments as target badges");
+        _appearancePresentationGroup = new FoundryToolbarButtonGroup(
+            _appearanceCardsButton,
+            _appearanceConnectionsButton,
+            _appearanceBadgesButton);
         var openButton = ToolbarButton(FoundryViewIcons.OpenSelection(), "Open the selected layout or detail in Rhino");
         fitButton.Click += (_, _) => _canvas.FitAll();
         focusButton.Click += (_, _) => _canvas.FocusSelection();
@@ -96,8 +112,12 @@ public sealed class ObserverFoundryPanel : Panel
         _namedViewsButton.Click += (_, _) => ApplySidebarVisibility();
         _nestedPackingButton.Click += (_, _) => SetPackingMode(ObserverPackingMode.NestedFolders);
         _compactPackingButton.Click += (_, _) => SetPackingMode(ObserverPackingMode.CompactSheets);
-        _dependencyLinesButton.Click += (_, _) =>
-            _canvas.SetDependencyConnectionsVisible(_dependencyLinesButton.Checked);
+        _appearanceCardsButton.Click += (_, _) =>
+            SetAppearancePresentationMode(ObserverAppearancePresentationMode.Cards);
+        _appearanceConnectionsButton.Click += (_, _) =>
+            SetAppearancePresentationMode(ObserverAppearancePresentationMode.CardsWithConnections);
+        _appearanceBadgesButton.Click += (_, _) =>
+            SetAppearancePresentationMode(ObserverAppearancePresentationMode.AssignmentBadges);
         openButton.Click += (_, _) => NavigateSelection();
 
         _canvasToolbar = new StackLayout
@@ -115,7 +135,6 @@ public sealed class ObserverFoundryPanel : Panel
                 ToolbarSeparator(),
                 _nestedPackingButton,
                 _compactPackingButton,
-                _dependencyLinesButton,
                 ToolbarSeparator(),
                 _gridAppearanceButton,
                 ToolbarSeparator(),
@@ -315,6 +334,9 @@ public sealed class ObserverFoundryPanel : Panel
 
     private void SetPackingMode(ObserverPackingMode packingMode)
     {
+        if (packingMode == ObserverPackingMode.CompactSheets &&
+            _canvas.AppearancePresentationMode == ObserverAppearancePresentationMode.AssignmentBadges)
+            return;
         _nestedPackingButton.Checked = packingMode == ObserverPackingMode.NestedFolders;
         _compactPackingButton.Checked = packingMode == ObserverPackingMode.CompactSheets;
         _canvas.SetPackingMode(packingMode, fit: true);
@@ -322,6 +344,32 @@ public sealed class ObserverFoundryPanel : Panel
             ? "Nested packing: child folders are contained inside their parent folders."
             : "Compact packing: layouts are tightly arranged without folder containers.";
         QueueVisiblePreviews();
+    }
+
+    private void SetAppearancePresentationMode(ObserverAppearancePresentationMode mode)
+    {
+        _appearanceCardsButton.Checked = mode == ObserverAppearancePresentationMode.Cards;
+        _appearanceConnectionsButton.Checked = mode == ObserverAppearancePresentationMode.CardsWithConnections;
+        _appearanceBadgesButton.Checked = mode == ObserverAppearancePresentationMode.AssignmentBadges;
+        if (mode == ObserverAppearancePresentationMode.AssignmentBadges)
+        {
+            _nestedPackingButton.Checked = true;
+            _compactPackingButton.Checked = false;
+            _compactPackingButton.Enabled = false;
+            _canvas.SetPackingMode(ObserverPackingMode.NestedFolders, fit: false);
+        }
+        else
+        {
+            _compactPackingButton.Enabled = true;
+        }
+        _canvas.SetAppearancePresentationMode(mode);
+        _status.Text = mode switch
+        {
+            ObserverAppearancePresentationMode.Cards => "Appearance states are shown as standalone cards.",
+            ObserverAppearancePresentationMode.CardsWithConnections =>
+                "Appearance states are connected to their direct assignment targets.",
+            _ => "Direct appearance-state assignments are shown as badges on their targets.",
+        };
     }
 
     private void ApplyGridAppearanceTrayVisibility()
@@ -831,10 +879,12 @@ public sealed class ObserverFoundryPanel : Panel
         var selected = LayoutFoundryUiHost.Selection.Selected;
         var sheetIds = selected.Where(key => key.Kind == OverviewNodeKind.Sheet).Select(key => key.Id).ToHashSet();
         var folderIds = selected.Where(key => key.Kind == OverviewNodeKind.Folder).Select(key => key.Id).ToHashSet();
+        var stateIds = selected.Where(key => key.Kind == OverviewNodeKind.AppearanceState).Select(key => key.Id).ToHashSet();
         var state = new ObserverPlacementPlanner().Tidy(
             _snapshot,
             selected.Count == 0 ? null : sheetIds,
-            selected.Count == 0 ? null : folderIds);
+            selected.Count == 0 ? null : folderIds,
+            selected.Count == 0 ? null : stateIds);
         if (ObserverCanvasStateComparer.ContentEquals(state, _snapshot.CanvasState))
         {
             _status.Text = "The selected board area is already tidy.";

@@ -21,7 +21,7 @@ internal sealed class NamingPatternHelpDialog : Dialog
             Spacing = new Size(FoundryTheme.Space3, FoundryTheme.Space2),
             Rows =
             {
-                TokenRow("{index}", "Current batch number using Start and Step."),
+                TokenRow("{index}", "Number selected by Indexing; occupied layout names are skipped automatically."),
                 TokenRow("{index:000}", "Formatted batch number; this example produces 001, 002, 003…"),
                 TokenRow("{project}", "Project value from the document metadata."),
                 TokenRow("{discipline}", "Discipline value from the document metadata."),

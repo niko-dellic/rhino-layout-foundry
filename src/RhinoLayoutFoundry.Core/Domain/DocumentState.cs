@@ -25,7 +25,7 @@ public sealed record DocumentState(
     IReadOnlyList<AppearanceStateRecord>? AppearanceStateResources = null,
     IReadOnlyList<AppearanceStateAssignment>? AppearanceStateAssignments = null)
 {
-    public const int CurrentSchemaVersion = 14;
+    public const int CurrentSchemaVersion = 15;
 
     [JsonIgnore]
     public IReadOnlyList<SheetTemplateRecipe> Templates => SheetTemplates ?? [];
@@ -124,14 +124,20 @@ public sealed record ImportRecoveryRecord(
 public sealed record ObserverCanvasState(
     int LayoutAlgorithmVersion,
     IReadOnlyDictionary<Guid, ObserverPointRecord> FolderOrigins,
-    IReadOnlyDictionary<Guid, ObserverPointRecord> SheetPlacements)
+    IReadOnlyDictionary<Guid, ObserverPointRecord> SheetPlacements,
+    IReadOnlyDictionary<Guid, ObserverPointRecord>? AppearanceStatePlacements = null)
 {
     public const int CurrentLayoutAlgorithmVersion = 1;
 
     public static ObserverCanvasState Empty { get; } = new(
         CurrentLayoutAlgorithmVersion,
         new Dictionary<Guid, ObserverPointRecord>(),
+        new Dictionary<Guid, ObserverPointRecord>(),
         new Dictionary<Guid, ObserverPointRecord>());
+
+    [JsonIgnore]
+    public IReadOnlyDictionary<Guid, ObserverPointRecord> StatePlacements =>
+        AppearanceStatePlacements ?? new Dictionary<Guid, ObserverPointRecord>();
 }
 
 public readonly record struct ObserverPointRecord(double X, double Y);
@@ -144,7 +150,8 @@ public static class ObserverCanvasStateComparer
         second ??= ObserverCanvasState.Empty;
         return first.LayoutAlgorithmVersion == second.LayoutAlgorithmVersion &&
                DictionaryEquals(first.FolderOrigins, second.FolderOrigins) &&
-               DictionaryEquals(first.SheetPlacements, second.SheetPlacements);
+               DictionaryEquals(first.SheetPlacements, second.SheetPlacements) &&
+               DictionaryEquals(first.StatePlacements, second.StatePlacements);
     }
 
     private static bool DictionaryEquals(

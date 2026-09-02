@@ -569,12 +569,13 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
 
             foreach (var detail in details)
             {
-                var scopes = ScopeChain(detail.Viewport.Id, beforeState, pages);
+                var beforeScopes = ScopeChain(detail.Viewport.Id, beforeState, pages);
+                var afterScopes = ScopeChain(detail.Viewport.Id, afterState, pages);
                 var before = ViewportAppearanceResolver.Resolve(
-                    scopes, beforeByScope, layerSnapshots, modelObjects,
+                    beforeScopes, beforeByScope, layerSnapshots, modelObjects,
                     beforeStates, beforeState.StateAssignments);
                 var after = ViewportAppearanceResolver.Resolve(
-                    scopes, afterByScope, layerSnapshots, modelObjects,
+                    afterScopes, afterByScope, layerSnapshots, modelObjects,
                     afterStates, afterState.StateAssignments);
                 foreach (var layerId in before.Layers.Keys.Concat(after.Layers.Keys).Distinct())
                 {
@@ -685,6 +686,8 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
         var before = WithCurrentPageRecords(document, storedBefore);
         var resources = before.AppearanceStates.ToList();
         var assignments = before.StateAssignments.ToList();
+        var statePlacements = before.Canvas.StatePlacements
+            .ToDictionary(pair => pair.Key, pair => pair.Value);
         foreach (var operation in plan.Changes)
         {
             if (operation is SetAppearanceStateResourceChange resourceChange)
@@ -696,7 +699,14 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
                 if (current is not null) resources.Remove(current);
                 if (resourceChange.NewState is not null) resources.Add(resourceChange.NewState);
                 if (resourceChange.NewState is null)
+                {
                     assignments.RemoveAll(item => item.StateId == resourceChange.StateId);
+                    statePlacements.Remove(resourceChange.StateId);
+                }
+                else if (current is not null && current.FolderId != resourceChange.NewState.FolderId)
+                {
+                    statePlacements.Remove(resourceChange.StateId);
+                }
             }
             else if (operation is SetAppearanceStateAssignmentChange assignmentChange)
             {
@@ -723,6 +733,10 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
                 SchemaVersion = DocumentState.CurrentSchemaVersion,
                 AppearanceStateResources = resources,
                 AppearanceStateAssignments = assignments,
+                ObserverCanvas = before.Canvas with
+                {
+                    AppearanceStatePlacements = statePlacements,
+                },
             };
             return ApplyStateOnlyChange(document, plan, storedBefore, after);
         }
@@ -734,7 +748,14 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
             plan,
             new SetHierarchyViewportRulesChange(rootScope, rootRules, rootRules),
             afterStatesOverride: resources,
-            afterAssignmentsOverride: assignments);
+            afterAssignmentsOverride: assignments,
+            afterDocumentStateOverride: before with
+            {
+                ObserverCanvas = before.Canvas with
+                {
+                    AppearanceStatePlacements = statePlacements,
+                },
+            });
     }
 
     private static OperationResult? ApplyTemplateCapabilities(
@@ -1296,6 +1317,9 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
         var appearanceStates = before.AppearanceStates
             .Where(item => !deletedFolderIds.Contains(item.FolderId)).ToArray();
         var appearanceStateIds = appearanceStates.Select(item => item.Id).ToHashSet();
+        var statePlacements = before.Canvas.StatePlacements
+            .Where(pair => appearanceStateIds.Contains(pair.Key))
+            .ToDictionary(pair => pair.Key, pair => pair.Value);
         return after with
         {
             SheetTemplates = before.Templates.Where(template =>
@@ -1307,6 +1331,10 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
             AppearanceStateResources = appearanceStates,
             AppearanceStateAssignments = before.StateAssignments.Where(assignment =>
                 !Deleted(assignment.Target) && appearanceStateIds.Contains(assignment.StateId)).ToArray(),
+            ObserverCanvas = after.Canvas with
+            {
+                AppearanceStatePlacements = statePlacements,
+            },
         };
     }
 
@@ -1751,13 +1779,14 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
             page.PageWidth,
             page.PageHeight,
             page.GetDetailViews().Select(detail =>
-                new DetailModeBefore(detail, detail.Viewport.DisplayMode.Id)).ToArray())).ToArray();
+                new DetailModeBefore(detail, detail.Viewport.DisplayMode.Id, detail.Attributes.LayerIndex)).ToArray())).ToArray();
         var stateBefore = WithCurrentPageRecords(document, _stateStore.Get(document));
         var titleBlocksBefore = pages.Select(page => CaptureTitleBlockBefore(
             document,
             page.MainViewport.Id,
             stateBefore.Sheets[page.MainViewport.Id].TitleBlock)).ToArray();
         var createdTitleBlockIds = new List<Guid>();
+        DetailLayerResolution? dedicatedDetailLayer = null;
         var changesPaper = update.PaperWidth is not null || update.PaperHeight is not null;
         try
         {
@@ -1788,6 +1817,27 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
                     }
                 }
             }
+            if (update.ChangeDetailLayer)
+            {
+                var details = pages.SelectMany(page => page.GetDetailViews()).ToArray();
+                if (details.Length > 0)
+                {
+                    var detailLayerIndex = update.UseDedicatedDetailLayer
+                        ? (dedicatedDetailLayer = ResolveDedicatedDetailLayer(
+                            document, stateBefore.DedicatedDetailLayerId)).LayerIndex
+                        : update.DetailLayerId is { } requestedLayerId
+                            ? document.Layers.FindId(requestedLayerId)?.Index ??
+                              throw new InvalidOperationException("The selected detail layer is unavailable.")
+                            : document.Layers.CurrentLayerIndex;
+                    foreach (var detail in details)
+                    {
+                        if (detail.Attributes.LayerIndex == detailLayerIndex) continue;
+                        detail.Attributes.LayerIndex = detailLayerIndex;
+                        if (!detail.CommitChanges())
+                            throw new InvalidOperationException("Rhino did not commit a detail-layer change.");
+                    }
+                }
+            }
             if (update.ChangeTitleBlock)
                 ApplyBatchTitleBlocks(
                     document,
@@ -1809,7 +1859,14 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
                     sheets[pair.Key] = sheet with { NamingBinding = pair.Value };
                 }
                 currentState = currentState with { Sheets = sheets };
-                _stateStore.SetCurrentSchema(document, currentState);
+            }
+            if (update.NamingBindingRemovals is { Count: > 0 })
+            {
+                var sheets = currentState.Sheets.ToDictionary(pair => pair.Key, pair => pair.Value);
+                foreach (var pageViewId in update.NamingBindingRemovals)
+                    if (sheets.TryGetValue(pageViewId, out var sheet))
+                        sheets[pageViewId] = sheet with { NamingBinding = null };
+                currentState = currentState with { Sheets = sheets };
             }
             if (update.ReplaceRevisionSchedule is not null || update.AppendRevision is not null)
             {
@@ -1826,13 +1883,67 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
                     };
                 }
                 currentState = currentState with { Sheets = sheets };
-                _stateStore.SetCurrentSchema(document, currentState);
             }
+            if (update.DestinationFolderId is { } destinationFolderId)
+            {
+                if (currentState.Folders.All(folder => folder.Id != destinationFolderId))
+                    throw new InvalidOperationException("The destination folder is unavailable.");
+                var sheets = currentState.Sheets.ToDictionary(pair => pair.Key, pair => pair.Value);
+                var nextOrder = sheets.Values.Where(sheet => sheet.FolderId == destinationFolderId)
+                    .Select(sheet => sheet.Order).DefaultIfEmpty(-1).Max() + 1;
+                foreach (var pageViewId in update.SheetPageViewIds)
+                {
+                    var sheet = sheets[pageViewId];
+                    if (sheet.FolderId == destinationFolderId) continue;
+                    sheets[pageViewId] = sheet with
+                    {
+                        FolderId = destinationFolderId,
+                        Order = nextOrder++,
+                    };
+                }
+                currentState = currentState with { Sheets = sheets };
+            }
+            if (update.ChangeAppearanceState)
+            {
+                if (update.AppearanceStateId is { } appearanceStateId &&
+                    currentState.AppearanceStates.All(state => state.Id != appearanceStateId))
+                    throw new InvalidOperationException("The selected appearance state is unavailable.");
+                var targets = update.SheetPageViewIds.Select(id =>
+                    new HierarchyScope(HierarchyScopeKind.Sheet, id)).ToHashSet();
+                var assignments = currentState.StateAssignments
+                    .Where(assignment => !targets.Contains(assignment.Target)).ToList();
+                if (update.AppearanceStateId is { } stateId)
+                    assignments.AddRange(targets.Select(target =>
+                        new AppearanceStateAssignment(Guid.NewGuid(), target, stateId)));
+                currentState = currentState with { AppearanceStateAssignments = assignments };
+            }
+            if (dedicatedDetailLayer is not null)
+                currentState = currentState with
+                {
+                    DedicatedDetailLayerId = dedicatedDetailLayer.LayerId,
+                };
             foreach (var page in pages.Where(page =>
                          update.NewNames.ContainsKey(page.MainViewport.Id) ||
                          update.ReplaceRevisionSchedule is not null ||
                          update.AppendRevision is not null))
-                RefreshManagedTitleBlockAttributes(document, page, _stateStore.Get(document));
+                RefreshManagedTitleBlockAttributes(document, page, currentState);
+            if (update.DestinationFolderId is not null || update.ChangeAppearanceState)
+            {
+                var rootScope = new HierarchyScope(HierarchyScopeKind.Folder, currentState.RootFolderId);
+                var rootRules = currentState.AppearanceRules.LastOrDefault(item => item.Scope == rootScope);
+                var appearanceResult = ApplyViewportAppearanceRules(
+                    document,
+                    plan,
+                    new SetHierarchyViewportRulesChange(rootScope, rootRules, rootRules),
+                    afterAssignmentsOverride: currentState.StateAssignments,
+                    afterDocumentStateOverride: currentState);
+                if (!appearanceResult.Succeeded)
+                    throw new InvalidOperationException(
+                        appearanceResult.Diagnostics.FirstOrDefault()?.Message ??
+                        "The resulting appearance state could not be applied.");
+                return appearanceResult;
+            }
+            _stateStore.SetCurrentSchema(document, currentState);
             document.Modified = true;
             _revisionTracker.Bump(document);
             document.Views.Redraw();
@@ -1849,6 +1960,8 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
                 item.Page.PageHeight = item.Height;
                 foreach (var detailBefore in item.DetailModes)
                 {
+                    detailBefore.Detail.Attributes.LayerIndex = detailBefore.LayerIndex;
+                    detailBefore.Detail.CommitChanges();
                     using var mode = DisplayModeDescription.GetDisplayMode(detailBefore.DisplayModeId);
                     if (mode is null) continue;
                     detailBefore.Detail.Viewport.DisplayMode = mode;
@@ -1858,8 +1971,12 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
             if (update.ChangeTitleBlock || changesPaper)
                 RestoreTitleBlocks(document, stateBefore, titleBlocksBefore);
             else if (update.ReplaceRevisionSchedule is not null || update.AppendRevision is not null ||
-                     update.NamingBindings is { Count: > 0 })
+                     update.NamingBindings is { Count: > 0 } || update.NamingBindingRemovals is { Count: > 0 } ||
+                     update.DestinationFolderId is not null ||
+                     update.ChangeAppearanceState || update.ChangeDetailLayer)
                 _stateStore.Set(document, stateBefore);
+            if (dedicatedDetailLayer is { Created: true })
+                document.Layers.Delete(dedicatedDetailLayer.LayerId, quiet: true);
             document.Views.Redraw();
             return Failure("batch.apply_failed",
                 $"Batch Apply failed and every available before-value was restored: {exception.Message}");
@@ -1898,7 +2015,8 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
 
         var before = details.Select(detail => new DetailModeBefore(
             detail,
-            detail.Viewport.DisplayMode.Id)).ToArray();
+            detail.Viewport.DisplayMode.Id,
+            detail.Attributes.LayerIndex)).ToArray();
         try
         {
             using var mode = DisplayModeDescription.GetDisplayMode(update.DisplayModeId)
@@ -3103,7 +3221,7 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
         double Height,
         IReadOnlyList<DetailModeBefore> DetailModes);
 
-    private sealed record DetailModeBefore(DetailViewObject Detail, Guid DisplayModeId);
+    private sealed record DetailModeBefore(DetailViewObject Detail, Guid DisplayModeId, int LayerIndex);
 
     private sealed record TitleBlockBefore(
         Guid PageViewId,

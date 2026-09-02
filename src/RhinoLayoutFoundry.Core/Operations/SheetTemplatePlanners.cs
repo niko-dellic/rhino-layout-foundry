@@ -101,7 +101,8 @@ public sealed record BatchCreateSheetsRequest(
     IReadOnlyDictionary<Guid, string>? NamedViewAssignments = null,
     IReadOnlyList<LayoutCreationSpec>? CreationSpecs = null,
     ProjectInformation? ProjectData = null,
-    IReadOnlyList<SheetRevisionRecord>? InitialRevisions = null);
+    IReadOnlyList<SheetRevisionRecord>? InitialRevisions = null,
+    NamingIndexMode IndexMode = NamingIndexMode.FolderPosition);
 
 public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateSheetsRequest>
 {
@@ -117,8 +118,6 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
         if (!hasCreationSpecs &&
             (request.TemplateQuantities.Count == 0 || request.TemplateQuantities.All(item => item.Quantity <= 0)))
             diagnostics.Add(CaptureSheetTemplatePlanner.Error("batch.empty", "Choose at least one template and quantity."));
-        if (request.Step == 0)
-            diagnostics.Add(CaptureSheetTemplatePlanner.Error("batch.step_zero", "The naming step cannot be zero."));
         UpdateProjectInformationPlanner.Validate(request.ProjectData ?? snapshot.ProjectInfo, diagnostics);
 
         var templates = snapshot.Templates.ToDictionary(item => item.Id);
@@ -187,26 +186,40 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
         var resolvedPattern = pattern.Length == 0
             ? expanded.FirstOrDefault().Template?.DefaultNamingPattern ?? string.Empty
             : pattern;
-        var naming = NamingEngine.Preview(new NamingRequest(
+        var nextOrder = snapshot.Sheets.Values.Where(item => item.FolderId == request.DestinationFolderId)
+            .Select(item => item.Order).DefaultIfEmpty(-1).Max() + 1;
+        var candidates = snapshot.Sheets.Values.Select(sheet => new NamingIndexCandidate(
+                new NamingItem(sheet.PageViewId, sheet.Name, SheetTokens(snapshot, sheet, sheet.FolderId)),
+                sheet.FolderId,
+                sheet.Order,
+                false,
+                sheet.NamingBinding?.Index))
+            .Concat(expanded.Select((item, index) => new NamingIndexCandidate(
+                namingItems[index], request.DestinationFolderId, nextOrder + index, true)))
+            .ToArray();
+        var indices = NamingIndexing.Resolve(
+            resolvedPattern,
+            1,
+            1,
+            request.IndexMode,
+            snapshot.RootFolderId,
+            snapshot.Folders,
+            candidates);
+        var availableNaming = NamingIndexing.PreviewAvailable(
             resolvedPattern,
             namingItems,
-            request.Start,
-            request.Step));
+            indices,
+            snapshot.Sheets.Values.Select(item => item.Name));
+        var naming = availableNaming.Preview;
+        indices = availableNaming.Indices;
         diagnostics.AddRange(naming.Diagnostics);
-
-        var existingNames = snapshot.Sheets.Values.Select(item => item.Name)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        foreach (var entry in naming.Entries.Where(entry => existingNames.Contains(entry.ProposedName)))
-            diagnostics.Add(new Diagnostic("batch.name_exists", DiagnosticSeverity.Error,
-                $"A layout named '{entry.ProposedName}' already exists.", entry.SheetId));
 
         var changes = new List<OperationChange>();
         if (diagnostics.All(item => item.Severity != DiagnosticSeverity.Error))
         {
-            var nextOrder = snapshot.Sheets.Values.Where(item => item.FolderId == request.DestinationFolderId)
-                .Select(item => item.Order).DefaultIfEmpty(-1).Max() + 1;
             for (var index = 0; index < expanded.Count; index++)
             {
+                var namingIndex = indices[expanded[index].DraftId];
                 changes.Add(new CreateSheetFromTemplateChange(
                     request.DestinationFolderId,
                     naming.Entries[index].ProposedName,
@@ -214,13 +227,13 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
                     expanded[index].Template,
                     expanded[index].NamedViewAssignments,
                     expanded[index].UseDedicatedDetailLayer,
-                    (request.Start + index * request.Step).ToString(CultureInfo.InvariantCulture),
+                    namingIndex.ToString(CultureInfo.InvariantCulture),
                     request.ProjectData ?? snapshot.ProjectInfo,
                     request.InitialRevisions,
                     expanded[index].DetailLayerId,
                     expanded[index].AppearanceStateId,
                     resolvedPattern,
-                    request.Start + index * request.Step));
+                    namingIndex));
             }
             diagnostics.Add(new Diagnostic("batch.undo_unavailable", DiagnosticSeverity.Warning,
                 "Rhino does not expose native Undo for layout creation. Foundry will roll back the entire batch if any sheet fails."));
@@ -576,6 +589,23 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
             .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
         result["view"] = assigned ?? template.DetailSlots.Select(slot => slot.DefaultNamedView)
             .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? string.Empty;
+        return result;
+    }
+
+    internal static IReadOnlyDictionary<string, string> SheetTokens(
+        DocumentSnapshot snapshot,
+        SheetSnapshot sheet,
+        Guid folderId)
+    {
+        var result = new Dictionary<string, string>(snapshot.Metadata, StringComparer.OrdinalIgnoreCase)
+        {
+            ["folder"] = folderId == snapshot.RootFolderId
+                ? string.Empty
+                : snapshot.Folders.GetValueOrDefault(folderId)?.Name ?? string.Empty,
+            ["tag"] = sheet.Tags.FirstOrDefault() ?? string.Empty,
+            ["view"] = sheet.Details.FirstOrDefault()?.Name ?? string.Empty,
+        };
+        foreach (var pair in sheet.Metadata) result[pair.Key] = pair.Value;
         return result;
     }
 }

@@ -8,6 +8,13 @@ public enum ObserverPackingMode
     CompactSheets,
 }
 
+public enum ObserverAppearancePresentationMode
+{
+    Cards,
+    CardsWithConnections,
+    AssignmentBadges,
+}
+
 public sealed record ObserverSheetCard(
     ObserverSheetSnapshot Sheet,
     ObserverRect Bounds,
@@ -15,7 +22,8 @@ public sealed record ObserverSheetCard(
 
 public sealed record ObserverAppearanceStateCard(
     AppearanceStateRecord State,
-    ObserverRect Bounds);
+    ObserverRect Bounds,
+    bool HasManualPlacement = false);
 
 public sealed record ObserverDetailTarget(
     Guid SheetPageViewId,
@@ -56,7 +64,8 @@ public sealed class ObserverPlacementPlanner
 
     public ObserverBoardLayout Arrange(
         ObserverSnapshot snapshot,
-        ObserverPackingMode packingMode = ObserverPackingMode.NestedFolders)
+        ObserverPackingMode packingMode = ObserverPackingMode.NestedFolders,
+        ObserverAppearancePresentationMode appearanceMode = ObserverAppearancePresentationMode.Cards)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         if (!snapshot.HasDocument || snapshot.Folders.Count == 0)
@@ -65,11 +74,13 @@ public sealed class ObserverPlacementPlanner
         }
 
         return packingMode == ObserverPackingMode.CompactSheets
-            ? ArrangeCompact(snapshot)
-            : ArrangeNested(snapshot);
+            ? ArrangeCompact(snapshot, appearanceMode)
+            : ArrangeNested(snapshot, appearanceMode);
     }
 
-    private static ObserverBoardLayout ArrangeCompact(ObserverSnapshot snapshot)
+    private static ObserverBoardLayout ArrangeCompact(
+        ObserverSnapshot snapshot,
+        ObserverAppearancePresentationMode appearanceMode)
     {
         var folderMap = snapshot.Folders.ToDictionary(folder => folder.Id);
         var folderOrder = PreOrderFolders(snapshot.RootFolderId, folderMap)
@@ -94,7 +105,9 @@ public sealed class ObserverPlacementPlanner
                     new ObserverRect(position.X, position.Y, size.Width, size.Height),
                     HasManualPlacement: false);
             });
-        var orderedStates = snapshot.AppearanceStates
+        var orderedStates = appearanceMode == ObserverAppearancePresentationMode.AssignmentBadges
+            ? []
+            : snapshot.AppearanceStates
             .OrderBy(state => folderOrder.GetValueOrDefault(state.FolderId, int.MaxValue))
             .ThenBy(state => state.Order)
             .ThenBy(state => state.Name, StringComparer.OrdinalIgnoreCase)
@@ -108,7 +121,8 @@ public sealed class ObserverPlacementPlanner
                 var position = statePack.Positions[state.Id];
                 return new ObserverAppearanceStateCard(state,
                     new ObserverRect(position.X, position.Y + stateTop,
-                        AppearanceStateSize.Width, AppearanceStateSize.Height));
+                        AppearanceStateSize.Width, AppearanceStateSize.Height),
+                    HasManualPlacement: false);
             });
         var bounds = cards.Values
             .Select(card => card.Bounds)
@@ -121,7 +135,9 @@ public sealed class ObserverPlacementPlanner
             stateCards);
     }
 
-    private static ObserverBoardLayout ArrangeNested(ObserverSnapshot snapshot)
+    private static ObserverBoardLayout ArrangeNested(
+        ObserverSnapshot snapshot,
+        ObserverAppearancePresentationMode appearanceMode)
     {
         var folderMap = snapshot.Folders.ToDictionary(folder => folder.Id);
         var orderedFolders = PreOrderFolders(snapshot.RootFolderId, folderMap);
@@ -140,7 +156,10 @@ public sealed class ObserverPlacementPlanner
                 group => group.OrderBy(sheet => sheet.Order)
                     .ThenBy(sheet => sheet.Name, StringComparer.OrdinalIgnoreCase)
                     .ToArray());
-        var directStates = snapshot.AppearanceStates
+        var visibleStates = appearanceMode == ObserverAppearancePresentationMode.AssignmentBadges
+            ? []
+            : snapshot.AppearanceStates;
+        var directStates = visibleStates
             .GroupBy(state => state.FolderId)
             .ToDictionary(
                 group => group.Key,
@@ -226,12 +245,18 @@ public sealed class ObserverPlacementPlanner
             foreach (var state in directStates.GetValueOrDefault(folder.Id, []))
             {
                 var position = measure.DirectItems.Positions[state.Id];
+                var hasManual = snapshot.CanvasState.StatePlacements.TryGetValue(state.Id, out var placement);
+                var basePoint = hasManual
+                    ? new ObserverPoint(placement.X, placement.Y)
+                    : new ObserverPoint(
+                        naturalOrigin.X + FolderPadding + position.X,
+                        naturalOrigin.Y + FolderHeaderHeight + FolderPadding + position.Y);
                 var bounds = new ObserverRect(
-                    naturalOrigin.X + FolderPadding + position.X + cumulativeOffset.X,
-                    naturalOrigin.Y + FolderHeaderHeight + FolderPadding + position.Y + cumulativeOffset.Y,
+                    basePoint.X + cumulativeOffset.X,
+                    basePoint.Y + cumulativeOffset.Y,
                     AppearanceStateSize.Width,
                     AppearanceStateSize.Height);
-                stateCards[state.Id] = new ObserverAppearanceStateCard(state, bounds);
+                stateCards[state.Id] = new ObserverAppearanceStateCard(state, bounds, hasManual);
                 contentBounds = ObserverRect.Union(contentBounds, bounds);
             }
 
@@ -331,6 +356,26 @@ public sealed class ObserverPlacementPlanner
         return snapshot.CanvasState with { SheetPlacements = placements };
     }
 
+    public ObserverCanvasState MoveAppearanceStates(
+        ObserverSnapshot snapshot,
+        ObserverBoardLayout layout,
+        IEnumerable<Guid> stateIds,
+        ObserverPoint worldDelta)
+    {
+        var placements = snapshot.CanvasState.StatePlacements
+            .ToDictionary(pair => pair.Key, pair => pair.Value);
+        foreach (var stateId in stateIds.Distinct())
+        {
+            if (!layout.AppearanceStates.TryGetValue(stateId, out var card)) continue;
+            var folderDelta = CumulativeFolderOffset(snapshot, card.State.FolderId);
+            placements[stateId] = new ObserverPointRecord(
+                card.Bounds.X + worldDelta.X - folderDelta.X,
+                card.Bounds.Y + worldDelta.Y - folderDelta.Y);
+        }
+
+        return snapshot.CanvasState with { AppearanceStatePlacements = placements };
+    }
+
     public ObserverCanvasState MoveFolder(
         ObserverSnapshot snapshot,
         Guid folderId,
@@ -345,14 +390,18 @@ public sealed class ObserverPlacementPlanner
     public ObserverCanvasState Tidy(
         ObserverSnapshot snapshot,
         IReadOnlySet<Guid>? sheetIds = null,
-        IReadOnlySet<Guid>? folderIds = null)
+        IReadOnlySet<Guid>? folderIds = null,
+        IReadOnlySet<Guid>? appearanceStateIds = null)
     {
         var placements = snapshot.CanvasState.SheetPlacements.ToDictionary(pair => pair.Key, pair => pair.Value);
         var origins = snapshot.CanvasState.FolderOrigins.ToDictionary(pair => pair.Key, pair => pair.Value);
-        if (sheetIds is null && folderIds is null)
+        var statePlacements = snapshot.CanvasState.StatePlacements
+            .ToDictionary(pair => pair.Key, pair => pair.Value);
+        if (sheetIds is null && folderIds is null && appearanceStateIds is null)
         {
             placements.Clear();
             origins.Clear();
+            statePlacements.Clear();
         }
         else
         {
@@ -371,7 +420,16 @@ public sealed class ObserverPlacementPlanner
                     {
                         placements.Remove(sheet.PageViewId);
                     }
+                    foreach (var state in snapshot.AppearanceStates.Where(state => state.FolderId == folderId))
+                    {
+                        statePlacements.Remove(state.Id);
+                    }
                 }
+            }
+
+            if (appearanceStateIds is not null)
+            {
+                foreach (var stateId in appearanceStateIds) statePlacements.Remove(stateId);
             }
         }
 
@@ -380,6 +438,7 @@ public sealed class ObserverPlacementPlanner
             LayoutAlgorithmVersion = ObserverCanvasState.CurrentLayoutAlgorithmVersion,
             FolderOrigins = origins,
             SheetPlacements = placements,
+            AppearanceStatePlacements = statePlacements,
         };
     }
 

@@ -170,7 +170,14 @@ public sealed record BatchUpdateSheetsChange(
     IReadOnlyList<SheetRevisionRecord>? ReplaceRevisionSchedule = null,
     SheetRevisionRecord? AppendRevision = null,
     BuiltInTitleBlockKind? BuiltInTitleBlock = null,
-    IReadOnlyDictionary<Guid, SheetNamingBinding>? NamingBindings = null) : OperationChange;
+    IReadOnlyDictionary<Guid, SheetNamingBinding>? NamingBindings = null,
+    IReadOnlySet<Guid>? NamingBindingRemovals = null,
+    Guid? DestinationFolderId = null,
+    bool ChangeAppearanceState = false,
+    Guid? AppearanceStateId = null,
+    bool ChangeDetailLayer = false,
+    bool UseDedicatedDetailLayer = true,
+    Guid? DetailLayerId = null) : OperationChange;
 
 public sealed record UpdateDetailDisplayModesChange(
     IReadOnlyList<Guid> DetailViewportIds,

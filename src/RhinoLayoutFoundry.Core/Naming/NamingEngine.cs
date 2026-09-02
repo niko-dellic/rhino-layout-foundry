@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using System.Text.RegularExpressions;
 using RhinoLayoutFoundry.Core.Diagnostics;
 
@@ -43,14 +44,33 @@ public static partial class NamingEngine
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        var entries = new List<NamingPreviewEntry>(request.Items.Count);
-        var diagnostics = new List<Diagnostic>();
+        var indices = new Dictionary<Guid, int>();
         var index = request.Start;
-
         foreach (var item in request.Items)
         {
+            indices[item.SheetId] = index;
+            index = checked(index + request.Step);
+        }
+        return PreviewWithIndices(request.Pattern, request.Items, indices);
+    }
+
+    public static NamingPreview PreviewWithIndices(
+        string pattern,
+        IReadOnlyList<NamingItem> items,
+        IReadOnlyDictionary<Guid, int> indices)
+    {
+        ArgumentNullException.ThrowIfNull(pattern);
+        ArgumentNullException.ThrowIfNull(items);
+        ArgumentNullException.ThrowIfNull(indices);
+
+        var entries = new List<NamingPreviewEntry>(items.Count);
+        var diagnostics = new List<Diagnostic>();
+
+        foreach (var item in items)
+        {
+            var index = indices.GetValueOrDefault(item.SheetId);
             var proposed = TokenPattern().Replace(
-                request.Pattern,
+                pattern,
                 match => ResolveToken(match, item, index, diagnostics));
 
             if (proposed.Contains('{', StringComparison.Ordinal) || proposed.Contains('}', StringComparison.Ordinal))
@@ -73,7 +93,6 @@ public static partial class NamingEngine
             }
 
             entries.Add(new NamingPreviewEntry(item.SheetId, item.CurrentName, proposed));
-            index = checked(index + request.Step);
         }
 
         foreach (var duplicate in entries
@@ -92,6 +111,41 @@ public static partial class NamingEngine
         }
 
         return new NamingPreview(entries, diagnostics);
+    }
+
+    public static string ResolveStem(string pattern, NamingItem item)
+    {
+        ArgumentNullException.ThrowIfNull(pattern);
+        ArgumentNullException.ThrowIfNull(item);
+        return TokenPattern().Replace(pattern, match =>
+        {
+            var token = match.Groups["name"].Value;
+            if (token.Equals("index", StringComparison.OrdinalIgnoreCase)) return string.Empty;
+            return item.Tokens.GetValueOrDefault(token) ?? string.Empty;
+        }).Trim();
+    }
+
+    public static bool MatchesResolvedIndexPattern(string pattern, NamingItem item)
+    {
+        ArgumentNullException.ThrowIfNull(pattern);
+        ArgumentNullException.ThrowIfNull(item);
+        var expression = new StringBuilder("^");
+        var offset = 0;
+        foreach (Match match in TokenPattern().Matches(pattern))
+        {
+            expression.Append(Regex.Escape(pattern[offset..match.Index]));
+            var token = match.Groups["name"].Value;
+            if (token.Equals("index", StringComparison.OrdinalIgnoreCase))
+                expression.Append("[-+]?\\d+");
+            else if (item.Tokens.TryGetValue(token, out var value))
+                expression.Append(Regex.Escape(value));
+            else
+                return false;
+            offset = match.Index + match.Length;
+        }
+        expression.Append(Regex.Escape(pattern[offset..]));
+        expression.Append('$');
+        return Regex.IsMatch(item.CurrentName, expression.ToString(), RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     }
 
     private static string ResolveToken(
@@ -157,4 +211,3 @@ public static partial class NamingEngine
     [GeneratedRegex(@"\{(?<name>[A-Za-z][A-Za-z0-9]*)(?::(?<format>[^{}]+))?\}", RegexOptions.CultureInvariant)]
     private static partial Regex TokenPattern();
 }
-

@@ -100,11 +100,15 @@ public static class DocumentStateSerializer
             });
         }
 
-        if (state.SchemaVersion == 13)
+        if (state.SchemaVersion is 13 or 14)
         {
             return NormalizeCurrent(state with
             {
                 SchemaVersion = DocumentState.CurrentSchemaVersion,
+                ObserverCanvas = state.Canvas with
+                {
+                    AppearanceStatePlacements = new Dictionary<Guid, ObserverPointRecord>(),
+                },
             });
         }
 
@@ -125,7 +129,10 @@ public static class DocumentStateSerializer
             Sheets = state.Sheets.ToDictionary(
                 pair => pair.Key,
                 pair => pair.Value with { Notes = pair.Value.Notes ?? string.Empty }),
-            ObserverCanvas = state.Canvas,
+            ObserverCanvas = state.Canvas with
+            {
+                AppearanceStatePlacements = state.Canvas.StatePlacements,
+            },
             ImportRecovery = state.Recovery,
             ProjectData = NormalizeProjectInformation(state.ProjectInfo),
             ViewportRuleSets = state.AppearanceRules,

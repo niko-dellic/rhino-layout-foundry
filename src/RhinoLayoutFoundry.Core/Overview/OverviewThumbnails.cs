@@ -63,7 +63,8 @@ public readonly record struct NamedViewThumbnailKey(
     string NamedViewName,
     int Width,
     int Height,
-    long ContentVersion = 0);
+    long ContentVersion = 0,
+    Guid? DisplayModeId = null);
 
 public sealed record NamedViewThumbnailRequest(NamedViewThumbnailKey Key);
 

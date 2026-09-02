@@ -70,8 +70,8 @@ public sealed class LinkedSheetNamingTests
         Assert.True(plan.CanApply);
         var change = Assert.IsType<BatchUpdateSheetsChange>(Assert.Single(plan.Changes));
         var binding = change.NamingBindings![TestSnapshots.SheetOneId];
-        Assert.Equal(9, binding.Index);
-        Assert.Equal("Plans-09", binding.LastGeneratedName);
+        Assert.Equal(1, binding.Index);
+        Assert.Equal("Plans-01", binding.LastGeneratedName);
     }
 
     [Fact]

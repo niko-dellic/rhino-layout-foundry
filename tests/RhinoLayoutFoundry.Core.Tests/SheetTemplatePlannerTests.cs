@@ -50,18 +50,18 @@ public sealed class SheetTemplatePlannerTests
         var plan = new BatchCreateSheetsPlanner().Plan(request, snapshot);
 
         Assert.True(plan.CanApply);
-        Assert.Equal(["S-003", "S-005", "S-007"],
+        Assert.Equal(["S-002", "S-003", "S-004"],
             plan.Changes.Cast<CreateSheetFromTemplateChange>().Select(item => item.Name));
         Assert.Equal(["A3", "A3", "A1"],
             plan.Changes.Cast<CreateSheetFromTemplateChange>().Select(item => item.Template.Name));
         Assert.All(plan.Changes.Cast<CreateSheetFromTemplateChange>(),
             item => Assert.Equal("S-{index:000}", item.NamingPattern));
-        Assert.Equal([3, 5, 7],
+        Assert.Equal([2, 3, 4],
             plan.Changes.Cast<CreateSheetFromTemplateChange>().Select(item => item.NamingIndex));
     }
 
     [Fact]
-    public void ExistingNameBlocksWholeBatch()
+    public void ExistingNamesAreSkippedAutomaticallyAcrossTheDocument()
     {
         var template = Template("A3", 420, 297);
         var snapshot = WithTemplates(TestSnapshots.Create(), [template]);
@@ -69,9 +69,10 @@ public sealed class SheetTemplatePlannerTests
             42, 1, TestSnapshots.RootFolderId, [new TemplateQuantity(template.Id, 2)],
             "A-{index:000}", 1, 1), snapshot);
 
-        Assert.False(plan.CanApply);
-        Assert.Contains(plan.Diagnostics, item => item.Code == "batch.name_exists");
-        Assert.Empty(plan.Changes);
+        Assert.True(plan.CanApply);
+        var changes = plan.Changes.Cast<CreateSheetFromTemplateChange>().ToArray();
+        Assert.Equal(["A-003", "A-004"], changes.Select(change => change.Name));
+        Assert.Equal([3, 4], changes.Select(change => change.NamingIndex));
     }
 
     [Fact]
@@ -654,7 +655,7 @@ public sealed class SheetTemplatePlannerTests
 
         Assert.True(plan.CanApply);
         var change = Assert.IsType<CreateSheetFromTemplateChange>(Assert.Single(plan.Changes));
-        Assert.Equal("101", change.SheetNumber);
+        Assert.Equal("3", change.SheetNumber);
         Assert.Equal("Civic Library", change.ProjectData!.ProjectName);
         Assert.Equal(BuiltInTitleBlockKind.CompactLowerRight, change.Template.TitleBlock!.BuiltInKind);
         var geometry = AdaptiveTitleBlockLayoutSolver.Solve(

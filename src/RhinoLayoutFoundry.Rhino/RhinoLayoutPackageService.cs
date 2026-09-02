@@ -1450,7 +1450,13 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
             });
         }
 
-        var canvas = RemapCanvas(before.Canvas, manifest.FoundryState.Canvas, mode, folderMap, pagesBySource);
+        var canvas = RemapCanvas(
+            before.Canvas,
+            manifest.FoundryState.Canvas,
+            mode,
+            folderMap,
+            pagesBySource,
+            appearanceStateMap);
         return new DocumentState(
             DocumentState.CurrentSchemaVersion,
             rootId,
@@ -1513,7 +1519,8 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
         ObserverCanvasState imported,
         LayoutPackageImportMode mode,
         IReadOnlyDictionary<Guid, Guid> folderMap,
-        IReadOnlyDictionary<Guid, RhinoPageView> pagesBySource)
+        IReadOnlyDictionary<Guid, RhinoPageView> pagesBySource,
+        IReadOnlyDictionary<Guid, Guid> appearanceStateMap)
     {
         var folderOrigins = mode == LayoutPackageImportMode.Merge
             ? before.FolderOrigins.ToDictionary(pair => pair.Key, pair => pair.Value)
@@ -1521,8 +1528,16 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
         var sheetPlacements = mode == LayoutPackageImportMode.Merge
             ? before.SheetPlacements.ToDictionary(pair => pair.Key, pair => pair.Value)
             : new Dictionary<Guid, ObserverPointRecord>();
+        var statePlacements = mode == LayoutPackageImportMode.Merge
+            ? before.StatePlacements.ToDictionary(pair => pair.Key, pair => pair.Value)
+            : new Dictionary<Guid, ObserverPointRecord>();
         var offsetX = mode == LayoutPackageImportMode.Merge
-            ? sheetPlacements.Values.Select(point => point.X).DefaultIfEmpty(0).Max() + 600
+            ? folderOrigins.Values
+                .Concat(sheetPlacements.Values)
+                .Concat(statePlacements.Values)
+                .Select(point => point.X)
+                .DefaultIfEmpty(0)
+                .Max() + 600
             : 0;
         foreach (var pair in imported.FolderOrigins)
             if (folderMap.TryGetValue(pair.Key, out var id))
@@ -1530,10 +1545,14 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
         foreach (var pair in imported.SheetPlacements)
             if (pagesBySource.TryGetValue(pair.Key, out var page))
                 sheetPlacements[page.MainViewport.Id] = new ObserverPointRecord(pair.Value.X + offsetX, pair.Value.Y);
+        foreach (var pair in imported.StatePlacements)
+            if (appearanceStateMap.TryGetValue(pair.Key, out var stateId))
+                statePlacements[stateId] = new ObserverPointRecord(pair.Value.X + offsetX, pair.Value.Y);
         return new ObserverCanvasState(
             ObserverCanvasState.CurrentLayoutAlgorithmVersion,
             folderOrigins,
-            sheetPlacements);
+            sheetPlacements,
+            statePlacements);
     }
 
     private RhinoDoc RequireDocument(uint serial, long revision)

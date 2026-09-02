@@ -34,6 +34,7 @@ public sealed class SetObserverCanvasStatePlanner : IOperationPlanner<SetObserve
 
         ValidatePoints(request.NewState.FolderOrigins, "folder", diagnostics);
         ValidatePoints(request.NewState.SheetPlacements, "sheet", diagnostics);
+        ValidatePoints(request.NewState.StatePlacements, "appearance state", diagnostics);
         var hasErrors = diagnostics.Any(item => item.Severity == DiagnosticSeverity.Error);
         var changed = !ObserverCanvasStateComparer.ContentEquals(snapshot.Canvas, request.NewState);
         if (!hasErrors && !changed)

@@ -41,6 +41,7 @@ public sealed class DocumentStateSerializerTests
             "Issued plan set");
         var sheetId = Guid.NewGuid();
         var detailLayerId = Guid.NewGuid();
+        var appearanceStateId = Guid.NewGuid();
         var titleBlock = new TitleBlockRole(Guid.NewGuid(), Guid.NewGuid(), "LowerRight");
         var sheet = new SheetRecord(
             sheetId,
@@ -92,6 +93,10 @@ public sealed class DocumentStateSerializerTests
                 new Dictionary<Guid, ObserverPointRecord>
                 {
                     [sheetId] = new(240, 80),
+                },
+                new Dictionary<Guid, ObserverPointRecord>
+                {
+                    [appearanceStateId] = new(360, 120),
                 }),
             DedicatedDetailLayerId: detailLayerId,
             ProjectData: ProjectInformation.Empty with
@@ -121,6 +126,7 @@ public sealed class DocumentStateSerializerTests
         Assert.Equal(sheetId, restored.Templates.Single().SourcePageViewId);
         Assert.Equal(new ObserverPointRecord(12.5, -4), restored.Canvas.FolderOrigins[folder.Id]);
         Assert.Equal(new ObserverPointRecord(240, 80), restored.Canvas.SheetPlacements[sheetId]);
+        Assert.Equal(new ObserverPointRecord(360, 120), restored.Canvas.StatePlacements[appearanceStateId]);
         Assert.Equal(detailLayerId, restored.DedicatedDetailLayerId);
         Assert.Equal("Civic Library", restored.ProjectInfo.ProjectName);
         Assert.Equal("P01", restored.ProjectInfo.DefaultRevision!.Code);
@@ -420,6 +426,29 @@ public sealed class DocumentStateSerializerTests
         Assert.Equal(DocumentState.CurrentSchemaVersion, restored.SchemaVersion);
         Assert.Equal(string.Empty, Assert.Single(restored.Folders).Notes);
         Assert.Equal(string.Empty, restored.Sheets[sheetId].Notes);
+    }
+
+    [Fact]
+    public void VersionFourteenCanvasGainsEmptyAppearanceStatePlacements()
+    {
+        var state = DocumentState.Empty() with
+        {
+            ObserverCanvas = new ObserverCanvasState(
+                ObserverCanvasState.CurrentLayoutAlgorithmVersion,
+                new Dictionary<Guid, ObserverPointRecord> { [Guid.NewGuid()] = new(10, 20) },
+                new Dictionary<Guid, ObserverPointRecord> { [Guid.NewGuid()] = new(30, 40) },
+                new Dictionary<Guid, ObserverPointRecord> { [Guid.NewGuid()] = new(50, 60) }),
+        };
+        var payload = DocumentStateSerializer.Serialize(state)
+            .Replace($"\"SchemaVersion\":{DocumentState.CurrentSchemaVersion}", "\"SchemaVersion\":14",
+                StringComparison.Ordinal);
+
+        var restored = DocumentStateSerializer.Deserialize(payload);
+
+        Assert.Equal(DocumentState.CurrentSchemaVersion, restored.SchemaVersion);
+        Assert.Empty(restored.Canvas.StatePlacements);
+        Assert.Single(restored.Canvas.FolderOrigins);
+        Assert.Single(restored.Canvas.SheetPlacements);
     }
 
     [Fact]
