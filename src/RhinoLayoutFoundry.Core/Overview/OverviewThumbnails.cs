@@ -1,3 +1,5 @@
+using RhinoLayoutFoundry.Core.Domain;
+
 namespace RhinoLayoutFoundry.Core.Overview;
 
 public readonly record struct OverviewThumbnailKey(
@@ -64,9 +66,15 @@ public readonly record struct NamedViewThumbnailKey(
     int Width,
     int Height,
     long ContentVersion = 0,
-    Guid? DisplayModeId = null);
+    Guid? DisplayModeId = null,
+    Guid? AppearanceStateId = null,
+    Guid? AppearanceScopeId = null,
+    Guid? DetailSlotId = null,
+    uint BackgroundArgb = 0);
 
-public sealed record NamedViewThumbnailRequest(NamedViewThumbnailKey Key);
+public sealed record NamedViewThumbnailRequest(
+    NamedViewThumbnailKey Key,
+    EffectiveViewportAppearance? Appearance = null);
 
 public sealed record NamedViewThumbnailResult(
     NamedViewThumbnailKey Key,

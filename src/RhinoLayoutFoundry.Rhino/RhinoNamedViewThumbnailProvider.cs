@@ -2,6 +2,7 @@ using System.Drawing.Imaging;
 using Rhino;
 using Rhino.Display;
 using Rhino.DocObjects;
+using RhinoLayoutFoundry.Core.Domain;
 using RhinoLayoutFoundry.Core.Overview;
 
 namespace RhinoLayoutFoundry.Rhino;
@@ -45,6 +46,10 @@ internal sealed class RhinoNamedViewThumbnailProvider : INamedViewThumbnailProvi
                 null,
                 "Named-view thumbnail capture was cancelled.");
         }
+        catch (Exception exception)
+        {
+            return new NamedViewThumbnailResult(request.Key, null, exception.Message);
+        }
         finally
         {
             if (enteredGate) RhinoThumbnailCaptureGate.Gate.Release();
@@ -66,16 +71,24 @@ internal sealed class RhinoNamedViewThumbnailProvider : INamedViewThumbnailProvi
             return Failure(request, "The named view no longer exists.");
 
         // Use an existing standard view as Rhino's display pipeline requires a
-        // live RhinoView. The projection is restored immediately and is never
-        // redrawn to screen, avoiding a temporary floating viewport or a 3DM edit.
+        // live RhinoView. Capture through the same ViewCaptureSettings pipeline
+        // as sheet thumbnails so display modes and viewport appearance overrides
+        // are evaluated by Rhino rather than approximated by the Foundry UI.
         var view = document.Views.GetStandardRhinoViews().FirstOrDefault();
         if (view is null)
             return Failure(request, "No standard Rhino viewport is available for preview capture.");
         using var previous = new ViewInfo(view.ActiveViewport);
         var previousDisplayModeId = view.ActiveViewport.DisplayMode.Id;
+        var layerBefore = new Dictionary<Guid, Layer>();
+        var objectBefore = new Dictionary<Guid, ObjectAttributes>();
+        var documentWasModified = document.Modified;
+        var undoRecordingWasEnabled = document.UndoRecordingEnabled;
+        var appliesAppearance = request.Appearance is { } appearance &&
+                                (appearance.Layers.Count > 0 || appearance.Objects.Count > 0);
         DisplayModeDescription? requestedDisplayMode = null;
         try
         {
+            if (appliesAppearance) document.UndoRecordingEnabled = false;
             if (!document.NamedViews.RestoreWithAspectRatio(namedViewIndex, view.ActiveViewport))
                 return Failure(request, "Rhino could not restore the named view for preview capture.");
             if (request.Key.DisplayModeId is { } displayModeId)
@@ -86,17 +99,32 @@ internal sealed class RhinoNamedViewThumbnailProvider : INamedViewThumbnailProvi
                 view.ActiveViewport.DisplayMode = requestedDisplayMode;
             }
 
-            var capture = new ViewCapture
+            ApplyAppearance(
+                document,
+                view.ActiveViewport.Id,
+                request.Appearance,
+                layerBefore,
+                objectBefore);
+
+            var requestedSize = new System.Drawing.Size(request.Key.Width, request.Key.Height);
+            using var captureSettings = new ViewCaptureSettings(view, requestedSize, 96)
             {
-                Width = request.Key.Width,
-                Height = request.Key.Height,
-                ScaleScreenItems = false,
-                DrawAxes = false,
+                DrawBackground = false,
+                DrawBackgroundBitmap = false,
+                DrawWallpaper = false,
                 DrawGrid = false,
-                DrawGridAxes = false,
-                TransparentBackground = false,
+                DrawAxis = false,
+                RasterMode = true,
+                OutputColor = ViewCaptureSettings.ColorMode.PrintColor,
+                UsePrintWidths = false,
+                ApplyDisplayModeThicknessScales = true,
             };
-            using var bitmap = capture.CaptureToBitmap(view);
+            captureSettings.SetLayout(
+                requestedSize,
+                new System.Drawing.Rectangle(System.Drawing.Point.Empty, requestedSize));
+            using var bitmap = RhinoDocumentThumbnailProvider.CaptureToBitmap(
+                captureSettings,
+                request.Key.BackgroundArgb);
             if (bitmap is null)
                 return Failure(request, "Rhino did not return a named-view preview.");
 
@@ -106,12 +134,82 @@ internal sealed class RhinoNamedViewThumbnailProvider : INamedViewThumbnailProvi
         }
         finally
         {
+            RestoreAppearance(document, layerBefore, objectBefore);
             view.ActiveViewport.SetViewProjection(previous.Viewport, false);
             using var previousDisplayMode = DisplayModeDescription.GetDisplayMode(previousDisplayModeId);
             if (previousDisplayMode is not null)
                 view.ActiveViewport.DisplayMode = previousDisplayMode;
             requestedDisplayMode?.Dispose();
+            if (appliesAppearance)
+            {
+                document.UndoRecordingEnabled = undoRecordingWasEnabled;
+                document.Modified = documentWasModified;
+            }
         }
+    }
+
+    private static void ApplyAppearance(
+        RhinoDoc document,
+        Guid viewportId,
+        EffectiveViewportAppearance? appearance,
+        IDictionary<Guid, Layer> layerBefore,
+        IDictionary<Guid, ObjectAttributes> objectBefore)
+    {
+        if (appearance is null) return;
+        foreach (var pair in appearance.Layers)
+        {
+            var source = document.Layers.FindId(pair.Key);
+            if (source is null) continue;
+            layerBefore[pair.Key] = CopyLayer(source);
+            var layer = CopyLayer(source);
+            var visible = pair.Value == LayerVisibilityOverride.Visible;
+            layer.SetPerViewportVisible(viewportId, visible);
+            layer.SetPerViewportPersistentVisibility(viewportId, visible);
+            if (!document.Layers.Modify(layer, source.Index, quiet: true))
+                throw new InvalidOperationException(
+                    $"Rhino could not apply preview visibility for layer '{source.FullPath}'.");
+        }
+
+        foreach (var pair in appearance.Objects)
+        {
+            var item = document.Objects.FindId(pair.Key);
+            if (item is null) continue;
+            objectBefore[pair.Key] = item.Attributes.Duplicate();
+            var attributes = item.Attributes.Duplicate();
+            using var mode = DisplayModeDescription.GetDisplayMode(pair.Value.DisplayModeId)
+                ?? throw new InvalidOperationException(
+                    $"Display mode '{pair.Value.DisplayModeName}' is unavailable.");
+            if (!RhinoObjectDisplayModeOverride.TrySet(attributes, mode, viewportId) ||
+                !document.Objects.ModifyAttributes(item, attributes, quiet: true))
+                throw new InvalidOperationException(
+                    $"Rhino could not apply a preview display override to '{item.Id}'.");
+        }
+    }
+
+    private static void RestoreAppearance(
+        RhinoDoc document,
+        IReadOnlyDictionary<Guid, Layer> layerBefore,
+        IReadOnlyDictionary<Guid, ObjectAttributes> objectBefore)
+    {
+        foreach (var pair in layerBefore)
+        {
+            var source = document.Layers.FindId(pair.Key);
+            if (source is not null)
+                document.Layers.Modify(pair.Value, source.Index, quiet: true);
+        }
+        foreach (var pair in objectBefore)
+        {
+            var item = document.Objects.FindId(pair.Key);
+            if (item is not null)
+                document.Objects.ModifyAttributes(item, pair.Value, quiet: true);
+        }
+    }
+
+    private static Layer CopyLayer(Layer source)
+    {
+        var copy = new Layer();
+        copy.CopyAttributesFrom(source);
+        return copy;
     }
 
     private static NamedViewThumbnailResult Failure(

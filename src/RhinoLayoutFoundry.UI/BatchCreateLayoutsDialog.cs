@@ -76,6 +76,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
     private bool _updatingPaper;
     private bool _updatingEditors;
     private bool _updatingPreviewSelection;
+    private bool _dialogShown;
 
     internal BatchCreateLayoutsDialog(DocumentSnapshot snapshot, Guid? preferredFolderId)
         : this(snapshot, preferredFolderId, null)
@@ -149,7 +150,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         _layoutPickerTrigger = new LayoutPickerDrawable(_layoutChoices, selectedIndex: 1);
         _layoutSelectorPreview = new LayoutSelectionDrawable(_layoutChoices, selectedIndex: 1);
         _layoutSelectorPreview.ToolTip =
-            "Click a detail to edit its named view and display mode.";
+            "Choose a detail to set its named view and display mode.";
         UpdateLayoutSelector();
         _displayModePicker = new FilteredPicker(
             new[] { InheritDisplayMode }.Concat(snapshot.DisplayModes.Values),
@@ -352,11 +353,12 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         };
         Shown += (_, _) =>
         {
-            _layoutSelectorPreview.SetAvailableHeight(Math.Clamp(ClientSize.Height / 2, 260, 560));
+            // Keep the preview's requested size independent from the dialog's
+            // constraint pass. The containing pane scrolls when space is tight.
+            _layoutSelectorPreview.SetAvailableHeight(340);
+            _dialogShown = true;
             _ = LoadNamedViewPreviewsAsync();
         };
-        SizeChanged += (_, _) => _layoutSelectorPreview.SetAvailableHeight(
-            Math.Clamp(ClientSize.Height / 2, 260, 560));
         RefreshEditControlState();
         RefreshPreview();
     }
@@ -364,49 +366,79 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
     internal int CreatedCount { get; private set; }
     internal bool Succeeded { get; private set; }
 
-    private Control CreateLayoutsTab() => new StackLayout
+    private Control CreateLayoutsTab()
     {
-        Padding = new Padding(0, FoundryTheme.Space3, 0, 0),
-        Spacing = FoundryTheme.Space3,
-        HorizontalContentAlignment = HorizontalAlignment.Stretch,
-        Items =
+        const int upperPaneHeight = 360;
+        var settingsPane = new Scrollable
         {
-            new Scrollable
+            Border = BorderType.None,
+            ExpandContentWidth = true,
+            ExpandContentHeight = false,
+            Content = new FoundryAccordion(
+                new FoundryAccordionItem("Batch", CreateBatchEditor(), isExpanded: true),
+                new FoundryAccordionItem("Page size", CreatePaperEditor(), isExpanded: true),
+                new FoundryAccordionItem("Layout", CreateLayoutEditor(), isExpanded: true)),
+        };
+        var previewPane = new Scrollable
+        {
+            Border = BorderType.None,
+            ExpandContentWidth = false,
+            ExpandContentHeight = false,
+            Content = CreateSheetPreview(),
+        };
+        return new StackLayout
+        {
+            Padding = new Padding(0, FoundryTheme.Space3, 0, 0),
+            Spacing = FoundryTheme.Space3,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            Items =
             {
-                Border = BorderType.None,
-                ExpandContentWidth = false,
-                ExpandContentHeight = false,
-                Content = new StackLayout
+                new Scrollable
                 {
-                    Orientation = Orientation.Horizontal,
-                    VerticalContentAlignment = VerticalAlignment.Top,
-                    Spacing = FoundryTheme.Space3,
-                    Items =
+                    Border = BorderType.None,
+                    ExpandContentWidth = false,
+                    ExpandContentHeight = false,
+                    Height = upperPaneHeight,
+                    Content = new StackLayout
                     {
-                        CollapsibleCard("Batch", CreateBatchEditor(), 292),
-                        CollapsibleCard("Page size", CreatePaperEditor(), 236),
-                        CollapsibleCard("Layout", CreateLayoutEditor(), 356),
-                        FixedWidthCard("Preview", CreateSheetPreview(), 460),
+                        Orientation = Orientation.Horizontal,
+                        VerticalContentAlignment = VerticalAlignment.Stretch,
+                        Spacing = FoundryTheme.Space3,
+                        Items =
+                        {
+                            new Panel
+                            {
+                                Width = 500,
+                                Height = upperPaneHeight,
+                                Content = settingsPane,
+                            },
+                            new Panel
+                            {
+                                Width = 460,
+                                Height = upperPaneHeight,
+                                Content = previewPane,
+                            },
+                        },
                     },
                 },
-            },
-            _layoutGroupChipScroll,
-            new StackLayout
-            {
-                Orientation = Orientation.Horizontal,
-                VerticalContentAlignment = VerticalAlignment.Center,
-                Spacing = FoundryTheme.Space2,
-                Items =
+                _layoutGroupChipScroll,
+                new StackLayout
                 {
-                    _countLabel,
-                    _selectionHint,
-                    new StackLayoutItem(null, true),
-                    _clearSelectionButton,
+                    Orientation = Orientation.Horizontal,
+                    VerticalContentAlignment = VerticalAlignment.Center,
+                    Spacing = FoundryTheme.Space2,
+                    Items =
+                    {
+                        _countLabel,
+                        _selectionHint,
+                        new StackLayoutItem(null, true),
+                        _clearSelectionButton,
+                    },
                 },
+                new StackLayoutItem(_previewGrid, true),
             },
-            new StackLayoutItem(_previewGrid, true),
-        },
-    };
+        };
+    }
 
     private Control CreateBatchEditor()
     {
@@ -491,16 +523,10 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         return editor;
     }
 
-    private Control CreateSheetPreview() => new StackLayout
+    private Control CreateSheetPreview() => new Panel
     {
-        Spacing = FoundryTheme.Space2,
-        HorizontalContentAlignment = HorizontalAlignment.Stretch,
-        Items =
-        {
-            new Panel { Width = 428, Content = _layoutSelectorPreview },
-            FoundryTheme.MutedLabel(
-                "Click a detail in the sheet preview to assign its named view and display mode."),
-        },
+        Width = 428,
+        Content = _layoutSelectorPreview,
     };
 
     private Control CreateSheetDefaultsEditor()
@@ -609,7 +635,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         {
             AllowMultipleSelection = true,
             AllowEmptySelection = true,
-            Height = 270,
+            Height = 260,
             ToolTip = "Select one or more rows to edit only those layouts. Clear the selection to edit all layouts.",
         };
         grid.Columns.Add(TextColumn("#", row => row.Index, 44));
@@ -1434,30 +1460,41 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         }
     }
 
-    private async Task LoadNamedViewPreviewAsync(string name, Guid? displayModeId)
+    private async Task LoadNamedViewPreviewAsync(
+        string name,
+        Guid? displayModeId,
+        PreviewAppearance? previewAppearance = null)
     {
         if (_namedViewPreviewCancellation.IsCancellationRequested ||
-            _namedViewPreviewTray.HasPreview(name, displayModeId)) return;
+            _namedViewPreviewTray.HasPreview(name, displayModeId, previewAppearance)) return;
         var key = new NamedViewThumbnailKey(
             _snapshot.DocumentRuntimeSerialNumber,
             name,
             320,
             200,
             _snapshot.Revision,
-            displayModeId);
+            displayModeId,
+            previewAppearance?.AppearanceStateId,
+            previewAppearance?.FolderId,
+            previewAppearance?.DetailSlotId,
+            PreviewBackgroundArgb(FoundryTheme.CanvasPreviewBackground));
         if (!_pendingNamedViewPreviews.Add(key)) return;
         try
         {
             var result = await LayoutFoundryUiHost.CaptureNamedViewThumbnailAsync(
-                new NamedViewThumbnailRequest(key),
+                new NamedViewThumbnailRequest(key, previewAppearance?.Effective),
                 _namedViewPreviewCancellation.Token);
-            if (!result.Succeeded || _namedViewPreviewCancellation.IsCancellationRequested) return;
+            if (_namedViewPreviewCancellation.IsCancellationRequested) return;
+            if (!result.Succeeded)
+            {
+                _namedViewPreviewTray.SetPreviewFailure(
+                    result.Key,
+                    result.Error ?? "Rhino could not capture this preview.");
+                return;
+            }
             if (_snapshot.DocumentRuntimeSerialNumber != result.Key.DocumentRuntimeSerialNumber ||
                 !_snapshot.NamedViews.Contains(result.Key.NamedViewName)) return;
-            _namedViewPreviewTray.SetPreview(
-                result.Key.NamedViewName,
-                result.Key.DisplayModeId,
-                new Bitmap(result.PngBytes!));
+            _namedViewPreviewTray.SetPreview(result.Key, new Bitmap(result.PngBytes!));
         }
         finally
         {
@@ -1744,24 +1781,39 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             var namedViewLabel = mixedNamedViews
                 ? "Mixed views"
                 : string.IsNullOrWhiteSpace(namedViewValues[0])
-                    ? "Template camera"
+                    ? "Set detail"
                     : namedViewValues[0]!;
             var displayModeLabel = mixedDisplayModes
                 ? "Mixed modes"
                 : displayModeValues[0] is { } displayModeId
                     ? _snapshot.DisplayModes.GetValueOrDefault(displayModeId) ?? "Unavailable mode"
                     : "Rhino default";
+            var previewAppearance = ResolvePreviewAppearance(_drafts[targets[0]], detailIndex);
             var preview = mixedNamedViews || mixedDisplayModes
                 ? null
-                : _namedViewPreviewTray.PreviewFor(namedViewValues[0], displayModeValues[0]);
-            if (!mixedNamedViews && !string.IsNullOrWhiteSpace(namedViewValues[0]) &&
-                !_namedViewPreviewTray.HasPreview(namedViewValues[0]!, displayModeValues[0]))
-                _ = LoadNamedViewPreviewAsync(namedViewValues[0]!, displayModeValues[0]);
+                : _namedViewPreviewTray.PreviewFor(
+                    namedViewValues[0], displayModeValues[0], previewAppearance);
+            if (_dialogShown && !mixedNamedViews && !string.IsNullOrWhiteSpace(namedViewValues[0]) &&
+                !_namedViewPreviewTray.HasPreview(
+                    namedViewValues[0]!, displayModeValues[0], previewAppearance) &&
+                !_namedViewPreviewTray.HasPreviewFailure(
+                    namedViewValues[0]!, displayModeValues[0], previewAppearance))
+                _ = LoadNamedViewPreviewAsync(
+                    namedViewValues[0]!, displayModeValues[0], previewAppearance);
+            var previewMessage = _dialogShown && preview is null &&
+                                 !mixedNamedViews && !mixedDisplayModes &&
+                                 !string.IsNullOrWhiteSpace(namedViewValues[0])
+                ? _namedViewPreviewTray.HasPreviewFailure(
+                    namedViewValues[0]!, displayModeValues[0], previewAppearance)
+                    ? "Preview unavailable"
+                    : "Loading preview…"
+                : null;
             states[detailIndex] = new DetailPreviewState(
                 details[detailIndex],
                 namedViewLabel,
                 displayModeLabel,
                 preview,
+                previewMessage,
                 namedViewValues.Any(value => !string.IsNullOrWhiteSpace(value)),
                 displayModeValues.Any(value => value is not null),
                 mixedNamedViews,
@@ -1770,7 +1822,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
 
         _layoutSelectorPreview.SetDetailStates(states);
         _layoutSelectorPreview.ToolTip =
-            "Click a numbered detail to edit its named view and display mode.";
+            "Choose a numbered detail to set its named view and display mode.";
     }
 
     private static Guid? EffectiveDisplayMode(CreationDraft draft, int detailIndex)
@@ -1783,6 +1835,95 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             return template.DetailSlots[detailIndex].DisplayModeId;
         return null;
     }
+
+    private PreviewAppearance ResolvePreviewAppearance(CreationDraft draft, int detailIndex)
+    {
+        var folderId = PreviewFolderId(draft);
+        var sheetScope = new HierarchyScope(HierarchyScopeKind.Sheet, draft.DraftId);
+        var detailSlotId = draft.Layout.Template is { } template &&
+                           detailIndex >= 0 && detailIndex < template.DetailSlots.Count
+            ? template.DetailSlots[detailIndex].Id
+            : PreviewDetailScopeId(draft.DraftId, detailIndex);
+        var detailScope = new HierarchyScope(HierarchyScopeKind.Detail, detailSlotId);
+        var scopes = PreviewFolderScopes(folderId)
+            .Append(sheetScope)
+            .Append(detailScope)
+            .ToArray();
+        var rules = _snapshot.AppearanceRules
+            .GroupBy(item => item.Scope)
+            .ToDictionary(group => group.Key, group => group.Last());
+        if (draft.Layout.Template is { } layoutTemplate &&
+            detailIndex >= 0 && detailIndex < layoutTemplate.DetailSlots.Count)
+        {
+            var slot = layoutTemplate.DetailSlots[detailIndex];
+            rules[detailScope] = new HierarchyViewportRuleSet(
+                detailScope,
+                slot.Layers,
+                slot.Objects);
+        }
+
+        var assignments = _snapshot.StateAssignments.ToList();
+        if (draft.AppearanceStateId is { } appearanceStateId)
+        {
+            assignments.Add(new AppearanceStateAssignment(
+                draft.DraftId,
+                sheetScope,
+                appearanceStateId));
+        }
+        var effective = ViewportAppearanceResolver.Resolve(
+            scopes,
+            rules,
+            _snapshot.LayerSnapshots,
+            _snapshot.ModelObjects,
+            _snapshot.AppearanceStates.ToDictionary(item => item.Id),
+            assignments);
+        return new PreviewAppearance(
+            effective,
+            folderId,
+            draft.AppearanceStateId,
+            detailSlotId);
+    }
+
+    private Guid PreviewFolderId(CreationDraft draft)
+    {
+        if (_destinationDropDown.SelectedIndex >= 0 &&
+            (!_isEditMode || _destinationChangeCheck.Checked == true))
+            return _folders[_destinationDropDown.SelectedIndex].Id;
+        if (draft.ExistingPageViewId is { } pageViewId &&
+            _snapshot.Sheets.TryGetValue(pageViewId, out var sheet))
+            return sheet.FolderId;
+        return _snapshot.RootFolderId;
+    }
+
+    private IEnumerable<HierarchyScope> PreviewFolderScopes(Guid folderId)
+    {
+        var chain = new List<HierarchyScope>();
+        var seen = new HashSet<Guid>();
+        var current = folderId;
+        while (_snapshot.Folders.TryGetValue(current, out var folder) && seen.Add(current))
+        {
+            chain.Add(new HierarchyScope(HierarchyScopeKind.Folder, current));
+            if (folder.ParentId is not { } parent) break;
+            current = parent;
+        }
+        chain.Reverse();
+        return chain;
+    }
+
+    private static Guid PreviewDetailScopeId(Guid draftId, int detailIndex)
+    {
+        var bytes = draftId.ToByteArray();
+        var indexBytes = BitConverter.GetBytes(detailIndex + 1);
+        for (var index = 0; index < indexBytes.Length; index++)
+            bytes[bytes.Length - indexBytes.Length + index] ^= indexBytes[index];
+        return new Guid(bytes);
+    }
+
+    private static uint PreviewBackgroundArgb(Color color) =>
+        ((uint)color.Ab << 24) |
+        ((uint)color.Rb << 16) |
+        ((uint)color.Gb << 8) |
+        (uint)color.Bb;
 
     private void OpenDetailAssignmentDialog(int detailIndex)
     {
@@ -2021,71 +2162,6 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         return match.folder == default ? 0 : match.index;
     }
 
-    private static Control Card(string title, Control content) => FoundryTheme.Surface(new StackLayout
-    {
-        Padding = new Padding(FoundryTheme.Space3),
-        Spacing = FoundryTheme.Space2,
-        HorizontalContentAlignment = HorizontalAlignment.Stretch,
-        Items =
-        {
-            new Label { Text = title, Font = SystemFonts.Bold(13), TextColor = FoundryTheme.PrimaryText },
-            content,
-        },
-    });
-
-    private static Control FixedWidthCard(string title, Control content, int width) => new Panel
-    {
-        Width = width,
-        Content = Card(title, content),
-    };
-
-    private static Control CollapsibleCard(string title, Control content, int expandedWidth)
-    {
-        const int collapsedWidth = 120;
-        var titleLabel = new Label
-        {
-            Text = title,
-            Font = SystemFonts.Bold(13),
-            TextColor = FoundryTheme.PrimaryText,
-        };
-        var contentHost = new Panel { Content = content };
-        var toggle = new FoundryToolbarIconButton(
-            FoundryViewIcons.ChevronDown(),
-            $"Collapse {title}");
-        var card = new Panel { Width = expandedWidth };
-        card.Content = FoundryTheme.Surface(new StackLayout
-        {
-            Padding = new Padding(FoundryTheme.Space3),
-            Spacing = FoundryTheme.Space2,
-            HorizontalContentAlignment = HorizontalAlignment.Stretch,
-            Items =
-            {
-                new StackLayout
-                {
-                    Orientation = Orientation.Horizontal,
-                    VerticalContentAlignment = VerticalAlignment.Center,
-                    Items =
-                    {
-                        new StackLayoutItem(titleLabel, true),
-                        toggle,
-                    },
-                },
-                contentHost,
-            },
-        });
-        var expanded = true;
-        toggle.Click += (_, _) =>
-        {
-            expanded = !expanded;
-            contentHost.Visible = expanded;
-            card.Width = expanded ? expandedWidth : collapsedWidth;
-            toggle.Image = expanded ? FoundryViewIcons.ChevronDown() : FoundryViewIcons.ChevronRight();
-            toggle.ToolTip = expanded ? $"Collapse {title}" : $"Expand {title}";
-            card.Parent?.Invalidate();
-        };
-        return card;
-    }
-
     private static Control PickerWithHelp(
         Control picker,
         FoundryToolbarIconButton helpButton,
@@ -2318,10 +2394,17 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         string NamedViewLabel,
         string DisplayModeLabel,
         Bitmap? NamedViewPreview,
+        string? PreviewMessage,
         bool HasNamedView,
         bool HasDisplayMode,
         bool NamedViewIsMixed,
         bool DisplayModeIsMixed);
+
+    private sealed record PreviewAppearance(
+        EffectiveViewportAppearance Effective,
+        Guid FolderId,
+        Guid? AppearanceStateId,
+        Guid DetailSlotId);
 
     private sealed class DetailActivatedEventArgs(int index) : EventArgs
     {
@@ -2768,6 +2851,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         private readonly NamedViewChoice[] _choices;
         private readonly Font _titleFont = SystemFonts.Bold(8);
         private readonly Dictionary<PreviewKey, Bitmap> _previews = [];
+        private readonly Dictionary<PreviewKey, string> _previewFailures = [];
         private int _selectedIndex;
 
         internal NamedViewPreviewTray(NamedViewChoice[] choices, int selectedIndex)
@@ -2810,18 +2894,39 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             return PreviewFor(name, null);
         }
 
-        internal Bitmap? PreviewFor(string? name, Guid? displayModeId = null) => string.IsNullOrWhiteSpace(name)
+        internal Bitmap? PreviewFor(
+            string? name,
+            Guid? displayModeId = null,
+            PreviewAppearance? appearance = null) => string.IsNullOrWhiteSpace(name)
             ? null
-            : _previews.GetValueOrDefault(PreviewKey.For(name, displayModeId));
+            : _previews.GetValueOrDefault(PreviewKey.For(name, displayModeId, appearance));
 
-        internal bool HasPreview(string name, Guid? displayModeId) =>
-            _previews.ContainsKey(PreviewKey.For(name, displayModeId));
+        internal bool HasPreview(
+            string name,
+            Guid? displayModeId,
+            PreviewAppearance? appearance = null) =>
+            _previews.ContainsKey(PreviewKey.For(name, displayModeId, appearance));
 
-        internal void SetPreview(string name, Guid? displayModeId, Bitmap bitmap)
+        internal bool HasPreviewFailure(
+            string name,
+            Guid? displayModeId,
+            PreviewAppearance? appearance = null) =>
+            _previewFailures.ContainsKey(PreviewKey.For(name, displayModeId, appearance));
+
+        internal void SetPreview(NamedViewThumbnailKey thumbnailKey, Bitmap bitmap)
         {
-            var key = PreviewKey.For(name, displayModeId);
+            var key = PreviewKey.For(thumbnailKey);
             if (_previews.Remove(key, out var previous)) previous.Dispose();
+            _previewFailures.Remove(key);
             _previews[key] = bitmap;
+            Invalidate();
+            PreviewsChanged?.Invoke(this, EventArgs.Empty);
+        }
+
+        internal void SetPreviewFailure(NamedViewThumbnailKey thumbnailKey, string error)
+        {
+            var key = PreviewKey.For(thumbnailKey);
+            _previewFailures[key] = error;
             Invalidate();
             PreviewsChanged?.Invoke(this, EventArgs.Empty);
         }
@@ -2830,12 +2935,32 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         {
             foreach (var bitmap in _previews.Values) bitmap.Dispose();
             _previews.Clear();
+            _previewFailures.Clear();
         }
 
-        private readonly record struct PreviewKey(string Name, Guid? DisplayModeId)
+        private readonly record struct PreviewKey(
+            string Name,
+            Guid? DisplayModeId,
+            Guid? AppearanceStateId,
+            Guid? AppearanceScopeId,
+            Guid? DetailSlotId)
         {
-            internal static PreviewKey For(string name, Guid? displayModeId) =>
-                new(name.ToUpperInvariant(), displayModeId);
+            internal static PreviewKey For(
+                string name,
+                Guid? displayModeId,
+                PreviewAppearance? appearance) => new(
+                name.ToUpperInvariant(),
+                displayModeId,
+                appearance?.AppearanceStateId,
+                appearance?.FolderId,
+                appearance?.DetailSlotId);
+
+            internal static PreviewKey For(NamedViewThumbnailKey key) => new(
+                key.NamedViewName.ToUpperInvariant(),
+                key.DisplayModeId,
+                key.AppearanceStateId,
+                key.AppearanceScopeId,
+                key.DetailSlotId);
         }
 
         private void OnPaint(object? sender, PaintEventArgs eventArgs)
@@ -3465,6 +3590,17 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                     graphics.FillRectangle(
                         highlighted ? FoundryTheme.ToolbarActiveBackground : FoundryTheme.ToolbarButtonBackground,
                         detail);
+                    if (!string.IsNullOrWhiteSpace(state?.PreviewMessage) && detail.Height >= 46)
+                    {
+                        var messageY = detail.Y + Math.Max(22, (detail.Height - 10) / 2);
+                        DrawCentered(
+                            graphics,
+                            _detailMetaFont,
+                            FoundryTheme.MutedText,
+                            state.PreviewMessage,
+                            detail,
+                            messageY);
+                    }
                 }
                 graphics.DrawRectangle(new Pen(
                     highlighted ? FoundryTheme.PrimaryText : FoundryTheme.CanvasBorder,
@@ -3533,8 +3669,8 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             if (_hoveredDetailIndex == next) return;
             _hoveredDetailIndex = next;
             ToolTip = next >= 0
-                ? $"{_detailStates[next].Label}\nNamed view: {_detailStates[next].NamedViewLabel}\nDisplay mode: {_detailStates[next].DisplayModeLabel}\nClick to edit."
-                : "Sheet preview. Click a detail to edit its named view and display mode.";
+                ? $"{_detailStates[next].Label}\nNamed view: {_detailStates[next].NamedViewLabel}\nDisplay mode: {_detailStates[next].DisplayModeLabel}\nSet named view and display mode."
+                : "Sheet preview. Unconfigured details are labeled Set detail.";
             Invalidate();
         }
 
@@ -3542,7 +3678,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         {
             if (_hoveredDetailIndex < 0) return;
             _hoveredDetailIndex = -1;
-            ToolTip = "Click a detail to edit its named view and display mode.";
+            ToolTip = "Sheet preview. Unconfigured details are labeled Set detail.";
             Invalidate();
         }
 

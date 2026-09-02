@@ -443,13 +443,6 @@ internal static class FoundryViewIcons
         graphics.DrawLine(pen, 8, 10, 12, 6);
     });
 
-    internal static Icon ChevronRight() => NewIcon(graphics =>
-    {
-        var pen = new Pen(FoundryTheme.PrimaryText, Emphasis);
-        graphics.DrawLine(pen, 6, 4, 10, 8);
-        graphics.DrawLine(pen, 10, 8, 6, 12);
-    });
-
     private static Icon ZoomGlyph(bool includePlus) => NewIcon(graphics =>
     {
         var pen = new Pen(FoundryTheme.PrimaryText, Hairline);

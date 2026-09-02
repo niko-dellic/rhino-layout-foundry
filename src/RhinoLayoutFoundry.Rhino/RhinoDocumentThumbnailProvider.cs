@@ -111,29 +111,7 @@ internal sealed class RhinoDocumentThumbnailProvider : IDocumentThumbnailProvide
             requestedSize,
             new System.Drawing.Rectangle(System.Drawing.Point.Empty, requestedSize));
 
-        var requestedBackground = request.Key.BackgroundArgb == 0
-            ? (System.Drawing.Color?)null
-            : System.Drawing.Color.FromArgb(unchecked((int)request.Key.BackgroundArgb));
-        EventHandler<InitFrameBufferEventArgs>? initializeFrameBuffer = requestedBackground is { } fill
-            ? (_, eventArgs) => eventArgs.SetFill(fill)
-            : null;
-        if (initializeFrameBuffer is not null)
-            DisplayPipeline.InitFrameBuffer += initializeFrameBuffer;
-
-        System.Drawing.Bitmap? bitmap;
-        try
-        {
-            // Rhino initializes a separate framebuffer for page and detail
-            // display pipelines. Supplying the Foundry preview fill here keeps
-            // both surfaces consistent without changing the user's Rhino
-            // appearance or display-mode settings.
-            bitmap = ViewCapture.CaptureToBitmap(captureSettings);
-        }
-        finally
-        {
-            if (initializeFrameBuffer is not null)
-                DisplayPipeline.InitFrameBuffer -= initializeFrameBuffer;
-        }
+        var bitmap = CaptureToBitmap(captureSettings, request.Key.BackgroundArgb);
 
         using (bitmap)
         {
@@ -145,6 +123,34 @@ internal sealed class RhinoDocumentThumbnailProvider : IDocumentThumbnailProvide
             using var stream = new MemoryStream();
             bitmap.Save(stream, ImageFormat.Png);
             return new OverviewThumbnailResult(request.Key, stream.ToArray());
+        }
+    }
+
+    internal static System.Drawing.Bitmap? CaptureToBitmap(
+        ViewCaptureSettings captureSettings,
+        uint backgroundArgb)
+    {
+        var requestedBackground = backgroundArgb == 0
+            ? (System.Drawing.Color?)null
+            : System.Drawing.Color.FromArgb(unchecked((int)backgroundArgb));
+        EventHandler<InitFrameBufferEventArgs>? initializeFrameBuffer = requestedBackground is { } fill
+            ? (_, eventArgs) => eventArgs.SetFill(fill)
+            : null;
+        if (initializeFrameBuffer is not null)
+            DisplayPipeline.InitFrameBuffer += initializeFrameBuffer;
+
+        try
+        {
+            // Rhino initializes a separate framebuffer for page and detail
+            // display pipelines. Supplying the Foundry preview fill here keeps
+            // both surfaces consistent without changing the user's Rhino
+            // appearance or display-mode settings.
+            return ViewCapture.CaptureToBitmap(captureSettings);
+        }
+        finally
+        {
+            if (initializeFrameBuffer is not null)
+                DisplayPipeline.InitFrameBuffer -= initializeFrameBuffer;
         }
     }
 }
