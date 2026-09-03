@@ -910,7 +910,7 @@ public sealed partial class LayoutFoundryPanel : Panel
         {
             try
             {
-                if (!FoundryCreateMenuActions.TryInvoke(actionId, this))
+                if (!TryInvokeCreateAction(actionId))
                     _statusLabel.Text = "That create action is no longer available.";
             }
             catch (Exception exception)
@@ -919,6 +919,12 @@ public sealed partial class LayoutFoundryPanel : Panel
             }
         });
     }
+
+    public bool TryInvokeCreateAction(string actionId) =>
+        FoundryCreateMenuActions.TryInvoke(
+            actionId,
+            this,
+            FoundryAutomationBridge.CreateInvocationContext());
 
     private async Task InvokeCreateMenuItemSafelyAsync(CreateResourceKind kind)
     {

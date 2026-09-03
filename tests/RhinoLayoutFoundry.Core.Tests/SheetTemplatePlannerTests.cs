@@ -153,6 +153,31 @@ public sealed class SheetTemplatePlannerTests
     }
 
     [Fact]
+    public void BuiltInSingleDetailUsesSingleSpreadLabel()
+    {
+        var snapshot = WithTemplates(TestSnapshots.Create(), []);
+        var plan = new BatchCreateSheetsPlanner().Plan(new BatchCreateSheetsRequest(
+            42,
+            1,
+            TestSnapshots.RootFolderId,
+            [],
+            "Page {index}",
+            1,
+            1,
+            CreationSpecs:
+            [
+                new LayoutCreationSpec(
+                    1,
+                    new PaperRecipe(594, 420, "Millimeters"),
+                    BuiltInLayoutKind.SingleDetail),
+            ]), snapshot);
+
+        Assert.True(plan.CanApply);
+        var change = Assert.IsType<CreateSheetFromTemplateChange>(Assert.Single(plan.Changes));
+        Assert.Equal("1 Detail — Single spread", change.Template.Name);
+    }
+
+    [Fact]
     public void PerDetailDisplayModeOverridesTakePrecedenceOverPageDefault()
     {
         var snapshot = WithTemplates(TestSnapshots.Create(), []);

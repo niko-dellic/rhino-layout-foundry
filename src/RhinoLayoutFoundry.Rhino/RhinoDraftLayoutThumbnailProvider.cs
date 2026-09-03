@@ -314,6 +314,8 @@ internal sealed class RhinoDraftLayoutThumbnailProvider : IDraftLayoutThumbnailP
                 [sourceViewport.CameraLocation.X, sourceViewport.CameraLocation.Y, sourceViewport.CameraLocation.Z],
                 [sourceViewport.CameraTarget.X, sourceViewport.CameraTarget.Y, sourceViewport.CameraTarget.Z],
                 [sourceViewport.CameraUp.X, sourceViewport.CameraUp.Y, sourceViewport.CameraUp.Z]);
+            if (!document.Objects.Delete(previewDetail.Id, quiet: true))
+                throw new InvalidOperationException("Rhino could not remove the stale preview detail.");
             var rebuiltViewportId = RhinoDocumentMutationService.CreateDetail(
                 document,
                 previewPage,

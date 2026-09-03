@@ -2737,7 +2737,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
     private static LayoutChoice[] LayoutChoices(DocumentSnapshot snapshot) =>
     [
         new LayoutChoice("Blank — no details", BuiltInLayoutKind.Blank, null, null),
-        new LayoutChoice("1 Detail — Top", BuiltInLayoutKind.SingleDetail, null, null),
+        new LayoutChoice("1 Detail — Single spread", BuiltInLayoutKind.SingleDetail, null, null),
         new LayoutChoice("2 Details — Horizontal", BuiltInLayoutKind.TwoDetailsHorizontal, null, null),
         new LayoutChoice("2 Details — Vertical", BuiltInLayoutKind.TwoDetailsVertical, null, null),
         new LayoutChoice("4 Details — Grid", BuiltInLayoutKind.FourDetailsGrid, null, null),
@@ -3926,8 +3926,8 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
     private sealed class LayoutPickerDrawable : Drawable
     {
         private readonly LayoutChoice[] _choices;
-        private readonly Font _titleFont = SystemFonts.Bold(9);
-        private readonly Font _subtitleFont = SystemFonts.Default(9);
+        private readonly Font _titleFont = SystemFonts.Bold();
+        private readonly Font _subtitleFont = SystemFonts.Default();
         private int _selectedIndex;
         private bool _expanded;
         private bool _hovered;

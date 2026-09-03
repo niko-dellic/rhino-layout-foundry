@@ -11,12 +11,12 @@ public sealed record FoundryCreateMenuAction(
     string Id,
     string Label,
     Func<Image> CreateIcon,
-    Action<Control> Invoke);
+    Action<Control, IReadOnlyDictionary<string, object?>> Invoke);
 
 public static class FoundryCreateMenuActions
 {
     private const string SharedStateKey =
-        "RhinoLayoutFoundry.UI.FoundryCreateMenuActions.v1";
+        "RhinoLayoutFoundry.UI.FoundryCreateMenuActions.v2";
     private static readonly object SyncRoot = string.Intern(SharedStateKey);
 
     internal static IReadOnlyList<FoundryCreateMenuAction> Snapshot()
@@ -28,7 +28,7 @@ public static class FoundryCreateMenuActions
                     (string)entry[0],
                     (string)entry[1],
                     (Func<Image>)entry[2],
-                    (Action<Control>)entry[3]))
+                    (Action<Control, IReadOnlyDictionary<string, object?>>)entry[3]))
                 .ToArray();
         }
     }
@@ -55,20 +55,24 @@ public static class FoundryCreateMenuActions
         return new Registration(normalized.Id);
     }
 
-    public static bool TryInvoke(string actionId, Control owner)
+    public static bool TryInvoke(
+        string actionId,
+        Control owner,
+        IReadOnlyDictionary<string, object?> context)
     {
         ArgumentNullException.ThrowIfNull(owner);
+        ArgumentNullException.ThrowIfNull(context);
         if (string.IsNullOrWhiteSpace(actionId)) return false;
 
-        Action<Control>? invoke = null;
+        Action<Control, IReadOnlyDictionary<string, object?>>? invoke = null;
         lock (SyncRoot)
         {
             if (Registrations.TryGetValue(actionId.Trim(), out var entry))
-                invoke = (Action<Control>)entry[3];
+                invoke = (Action<Control, IReadOnlyDictionary<string, object?>>)entry[3];
         }
         if (invoke is null) return false;
 
-        invoke(owner);
+        invoke(owner, context);
         return true;
     }
 

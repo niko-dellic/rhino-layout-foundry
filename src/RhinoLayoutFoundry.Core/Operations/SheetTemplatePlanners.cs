@@ -537,7 +537,7 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
     private static string BuiltInLabel(BuiltInLayoutKind kind) => kind switch
     {
         BuiltInLayoutKind.Blank => "Blank",
-        BuiltInLayoutKind.SingleDetail => "1 Detail — Top",
+        BuiltInLayoutKind.SingleDetail => "1 Detail — Single spread",
         BuiltInLayoutKind.TwoDetailsHorizontal => "2 Details — Horizontal",
         BuiltInLayoutKind.TwoDetailsVertical => "2 Details — Vertical",
         BuiltInLayoutKind.FourDetailsGrid => "4 Details — Grid",

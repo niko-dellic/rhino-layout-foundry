@@ -9,6 +9,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\RhinoLayoutFoundry.Core\RhinoLayoutFoundry.Core.csproj" />
+    <ProjectReference Include="..\RhinoLayoutFoundry.Extensibility\RhinoLayoutFoundry.Extensibility.csproj" />
     <PackageReference Include="RhinoCommon" ExcludeAssets="runtime" />
   </ItemGroup>
   <ItemGroup Condition="$([MSBuild]::IsOSPlatform('OSX')) and Exists('$(RhinoMacResources)/Microsoft.macOS.dll') and Exists('$(RhinoMacResources)/Eto.macOS.dll')">

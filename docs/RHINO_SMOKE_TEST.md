@@ -23,12 +23,13 @@ dotnet test RhinoLayoutFoundry.sln --no-build
 6. Test one missing block-definition case and confirm preflight warns while sheets remain creatable without the block.
 7. Record that Rhino page creation is currently non-undoable; verify an injected failed batch leaves no generated pages rather than relying on Undo.
 
-Confirm that the output directory contains the plug-in and both project dependencies:
+Confirm that the output directory contains the plug-in and all project dependencies:
 
 ```text
 src/RhinoLayoutFoundry.Rhino/bin/Debug/net8.0/
 ├── RhinoLayoutFoundry.rhp
 ├── RhinoLayoutFoundry.Core.dll
+├── RhinoLayoutFoundry.Extensibility.dll
 └── RhinoLayoutFoundry.UI.dll
 ```
 
@@ -41,6 +42,7 @@ plugin_dir="$HOME/Library/Application Support/McNeel/Rhinoceros/8.0/MacPlugIns/R
 mkdir -p "$plugin_dir"
 cp src/RhinoLayoutFoundry.Rhino/bin/Debug/net8.0/RhinoLayoutFoundry.rhp \
   src/RhinoLayoutFoundry.Rhino/bin/Debug/net8.0/RhinoLayoutFoundry.Core.dll \
+  src/RhinoLayoutFoundry.Rhino/bin/Debug/net8.0/RhinoLayoutFoundry.Extensibility.dll \
   src/RhinoLayoutFoundry.Rhino/bin/Debug/net8.0/RhinoLayoutFoundry.UI.dll \
   src/RhinoLayoutFoundry.Rhino/bin/Debug/net8.0/RhinoLayoutFoundry.deps.json \
   src/RhinoLayoutFoundry.Rhino/bin/Debug/net8.0/RhinoLayoutFoundry.runtimeconfig.json \
