@@ -321,7 +321,12 @@ public sealed partial class LayoutFoundryPanel : Panel
             await CommitTemplateRolesAsync(eventArgs.Values);
         _createMenuOverlay = new CreateResourceMenuOverlay();
         _createMenuOverlay.ItemInvoked += (_, eventArgs) =>
-            QueueCreateMenuItem(eventArgs.Kind);
+        {
+            if (eventArgs.Kind is { } kind)
+                QueueCreateMenuItem(kind);
+            else if (eventArgs.ActionId is { } actionId)
+                QueueCreateMenuAction(actionId);
+        };
         _panelOverlayHost = new PixelLayout
         {
             BackgroundColor = FoundryTheme.PanelBackground,
@@ -884,9 +889,11 @@ public sealed partial class LayoutFoundryPanel : Panel
         if (_overview.DocumentRuntimeSerialNumber is null) return;
         var screenAnchor = _createButton.PointToScreen(new PointF(0, _createButton.Height));
         var anchor = _panelOverlayHost.PointFromScreen(screenAnchor);
-        _createMenuOverlay.ShowMenu(new Point(
-            (int)Math.Round(anchor.X),
-            (int)Math.Round(anchor.Y + FoundryTheme.Space1)));
+        _createMenuOverlay.ShowMenu(
+            new Point(
+                (int)Math.Round(anchor.X),
+                (int)Math.Round(anchor.Y + FoundryTheme.Space1)),
+            FoundryCreateMenuActions.Snapshot());
     }
 
     private void QueueCreateMenuItem(CreateResourceKind kind)
@@ -894,6 +901,22 @@ public sealed partial class LayoutFoundryPanel : Panel
         Application.Instance.AsyncInvoke(() =>
         {
             _ = InvokeCreateMenuItemSafelyAsync(kind);
+        });
+    }
+
+    private void QueueCreateMenuAction(string actionId)
+    {
+        Application.Instance.AsyncInvoke(() =>
+        {
+            try
+            {
+                if (!FoundryCreateMenuActions.TryInvoke(actionId, this))
+                    _statusLabel.Text = "That create action is no longer available.";
+            }
+            catch (Exception exception)
+            {
+                _statusLabel.Text = $"Could not open create action: {exception.Message}";
+            }
         });
     }
 

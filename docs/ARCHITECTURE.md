@@ -46,11 +46,22 @@ RhinoLayoutFoundry.UI
 ├── Selection, staging, progress, and diagnostics presentation
 └── UI-thread dispatch and image presentation
 
+RhinoLayoutFoundry.Extensibility
+├── Versioned, Rhino-independent companion contracts
+├── Sanitized snapshot and consent-gated capture requests
+└── Staged-plan approval and application boundary
+
 RhinoLayoutFoundry.Core.Tests
 RhinoLayoutFoundry.Rhino.Tests
 ```
 
 `Core` cannot reference RhinoCommon, Eto, operating-system UI libraries, or file-system globals. `UI` does not directly mutate `RhinoDoc`; it submits operations through application services. `Rhino` never stores control or view-model instances in document state.
+
+The extensibility assembly is part of the open-source plug-in. It deliberately
+contains no AI provider, prompt, subscription, or entitlement logic. A companion
+may propose only Core `OperationPlan` instances accepted by the Rhino host's
+allow-list. Captures and mutations cross separate explicit consent boundaries;
+arbitrary Rhino commands, scripts, deletions, and raw 3DM transfer are absent.
 
 ## 3. Domain model
 

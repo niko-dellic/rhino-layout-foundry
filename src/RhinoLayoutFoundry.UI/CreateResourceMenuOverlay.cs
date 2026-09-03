@@ -41,8 +41,11 @@ internal sealed class CreateResourceMenuOverlay : PixelLayout
 
     internal event EventHandler<CreateResourceInvokedEventArgs>? ItemInvoked;
 
-    internal void ShowMenu(Point anchor)
+    internal void ShowMenu(
+        Point anchor,
+        IReadOnlyList<FoundryCreateMenuAction> contributedActions)
     {
+        _menu.SetContributedActions(contributedActions);
         const int margin = 8;
         var x = Math.Clamp(anchor.X, margin, Math.Max(margin, ClientSize.Width - _menu.Width - margin));
         var below = anchor.Y;
@@ -64,11 +67,11 @@ internal sealed class CreateResourceMenuOverlay : PixelLayout
         private const int RowHeight = 38;
         private const int OuterPadding = 6;
         private readonly Font _font = SystemFonts.Default(14);
-        private readonly MenuItem[] _items =
+        private MenuItem[] _items =
         [
-            new(CreateResourceKind.Folder, "Folder", FoundryViewIcons.Folder()),
-            new(CreateResourceKind.Layout, "Sheet", FoundryViewIcons.Layout()),
-            new(CreateResourceKind.AppearanceState, "Appearance State", FoundryViewIcons.AppearanceState()),
+            new(CreateResourceKind.Folder, null, "Folder", FoundryViewIcons.Folder()),
+            new(CreateResourceKind.Layout, null, "Sheet", FoundryViewIcons.Layout()),
+            new(CreateResourceKind.AppearanceState, null, "Appearance State", FoundryViewIcons.AppearanceState()),
         ];
         private int _hovered = -1;
         private int _focused;
@@ -105,6 +108,33 @@ internal sealed class CreateResourceMenuOverlay : PixelLayout
 
         internal event EventHandler<CreateResourceInvokedEventArgs>? ItemInvoked;
         internal event EventHandler? CancelRequested;
+
+        internal void SetContributedActions(
+            IReadOnlyList<FoundryCreateMenuAction> contributedActions)
+        {
+            foreach (var item in _items)
+                item.Icon.Dispose();
+
+            var items = new List<MenuItem>
+            {
+                new(CreateResourceKind.Folder, null, "Folder", FoundryViewIcons.Folder()),
+                new(CreateResourceKind.Layout, null, "Sheet", FoundryViewIcons.Layout()),
+                new(CreateResourceKind.AppearanceState, null, "Appearance State", FoundryViewIcons.AppearanceState()),
+            };
+            foreach (var action in contributedActions)
+            {
+                var icon = action.CreateIcon()
+                    ?? throw new InvalidOperationException(
+                        $"The create-menu action '{action.Id}' did not provide an icon.");
+                items.Add(new MenuItem(null, action.Id, action.Label, icon));
+            }
+
+            _items = items.ToArray();
+            _hovered = -1;
+            _focused = Math.Clamp(_focused, 0, _items.Length - 1);
+            Height = OuterPadding * 2 + RowHeight * _items.Length;
+            Invalidate();
+        }
 
         private void OnKeyDown(object? sender, KeyEventArgs eventArgs)
         {
@@ -144,7 +174,12 @@ internal sealed class CreateResourceMenuOverlay : PixelLayout
         {
             if (index < 0 || index >= _items.Length) return;
             _focused = index;
-            ItemInvoked?.Invoke(this, new CreateResourceInvokedEventArgs(_items[index].Kind));
+            var item = _items[index];
+            ItemInvoked?.Invoke(
+                this,
+                item.Kind is { } kind
+                    ? new CreateResourceInvokedEventArgs(kind)
+                    : new CreateResourceInvokedEventArgs(item.ActionId!));
         }
 
         private void OnPaint(object? sender, PaintEventArgs eventArgs)
@@ -185,11 +220,27 @@ internal sealed class CreateResourceMenuOverlay : PixelLayout
             }
         }
 
-        private sealed record MenuItem(CreateResourceKind Kind, string Label, Icon Icon);
+        private sealed record MenuItem(
+            CreateResourceKind? Kind,
+            string? ActionId,
+            string Label,
+            Image Icon);
     }
 }
 
-internal sealed class CreateResourceInvokedEventArgs(CreateResourceKind kind) : EventArgs
+internal sealed class CreateResourceInvokedEventArgs : EventArgs
 {
-    internal CreateResourceKind Kind { get; } = kind;
+    internal CreateResourceInvokedEventArgs(CreateResourceKind kind)
+    {
+        Kind = kind;
+    }
+
+    internal CreateResourceInvokedEventArgs(string actionId)
+    {
+        ActionId = actionId;
+    }
+
+    internal CreateResourceKind? Kind { get; }
+
+    internal string? ActionId { get; }
 }

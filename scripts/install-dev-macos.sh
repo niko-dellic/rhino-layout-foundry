@@ -11,6 +11,7 @@ plugin_dir="${RHINO_LAYOUT_FOUNDRY_MAC_PLUGIN_DIR:-${HOME}/Library/Application S
 required_files=(
   RhinoLayoutFoundry.rhp
   RhinoLayoutFoundry.Core.dll
+  RhinoLayoutFoundry.Extensibility.dll
   RhinoLayoutFoundry.UI.dll
   RhinoLayoutFoundry.deps.json
   RhinoLayoutFoundry.runtimeconfig.json

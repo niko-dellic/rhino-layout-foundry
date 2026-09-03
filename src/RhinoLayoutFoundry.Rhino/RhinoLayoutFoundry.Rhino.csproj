@@ -11,6 +11,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\RhinoLayoutFoundry.Core\RhinoLayoutFoundry.Core.csproj" />
+    <ProjectReference Include="..\RhinoLayoutFoundry.Extensibility\RhinoLayoutFoundry.Extensibility.csproj" />
     <ProjectReference Include="..\RhinoLayoutFoundry.UI\RhinoLayoutFoundry.UI.csproj" />
     <PackageReference Include="RhinoCommon" ExcludeAssets="runtime" />
     <EmbeddedResource Include="Resources\LayoutFoundryMark.svg"

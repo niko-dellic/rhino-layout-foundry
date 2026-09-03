@@ -1,6 +1,7 @@
 using Rhino;
 using Rhino.Display;
 using Rhino.DocObjects;
+using Rhino.Geometry;
 using RhinoLayoutFoundry.Core.Domain;
 using RhinoLayoutFoundry.Core.Operations;
 
@@ -141,6 +142,39 @@ internal sealed class RhinoDocumentSnapshotProvider : IDocumentSnapshotProvider
                     item is InstanceObject);
             })
             .ToDictionary(item => item.Id);
+        var modelBounds = CaptureModelBounds(document);
+        var namedViewSnapshots = document.NamedViews
+            .Select(view => new NamedViewSnapshot(
+                view.Name,
+                Coordinates(view.Viewport.CameraLocation),
+                Coordinates(view.Viewport.TargetPoint),
+                Coordinates(view.Viewport.CameraUp),
+                view.Viewport.IsPerspectiveProjection
+                    ? FoundryViewProjection.Perspective
+                    : FoundryViewProjection.Parallel))
+            .ToArray();
+        var clippingPlanes = document.Objects
+            .OfType<ClippingPlaneObject>()
+            .Select(item =>
+            {
+                var geometry = item.ClippingPlaneGeometry;
+                var plane = geometry.Plane;
+                return new ClippingPlaneSnapshot(
+                    item.Id,
+                    string.IsNullOrWhiteSpace(item.Attributes.Name)
+                        ? "Clipping plane"
+                        : item.Attributes.Name,
+                    Coordinates(plane.Origin),
+                    Coordinates(plane.Normal),
+                    Math.Abs(geometry.Domain(0).Length),
+                    Math.Abs(geometry.Domain(1).Length),
+                    geometry.ViewportIds(),
+                    item.Attributes.GetUserString("RhinoLayoutFoundry.Automation.SessionId") ?? string.Empty);
+            })
+            .ToArray();
+        var standardViewportIds = document.Views.GetStandardRhinoViews()
+            .Select(view => view.ActiveViewport.Id)
+            .ToArray();
         var detailLayerVisibilities = new List<DetailLayerVisibilitySnapshot>();
         var objectOverrides = new List<DetailObjectDisplayOverrideSnapshot>();
         foreach (var detail in pageViews.SelectMany(page => page.GetDetailViews()))
@@ -277,8 +311,31 @@ internal sealed class RhinoDocumentSnapshotProvider : IDocumentSnapshotProvider
             state.TemplateLinks,
             state.AppearanceStates,
             state.StateAssignments,
-            state.DedicatedDetailLayerId);
+            state.DedicatedDetailLayerId,
+            modelBounds,
+            namedViewSnapshots,
+            clippingPlanes,
+            standardViewportIds);
     }
+
+    private static ModelBoundsSnapshot? CaptureModelBounds(RhinoDoc document)
+    {
+        var bounds = BoundingBox.Empty;
+        foreach (var item in document.Objects.Where(item =>
+                     item is not DetailViewObject && item.Attributes.Space == ActiveSpace.ModelSpace))
+        {
+            var objectBounds = item.Geometry?.GetBoundingBox(true) ?? BoundingBox.Empty;
+            if (objectBounds.IsValid) bounds.Union(objectBounds);
+        }
+
+        return bounds.IsValid
+            ? new ModelBoundsSnapshot(Coordinates(bounds.Min), Coordinates(bounds.Max))
+            : null;
+    }
+
+    private static Point3Coordinates Coordinates(Point3d point) => new(point.X, point.Y, point.Z);
+
+    private static Vector3Coordinates Coordinates(Vector3d vector) => new(vector.X, vector.Y, vector.Z);
 
     private static DetailPageBounds? PageBounds(DetailViewObject detail)
     {

@@ -230,6 +230,12 @@ Turn the completed capability set into a stable, supportable cross-platform v1.
 - Arbitrary scripting in naming or mapping rules
 - A native Rust component without an accepted profiling-based architecture decision
 
+The open-source automation SDK may support separately distributed companion
+products before v1, but subscriptions, AI orchestration, prompts, and provider
+credentials do not become part of this repository. The public host remains useful
+to any trusted companion through versioned snapshot, capture, staging, approval,
+and apply contracts.
+
 ## 10. Definition of done for every feature
 
 A feature is done only when:

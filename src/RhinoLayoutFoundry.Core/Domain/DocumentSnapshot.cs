@@ -26,7 +26,11 @@ public sealed record DocumentSnapshot(
     IReadOnlyList<CapabilityTemplateLink>? CapabilityLinks = null,
     IReadOnlyList<AppearanceStateRecord>? AppearanceStateResources = null,
     IReadOnlyList<AppearanceStateAssignment>? AppearanceStateAssignments = null,
-    Guid? DedicatedDetailLayerId = null)
+    Guid? DedicatedDetailLayerId = null,
+    ModelBoundsSnapshot? ModelBounds = null,
+    IReadOnlyList<NamedViewSnapshot>? NamedViewDetails = null,
+    IReadOnlyList<ClippingPlaneSnapshot>? ClippingPlaneDetails = null,
+    IReadOnlyList<Guid>? StandardViewportIds = null)
 {
     public IReadOnlyList<SheetTemplateRecipe> Templates => SheetTemplates ?? [];
     public IReadOnlyDictionary<string, string> Metadata =>
@@ -53,6 +57,9 @@ public sealed record DocumentSnapshot(
     public IReadOnlyList<CapabilityTemplateLink> TemplateLinks => CapabilityLinks ?? [];
     public IReadOnlyList<AppearanceStateRecord> AppearanceStates => AppearanceStateResources ?? [];
     public IReadOnlyList<AppearanceStateAssignment> StateAssignments => AppearanceStateAssignments ?? [];
+    public IReadOnlyList<NamedViewSnapshot> NamedViewSnapshots => NamedViewDetails ?? [];
+    public IReadOnlyList<ClippingPlaneSnapshot> ClippingPlanes => ClippingPlaneDetails ?? [];
+    public IReadOnlyList<Guid> StandardViewports => StandardViewportIds ?? [];
 }
 
 public sealed record SheetSnapshot(

@@ -3,6 +3,7 @@ using Rhino.FileIO;
 using Rhino.PlugIns;
 using Rhino.UI;
 using RhinoLayoutFoundry.Core.Overview;
+using RhinoLayoutFoundry.Extensibility;
 using RhinoLayoutFoundry.UI;
 
 namespace RhinoLayoutFoundry.Rhino;
@@ -12,6 +13,7 @@ public sealed class LayoutFoundryPlugin : PlugIn
     private readonly DocumentStateStore _stateStore = new();
     private readonly DocumentRevisionTracker _revisionTracker = new();
     private RhinoDocumentEventBridge? _eventBridge;
+    private IDisposable? _automationRegistration;
     private System.Drawing.Icon? _panelIcon;
 
     public LayoutFoundryPlugin()
@@ -28,6 +30,8 @@ public sealed class LayoutFoundryPlugin : PlugIn
             _revisionTracker,
             _stateStore,
             LayoutFoundryUiHost.NotifyOverviewChanged);
+        var thumbnailProvider = new RhinoDocumentThumbnailProvider();
+        var namedViewThumbnailProvider = new RhinoNamedViewThumbnailProvider();
         LayoutFoundryUiHost.Configure(
             new RhinoDocumentOverviewProvider(_stateStore),
             snapshotProvider,
@@ -39,14 +43,19 @@ public sealed class LayoutFoundryPlugin : PlugIn
                 _stateStore,
                 _revisionTracker,
                 () => LayoutFoundryUiHost.NotifyOverviewChanged(OverviewInvalidation.All)),
-            new RhinoDocumentThumbnailProvider(),
-            new RhinoNamedViewThumbnailProvider(),
+            thumbnailProvider,
+            namedViewThumbnailProvider,
             new RhinoDraftLayoutThumbnailProvider(_stateStore),
             new RhinoMutationCapabilityProvider(),
             new RhinoTemplateCaptureContextProvider(),
             new RhinoDocumentObserverSnapshotProvider(_stateStore, _revisionTracker),
             new RhinoModelObjectSelectionService(),
             RhinoProjectIconLoader.Load());
+        _automationRegistration = FoundryAutomation.Register(new RhinoFoundryAutomationHost(
+            snapshotProvider,
+            mutationService,
+            thumbnailProvider,
+            namedViewThumbnailProvider));
         _panelIcon = PanelIcon.Create();
         Panels.RegisterPanel(this, typeof(LayoutFoundryPanel), "Layout Foundry", _panelIcon);
         _eventBridge = new RhinoDocumentEventBridge(
@@ -64,6 +73,8 @@ public sealed class LayoutFoundryPlugin : PlugIn
         RhinoDoc.CloseDocument -= OnCloseDocument;
         _eventBridge?.Dispose();
         _eventBridge = null;
+        _automationRegistration?.Dispose();
+        _automationRegistration = null;
         LayoutFoundryUiHost.Reset();
         _panelIcon = null;
         Instance = null;

@@ -86,6 +86,10 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
 
         return plan.Changes switch
         {
+            [CreateNamedViewChange createNamedView] =>
+                ApplyCreateNamedView(document, plan, createNamedView),
+            [CreateClippingPlaneChange createClippingPlane] =>
+                ApplyCreateClippingPlane(document, plan, createClippingPlane),
             [RenameSheetChange rename] => ApplyRename(document, plan, rename),
             [CreateSheetChange create] => ApplyCreateSheet(document, plan, create),
             [BatchUpdateSheetsChange update] => ApplyBatchUpdate(document, plan, update),
@@ -120,6 +124,146 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
             _ => Failure("operation.unsupported_plan", "The operation plan is not supported by this build."),
         };
     }
+
+    private OperationResult ApplyCreateNamedView(
+        RhinoDoc document,
+        OperationPlan plan,
+        CreateNamedViewChange change)
+    {
+        var definition = change.Definition;
+        if (document.NamedViews.FindByName(definition.Name) >= 0)
+            return Failure("named_view.duplicate_name", $"A named view called '{definition.Name}' already exists.");
+        var sourceView = document.Views.ActiveView ?? document.Views.GetStandardRhinoViews().FirstOrDefault();
+        if (sourceView is null)
+            return Failure("named_view.viewport_unavailable", "No Rhino viewport is available to seed the named view.");
+
+        var undoRecord = document.BeginUndoRecord(plan.UndoDescription);
+        if (undoRecord == 0)
+            return Failure("operation.undo_unavailable", "Rhino could not start a dedicated undo record.");
+        var created = false;
+        try
+        {
+            using var view = new ViewInfo(sourceView.ActiveViewport) { Name = definition.Name };
+            var viewport = view.Viewport;
+            viewport.UnlockCamera();
+            var location = Point(definition.CameraLocation);
+            var target = Point(definition.CameraTarget);
+            var direction = target - location;
+            if (!viewport.SetCameraLocation(location) ||
+                !viewport.SetCameraDirection(direction) ||
+                !viewport.SetCameraUp(Vector(definition.CameraUp)))
+                throw new InvalidOperationException("Rhino rejected the proposed camera frame.");
+            viewport.TargetPoint = target;
+            var projectionChanged = definition.Projection switch
+            {
+                FoundryViewProjection.Parallel => viewport.ChangeToParallelProjection(true),
+                FoundryViewProjection.Perspective => viewport.ChangeToPerspectiveProjection(
+                    location.DistanceTo(target), true, definition.LensLength),
+                _ => false,
+            };
+            if (!projectionChanged)
+                throw new InvalidOperationException("Rhino rejected the proposed projection.");
+            if (document.NamedViews.Add(view) < 0)
+                throw new InvalidOperationException("Rhino did not create the named view.");
+            created = true;
+            document.Modified = true;
+            _revisionTracker.Bump(document);
+            _overviewChanged(OverviewInvalidation.All);
+            return SuccessWithEntity(plan, "named_view.created", $"Created named view '{definition.Name}'.");
+        }
+        catch (Exception exception)
+        {
+            if (created) document.NamedViews.Delete(definition.Name);
+            return Failure(
+                "named_view.apply_failed",
+                $"Named-view creation failed and the new view was removed: {exception.Message}");
+        }
+        finally
+        {
+            document.EndUndoRecord(undoRecord);
+        }
+    }
+
+    private OperationResult ApplyCreateClippingPlane(
+        RhinoDoc document,
+        OperationPlan plan,
+        CreateClippingPlaneChange change)
+    {
+        var definition = change.Definition;
+        var availableViewportIds = document.Views.GetStandardRhinoViews()
+            .Select(view => view.ActiveViewport.Id)
+            .Concat(document.Views.GetPageViews().Select(page => page.MainViewport.Id))
+            .Concat(document.Views.GetPageViews()
+                .SelectMany(page => page.GetDetailViews())
+                .Select(detail => detail.Viewport.Id))
+            .ToHashSet();
+        var missingViewport = definition.ViewportIds.FirstOrDefault(id => !availableViewportIds.Contains(id));
+        if (missingViewport != Guid.Empty)
+            return Failure("clipping_plane.viewport_missing", "A targeted viewport no longer exists.");
+
+        var undoRecord = document.BeginUndoRecord(plan.UndoDescription);
+        if (undoRecord == 0)
+            return Failure("operation.undo_unavailable", "Rhino could not start a dedicated undo record.");
+        var objectId = Guid.Empty;
+        try
+        {
+            var normal = Vector(definition.Normal);
+            var xAxis = Vector(definition.XAxis);
+            var yAxis = Vector3d.CrossProduct(normal, xAxis);
+            if (!normal.Unitize() || !xAxis.Unitize() || !yAxis.Unitize())
+                throw new InvalidOperationException("Rhino could not normalize the clipping-plane axes.");
+            xAxis = Vector3d.CrossProduct(yAxis, normal);
+            if (!xAxis.Unitize())
+                throw new InvalidOperationException("Rhino could not orthogonalize the clipping-plane axes.");
+            var plane = new Plane(Point(definition.Origin), xAxis, yAxis);
+            if (!plane.IsValid)
+                throw new InvalidOperationException("The clipping plane is invalid.");
+            var attributes = new ObjectAttributes { Name = definition.Name };
+            attributes.SetUserString("RhinoLayoutFoundry.Automation.SessionId", definition.SessionId);
+            attributes.SetUserString("RhinoLayoutFoundry.Automation.Kind", "ClippingPlane");
+            objectId = document.Objects.AddClippingPlane(
+                plane,
+                definition.Width,
+                definition.Height,
+                definition.ViewportIds,
+                attributes);
+            if (objectId == Guid.Empty)
+                throw new InvalidOperationException("Rhino did not create the clipping plane.");
+            document.Modified = true;
+            _revisionTracker.Bump(document);
+            document.Views.Redraw();
+            _overviewChanged(OverviewInvalidation.All);
+            return SuccessWithEntity(
+                plan,
+                "clipping_plane.created",
+                $"Created clipping plane '{definition.Name}'.",
+                objectId);
+        }
+        catch (Exception exception)
+        {
+            if (objectId != Guid.Empty) document.Objects.Delete(objectId, quiet: true);
+            return Failure(
+                "clipping_plane.apply_failed",
+                $"Clipping-plane creation failed and the new object was removed: {exception.Message}");
+        }
+        finally
+        {
+            document.EndUndoRecord(undoRecord);
+        }
+    }
+
+    private static Point3d Point(Point3Coordinates value) => new(value.X, value.Y, value.Z);
+
+    private static Vector3d Vector(Vector3Coordinates value) => new(value.X, value.Y, value.Z);
+
+    private static OperationResult SuccessWithEntity(
+        OperationPlan plan,
+        string code,
+        string message,
+        Guid? entityId = null) =>
+        new(true, plan.Diagnostics.Concat([
+            new Diagnostic(code, DiagnosticSeverity.Information, message, entityId),
+        ]).ToArray());
 
     private OperationResult ApplyNamedView(
         RhinoDoc document,

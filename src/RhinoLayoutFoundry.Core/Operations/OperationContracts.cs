@@ -43,6 +43,10 @@ public sealed record OperationPlan(
 
 public abstract record OperationChange;
 
+public sealed record CreateNamedViewChange(NamedViewDefinition Definition) : OperationChange;
+
+public sealed record CreateClippingPlaneChange(ClippingPlaneDefinition Definition) : OperationChange;
+
 public sealed record RenameSheetChange(
     Guid PageViewId,
     string ExpectedName,

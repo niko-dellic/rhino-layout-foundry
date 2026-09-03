@@ -24,6 +24,7 @@ Development now includes a functional existing-sheet batch editor, the first Mil
 - Capture layouts as reusable document-local or shared sheet templates.
 - Create sheets in batches and assign named views to detail slots.
 - Present every sheet on an observer canvas for navigation, spatial organization, reordering, and named-view assignment.
+- Expose an approval-gated automation SDK for trusted companion tools without exposing arbitrary Rhino commands or raw model geometry.
 
 ## Terminology
 
@@ -57,6 +58,7 @@ The hierarchy is a fixed-column property table on both platforms: Name, Print, P
 - [Testing and release](docs/TESTING_AND_RELEASE.md) — test strategy, compatibility matrix, performance gates, CI, and Yak releases
 - [Development status](docs/DEVELOPMENT_STATUS.md) — completed foundation work, immediate milestones, and prioritized test backlog
 - [Rhino smoke test](docs/RHINO_SMOKE_TEST.md) — build, development-load, hierarchy, previews, batch-shell, and lifecycle verification
+- [Automation SDK](docs/AUTOMATION_SDK.md) — companion integration, capture consent, staged plans, and trust boundaries
 
 ## Planned development prerequisites
 
