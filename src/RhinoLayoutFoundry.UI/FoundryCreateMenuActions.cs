@@ -15,13 +15,22 @@ public sealed record FoundryCreateMenuAction(
 
 public static class FoundryCreateMenuActions
 {
-    private static readonly object SyncRoot = new();
-    private static readonly Dictionary<string, FoundryCreateMenuAction> Registrations =
-        new(StringComparer.Ordinal);
+    private const string SharedStateKey =
+        "RhinoLayoutFoundry.UI.FoundryCreateMenuActions.v1";
+    private static readonly object SyncRoot = string.Intern(SharedStateKey);
 
     internal static IReadOnlyList<FoundryCreateMenuAction> Snapshot()
     {
-        lock (SyncRoot) return Registrations.Values.ToArray();
+        lock (SyncRoot)
+        {
+            return Registrations.Values
+                .Select(entry => new FoundryCreateMenuAction(
+                    (string)entry[0],
+                    (string)entry[1],
+                    (Func<Image>)entry[2],
+                    (Action<Control>)entry[3]))
+                .ToArray();
+        }
     }
 
     public static IDisposable Register(FoundryCreateMenuAction action)
@@ -37,7 +46,8 @@ public static class FoundryCreateMenuActions
         var normalized = action with { Id = action.Id.Trim(), Label = action.Label.Trim() };
         lock (SyncRoot)
         {
-            if (!Registrations.TryAdd(normalized.Id, normalized))
+            if (!Registrations.TryAdd(normalized.Id,
+                    [normalized.Id, normalized.Label, normalized.CreateIcon, normalized.Invoke]))
                 throw new InvalidOperationException(
                     $"A Foundry create-menu action called '{normalized.Id}' is already registered.");
         }
@@ -50,13 +60,30 @@ public static class FoundryCreateMenuActions
         ArgumentNullException.ThrowIfNull(owner);
         if (string.IsNullOrWhiteSpace(actionId)) return false;
 
-        FoundryCreateMenuAction? action;
+        Action<Control>? invoke = null;
         lock (SyncRoot)
-            Registrations.TryGetValue(actionId.Trim(), out action);
-        if (action is null) return false;
+        {
+            if (Registrations.TryGetValue(actionId.Trim(), out var entry))
+                invoke = (Action<Control>)entry[3];
+        }
+        if (invoke is null) return false;
 
-        action.Invoke(owner);
+        invoke(owner);
         return true;
+    }
+
+    private static Dictionary<string, object[]> Registrations
+    {
+        get
+        {
+            if (AppDomain.CurrentDomain.GetData(SharedStateKey) is
+                Dictionary<string, object[]> registrations)
+                return registrations;
+
+            registrations = new Dictionary<string, object[]>(StringComparer.Ordinal);
+            AppDomain.CurrentDomain.SetData(SharedStateKey, registrations);
+            return registrations;
+        }
     }
 
     private sealed class Registration(string actionId) : IDisposable
