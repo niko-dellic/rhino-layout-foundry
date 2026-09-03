@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using Rhino;
 using Rhino.Display;
 using Rhino.DocObjects;
+using Rhino.Geometry;
 using RhinoLayoutFoundry.Core.Domain;
 using RhinoLayoutFoundry.Core.Operations;
 using RhinoLayoutFoundry.Core.Overview;
@@ -277,15 +278,17 @@ internal sealed class RhinoDraftLayoutThumbnailProvider : IDraftLayoutThumbnailP
         var previewDetails = previewPage.GetDetailViews().ToArray();
         if (previewDetails.Length != sourceDetails.Length)
             throw new InvalidOperationException("Rhino did not preserve the sheet details in the preview copy.");
+        var previewBySourceId = MatchDuplicatedDetails(sourceDetails, previewDetails);
 
         for (var index = 0; index < sourceDetails.Length; index++)
         {
             var sourceDetail = sourceDetails[index];
-            var previewDetail = previewDetails[index];
+            var previewDetail = previewBySourceId[sourceDetail.Viewport.Id];
             if (!requestedById.TryGetValue(sourceDetail.Viewport.Id, out var requested))
                 throw new InvalidOperationException("A detail preview assignment is unavailable.");
 
-            var cameraChanged = !string.IsNullOrWhiteSpace(requested.NamedViewName);
+            var cameraChanged = requested.ChangeNamedView &&
+                                !string.IsNullOrWhiteSpace(requested.NamedViewName);
             var displayModeChanged = requested.DisplayModeId is { } displayModeId &&
                                      previewDetail.Viewport.DisplayMode.Id != displayModeId;
             if (!cameraChanged && !displayModeChanged) continue;
@@ -305,10 +308,10 @@ internal sealed class RhinoDraftLayoutThumbnailProvider : IDraftLayoutThumbnailP
                 bounds.Max.X,
                 bounds.Max.Y,
                 sourceViewport.IsPerspectiveProjection ? "Perspective" : "Top",
-                sourceDetail.DetailGeometry.IsParallelProjection
+                !cameraChanged && sourceDetail.DetailGeometry.IsParallelProjection
                     ? sourceDetail.DetailGeometry.PageToModelRatio
                     : null,
-                sourceDetail.DetailGeometry.IsProjectionLocked,
+                !cameraChanged && sourceDetail.DetailGeometry.IsProjectionLocked,
                 requested.DisplayModeId,
                 null,
                 [sourceViewport.CameraLocation.X, sourceViewport.CameraLocation.Y, sourceViewport.CameraLocation.Z],
@@ -322,12 +325,25 @@ internal sealed class RhinoDraftLayoutThumbnailProvider : IDraftLayoutThumbnailP
                 slot,
                 document.PageUnitSystem,
                 1.0,
-                requested.NamedViewName,
-                sourceDetail.Attributes.LayerIndex);
+                assignedNamedView: null,
+                detailLayerIndex: sourceDetail.Attributes.LayerIndex);
             var rebuilt = previewPage.GetDetailViews().FirstOrDefault(detail =>
                 detail.Viewport.Id == rebuiltViewportId)
                 ?? throw new InvalidOperationException("Rhino could not find a rebuilt preview detail.");
-            if (!cameraChanged)
+            if (cameraChanged)
+            {
+                var namedViewIndex = document.NamedViews.FindByName(requested.NamedViewName!);
+                if (namedViewIndex < 0 ||
+                    !RhinoDocumentMutationService.RestoreNamedViewForDetail(
+                        document,
+                        namedViewIndex,
+                        rebuilt))
+                    throw new InvalidOperationException(
+                        $"Rhino could not apply named view '{requested.NamedViewName}' to a preview detail.");
+                if (!rebuilt.CommitViewportChanges())
+                    throw new InvalidOperationException("Rhino could not commit a preview detail camera.");
+            }
+            else
             {
                 rebuilt.Viewport.SetViewProjection(new ViewportInfo(sourceViewport), true);
                 if (requested.DisplayModeId is { } inheritedDisplayModeId)
@@ -339,7 +355,7 @@ internal sealed class RhinoDraftLayoutThumbnailProvider : IDraftLayoutThumbnailP
                 if (!rebuilt.CommitViewportChanges())
                     throw new InvalidOperationException("Rhino could not restore a preview detail camera.");
             }
-            previewDetails[index] = rebuilt;
+            previewBySourceId[sourceDetail.Viewport.Id] = rebuilt;
         }
         previewPage.SetPageAsActive();
 
@@ -383,7 +399,7 @@ internal sealed class RhinoDraftLayoutThumbnailProvider : IDraftLayoutThumbnailP
         for (var index = 0; index < sourceDetails.Length; index++)
         {
             var sourceDetail = sourceDetails[index];
-            var previewDetail = previewDetails[index];
+            var previewDetail = previewBySourceId[sourceDetail.Viewport.Id];
             var requested = requestedById[sourceDetail.Viewport.Id];
 
             var sourceDetailScope = new HierarchyScope(
@@ -404,6 +420,35 @@ internal sealed class RhinoDraftLayoutThumbnailProvider : IDraftLayoutThumbnailP
                 layerBefore,
                 objectBefore);
         }
+    }
+
+    private static Dictionary<Guid, DetailViewObject> MatchDuplicatedDetails(
+        IReadOnlyList<DetailViewObject> sourceDetails,
+        IReadOnlyList<DetailViewObject> previewDetails)
+    {
+        var remaining = previewDetails.ToList();
+        var result = new Dictionary<Guid, DetailViewObject>();
+        foreach (var source in sourceDetails)
+        {
+            var sourceBounds = source.DetailGeometry.GetBoundingBox(true);
+            var best = remaining
+                .OrderBy(candidate => DetailBoundsDistance(
+                    sourceBounds,
+                    candidate.DetailGeometry.GetBoundingBox(true)))
+                .First();
+            result[source.Viewport.Id] = best;
+            remaining.Remove(best);
+        }
+        return result;
+    }
+
+    private static double DetailBoundsDistance(BoundingBox left, BoundingBox right)
+    {
+        if (!left.IsValid || !right.IsValid) return double.MaxValue;
+        var centerDistance = left.Center.DistanceToSquared(right.Center);
+        var widthDistance = left.Diagonal.X - right.Diagonal.X;
+        var heightDistance = left.Diagonal.Y - right.Diagonal.Y;
+        return centerDistance + widthDistance * widthDistance + heightDistance * heightDistance;
     }
 
     private static void ReplaceDirectAssignment(

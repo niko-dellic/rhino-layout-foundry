@@ -124,7 +124,8 @@ public sealed record EditDetailPreviewAssignment(
     Guid DetailViewportId,
     string? NamedViewName,
     Guid? DisplayModeId,
-    Guid? AppearanceStateId);
+    Guid? AppearanceStateId,
+    bool ChangeNamedView = false);
 
 public sealed record EditSheetThumbnailRequest(
     EditSheetThumbnailKey Key,

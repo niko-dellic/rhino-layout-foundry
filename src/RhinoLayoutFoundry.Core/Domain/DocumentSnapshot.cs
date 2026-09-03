@@ -30,7 +30,8 @@ public sealed record DocumentSnapshot(
     ModelBoundsSnapshot? ModelBounds = null,
     IReadOnlyList<NamedViewSnapshot>? NamedViewDetails = null,
     IReadOnlyList<ClippingPlaneSnapshot>? ClippingPlaneDetails = null,
-    IReadOnlyList<Guid>? StandardViewportIds = null)
+    IReadOnlyList<Guid>? StandardViewportIds = null,
+    Guid? ActiveViewportDisplayModeId = null)
 {
     public IReadOnlyList<SheetTemplateRecipe> Templates => SheetTemplates ?? [];
     public IReadOnlyDictionary<string, string> Metadata =>

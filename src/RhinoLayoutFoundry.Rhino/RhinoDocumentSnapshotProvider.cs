@@ -316,7 +316,8 @@ internal sealed class RhinoDocumentSnapshotProvider : IDocumentSnapshotProvider
             modelBounds,
             namedViewSnapshots,
             clippingPlanes,
-            standardViewportIds);
+            standardViewportIds,
+            document.Views.ActiveView?.ActiveViewport.DisplayMode.Id);
     }
 
     private static ModelBoundsSnapshot? CaptureModelBounds(RhinoDoc document)

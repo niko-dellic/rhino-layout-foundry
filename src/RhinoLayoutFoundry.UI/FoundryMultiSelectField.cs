@@ -12,12 +12,16 @@ internal sealed class FoundryMultiSelectField : Panel
 {
     private readonly TextBox _search = new();
     private readonly FoundryToolbarIconButton _toggle;
-    private readonly Label _summary = FoundryTheme.MutedLabel("Nothing selected");
+    private readonly Panel _badges = new();
+    private readonly Label _emptyState = FoundryTheme.MutedLabel("Nothing selected — type a custom drawing and press Enter");
     private readonly ListBox _results = new();
     private readonly List<FoundryMultiSelectChoice> _choices;
     private readonly List<string> _selected = [];
+    private readonly List<FoundryRemovableBadge> _badgeControls = [];
     private Form? _popup;
     private bool _updating;
+    private bool _layingOutBadges;
+    private int _badgeLayoutWidth;
 
     internal FoundryMultiSelectField(
         IEnumerable<FoundryMultiSelectChoice> choices,
@@ -106,10 +110,16 @@ internal sealed class FoundryMultiSelectField : Panel
                         _toggle,
                     },
                 },
-                _summary,
+                _badges,
+                _emptyState,
             },
         };
-        UpdateSummary();
+        SizeChanged += (_, _) =>
+        {
+            var width = ClientSize.Width;
+            if (width > 0 && Math.Abs(width - _badgeLayoutWidth) > 2) UpdateBadges(width);
+        };
+        UpdateBadges();
         UnLoad += (_, _) => ClosePopup();
     }
 
@@ -124,7 +134,7 @@ internal sealed class FoundryMultiSelectField : Panel
             .Where(value => !string.IsNullOrWhiteSpace(value))
             .Select(value => value.Trim())
             .Distinct(StringComparer.OrdinalIgnoreCase));
-        UpdateSummary();
+        UpdateBadges();
         Filter(show: false);
         ValueChanged?.Invoke(this, EventArgs.Empty);
     }
@@ -139,7 +149,7 @@ internal sealed class FoundryMultiSelectField : Panel
             changed = true;
         }
         if (!changed) return;
-        UpdateSummary();
+        UpdateBadges();
         Filter(show: _popup?.Visible == true);
         ValueChanged?.Invoke(this, EventArgs.Empty);
     }
@@ -153,6 +163,7 @@ internal sealed class FoundryMultiSelectField : Panel
             _search.Enabled = value;
             _toggle.Enabled = value;
             _results.Enabled = value;
+            foreach (var badge in _badgeControls) badge.Enabled = value;
             if (!value) CloseResults();
         }
     }
@@ -176,7 +187,7 @@ internal sealed class FoundryMultiSelectField : Panel
             string.Equals(item, value, StringComparison.OrdinalIgnoreCase));
         if (existing >= 0) _selected.RemoveAt(existing);
         else _selected.Add(value);
-        UpdateSummary();
+        UpdateBadges();
         ValueChanged?.Invoke(this, EventArgs.Empty);
     }
 
@@ -205,14 +216,75 @@ internal sealed class FoundryMultiSelectField : Panel
         else CloseResults();
     }
 
-    private void UpdateSummary()
+    private void UpdateBadges(int? requestedWidth = null)
     {
-        _summary.Text = _selected.Count == 0
-            ? "Nothing selected — type a custom drawing and press Enter"
-            : _selected.Count <= 4
-                ? string.Join("  ·  ", _selected)
-                : $"{string.Join("  ·  ", _selected.Take(3))}  ·  +{_selected.Count - 3} more";
-        _summary.ToolTip = _selected.Count == 0 ? null : string.Join("\n", _selected);
+        if (_layingOutBadges) return;
+        _layingOutBadges = true;
+        try
+        {
+            var availableWidth = Math.Max(120, requestedWidth ?? (ClientSize.Width > 0 ? ClientSize.Width : 360));
+            _badgeLayoutWidth = availableWidth;
+            _badgeControls.Clear();
+            _emptyState.Visible = _selected.Count == 0;
+            _badges.Visible = _selected.Count > 0;
+            if (_selected.Count == 0)
+            {
+                _badges.Content = null;
+                return;
+            }
+
+            var rows = new StackLayout
+            {
+                Spacing = FoundryTheme.Space1,
+                HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            };
+            var row = BadgeRow();
+            var usedWidth = 0;
+            foreach (var value in _selected)
+            {
+                var badge = new FoundryRemovableBadge(value) { Enabled = Enabled };
+                if (badge.Width > availableWidth) badge.Size = new Size(availableWidth, badge.Height);
+                var nextWidth = usedWidth == 0 ? badge.Width : usedWidth + FoundryTheme.Space1 + badge.Width;
+                if (usedWidth > 0 && nextWidth > availableWidth)
+                {
+                    row.Items.Add(new StackLayoutItem(null, true));
+                    rows.Items.Add(row);
+                    row = BadgeRow();
+                    usedWidth = 0;
+                }
+
+                badge.Click += (_, _) => Remove(value);
+                _badgeControls.Add(badge);
+                row.Items.Add(badge);
+                usedWidth = usedWidth == 0 ? badge.Width : usedWidth + FoundryTheme.Space1 + badge.Width;
+            }
+
+            row.Items.Add(new StackLayoutItem(null, true));
+            rows.Items.Add(row);
+            _badges.Content = rows;
+        }
+        finally
+        {
+            _layingOutBadges = false;
+        }
+    }
+
+    private static StackLayout BadgeRow() => new()
+    {
+        Orientation = Orientation.Horizontal,
+        Spacing = FoundryTheme.Space1,
+        VerticalContentAlignment = VerticalAlignment.Center,
+    };
+
+    private void Remove(string value)
+    {
+        var existing = _selected.FindIndex(item =>
+            string.Equals(item, value, StringComparison.OrdinalIgnoreCase));
+        if (existing < 0) return;
+        _selected.RemoveAt(existing);
+        UpdateBadges();
+        Filter(show: _popup?.Visible == true);
+        ValueChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private void ShowResults(int count)

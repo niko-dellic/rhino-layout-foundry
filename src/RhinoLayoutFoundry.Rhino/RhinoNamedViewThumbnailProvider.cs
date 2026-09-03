@@ -74,6 +74,7 @@ internal sealed class RhinoNamedViewThumbnailProvider : INamedViewThumbnailProvi
         // live RhinoView. Capture through the same ViewCaptureSettings pipeline
         // as sheet thumbnails so display modes and viewport appearance overrides
         // are evaluated by Rhino rather than approximated by the Foundry UI.
+        var fallbackDisplayModeId = document.Views.ActiveView?.ActiveViewport.DisplayMode.Id;
         var view = document.Views.GetStandardRhinoViews().FirstOrDefault();
         if (view is null)
             return Failure(request, "No standard Rhino viewport is available for preview capture.");
@@ -90,7 +91,8 @@ internal sealed class RhinoNamedViewThumbnailProvider : INamedViewThumbnailProvi
             document.UndoRecordingEnabled = false;
             if (!document.NamedViews.RestoreWithAspectRatio(namedViewIndex, view.ActiveViewport))
                 return Failure(request, "Rhino could not restore the named view for preview capture.");
-            if (request.Key.DisplayModeId is { } displayModeId)
+            var effectiveDisplayModeId = request.Key.DisplayModeId ?? fallbackDisplayModeId;
+            if (effectiveDisplayModeId is { } displayModeId)
             {
                 requestedDisplayMode = DisplayModeDescription.GetDisplayMode(displayModeId);
                 if (requestedDisplayMode is null)

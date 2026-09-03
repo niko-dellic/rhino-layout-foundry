@@ -18,6 +18,30 @@ public static class ExistingSheetLayoutClassifier
         };
     }
 
+    public static IReadOnlyList<DetailSnapshot> OrderForLayout(
+        IReadOnlyList<DetailSnapshot> details,
+        BuiltInLayoutKind layout)
+    {
+        ArgumentNullException.ThrowIfNull(details);
+        if (details.Count < 2 || details.Any(detail => detail.PageBounds is not { IsValid: true }))
+            return details.ToArray();
+
+        return layout switch
+        {
+            BuiltInLayoutKind.TwoDetailsVertical => details
+                .OrderBy(detail => detail.PageBounds!.CenterX)
+                .ToArray(),
+            BuiltInLayoutKind.TwoDetailsHorizontal => details
+                .OrderByDescending(detail => detail.PageBounds!.CenterY)
+                .ToArray(),
+            BuiltInLayoutKind.FourDetailsGrid => details
+                .OrderByDescending(detail => detail.PageBounds!.CenterY)
+                .ThenBy(detail => detail.PageBounds!.CenterX)
+                .ToArray(),
+            _ => details.ToArray(),
+        };
+    }
+
     private static BuiltInLayoutKind? ClassifyTwoDetails(
         DetailPageBounds? first,
         DetailPageBounds? second)

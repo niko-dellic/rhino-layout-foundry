@@ -2001,7 +2001,7 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
                     var namedViewName = detailUpdate.NamedViewName.Trim();
                     var namedViewIndex = document.NamedViews.FindByName(namedViewName);
                     if (namedViewIndex < 0 ||
-                        !document.NamedViews.RestoreWithAspectRatio(namedViewIndex, detail.Viewport))
+                        !RestoreNamedViewForDetail(document, namedViewIndex, detail))
                         throw new InvalidOperationException(
                             $"Rhino could not apply named view '{namedViewName}' to a detail.");
                     viewportChanged = true;
@@ -2917,6 +2917,25 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
             throw new InvalidOperationException($"Rhino did not commit viewport settings for detail '{slot.Name}'.");
         ApplyDetailAppearanceRecipe(document, detail.Viewport.Id, slot);
         return detail.Viewport.Id;
+    }
+
+    internal static bool RestoreNamedViewForDetail(
+        RhinoDoc document,
+        int namedViewIndex,
+        DetailViewObject detail)
+    {
+        if (namedViewIndex < 0 || namedViewIndex >= document.NamedViews.Count)
+            return false;
+
+        using var namedView = document.NamedViews[namedViewIndex];
+        using var projection = new ViewportInfo(namedView.Viewport);
+        var bounds = detail.DetailGeometry.GetBoundingBox(true);
+        var width = bounds.Max.X - bounds.Min.X;
+        var height = bounds.Max.Y - bounds.Min.Y;
+        if (width > RhinoMath.ZeroTolerance && height > RhinoMath.ZeroTolerance)
+            projection.FrustumAspect = width / height;
+
+        return detail.Viewport.SetViewProjection(projection, updateTargetLocation: true);
     }
 
     private static void ApplyDetailAppearanceRecipe(
