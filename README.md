@@ -65,7 +65,7 @@ The hierarchy is a fixed-column property table on both platforms: Name, Print, P
 ### Prerequisites
 
 - Rhino 8.20 or later for Windows or macOS.
-- A .NET SDK accepted by [`global.json`](global.json). The plug-in itself must target `net8.0`; verify your selected SDK with `dotnet --version`.
+- The .NET 8 SDK and runtime. [`global.json`](global.json) may select a compatible newer SDK when 8 is unavailable, but the .NET 8 runtime is still required to execute the normal test suite. Verify both with `dotnet --version` and `dotnet --list-runtimes`.
 - Git and, optionally, Visual Studio 2022 on Windows or Visual Studio Code with C# debugging support on either platform.
 - Network access for the first NuGet restore.
 
@@ -153,9 +153,10 @@ Open the repository folder and choose the `Rhino 8 (macOS)` or `Rhino 8 (Windows
 ### Common build problems
 
 - **`NETSDK` or target-framework error:** run `dotnet --info` and confirm that the SDK selected through `global.json` is installed and that the build still targets `net8.0`.
+- **The build stalls without diagnostics:** run `dotnet build-server shutdown`, then retry the build with `--disable-build-servers -m:1` to bypass a stuck compiler or parallel MSBuild node.
 - **`Missing build output` from the macOS installer:** build the Rhino project first and pass the same configuration name to both commands, such as `Debug` or `Release`.
 - **The old UI still appears:** fully quit and reopen Rhino; closing the model or panel is not enough. Confirm the configuration and bundle path reported by the commands.
-- **Restore fails offline:** restore once with network access. The test project also has a zero-dependency local runner for constrained environments, selected with `-p:UseLocalTestHarness=true`; normal development and CI use xUnit.
+- **Restore fails offline:** restore once with network access so the centrally pinned NuGet packages are available locally; normal development and CI use xUnit.
 
 For the full in-Rhino acceptance checklist, continue with the [Rhino smoke test](docs/RHINO_SMOKE_TEST.md).
 
