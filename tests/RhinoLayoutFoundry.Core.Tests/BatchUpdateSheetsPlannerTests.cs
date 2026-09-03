@@ -196,6 +196,89 @@ public sealed class BatchUpdateSheetsPlannerTests
         Assert.Contains(plan.Diagnostics, item => item.Code == "batch.detail_layer_missing");
     }
 
+    [Fact]
+    public void PerDetailAssignmentsAreStagedAsBatchChanges()
+    {
+        var snapshot = EnrichedSnapshot() with
+        {
+            NamedViewNames = new HashSet<string>(["Level 02"], StringComparer.OrdinalIgnoreCase),
+        };
+        var detailUpdate = new BatchDetailUpdate(
+            TestSnapshots.DetailOneId,
+            ChangeNamedView: true,
+            NamedViewName: "Level 02",
+            ChangeDisplayMode: true,
+            DisplayModeId: TestSnapshots.DisplayModeTwoId);
+        var plan = new BatchUpdateSheetsPlanner().Plan(new BatchUpdateSheetsRequest(
+            42, 1, [TestSnapshots.SheetOneId], null, 1, 1,
+            null, null, null, null,
+            DetailUpdates: [detailUpdate]), snapshot);
+
+        Assert.True(plan.CanApply);
+        var change = Assert.IsType<BatchUpdateSheetsChange>(Assert.Single(plan.Changes));
+        Assert.Equal(detailUpdate, Assert.Single(change.DetailUpdates!));
+    }
+
+    [Fact]
+    public void PerDetailAppearanceStateIsStagedAndValidated()
+    {
+        var stateId = Guid.Parse("60000000-0000-0000-0000-000000000011");
+        var snapshot = EnrichedSnapshot() with
+        {
+            AppearanceStateResources =
+            [
+                new AppearanceStateRecord(stateId, TestSnapshots.RootFolderId, 0, "Detail state", [], []),
+            ],
+        };
+        var detailUpdate = new BatchDetailUpdate(
+            TestSnapshots.DetailOneId,
+            ChangeNamedView: false,
+            NamedViewName: null,
+            ChangeDisplayMode: false,
+            DisplayModeId: TestSnapshots.DisplayModeOneId,
+            ChangeAppearanceState: true,
+            AppearanceStateId: stateId);
+
+        var plan = new BatchUpdateSheetsPlanner().Plan(new BatchUpdateSheetsRequest(
+            42, 1, [TestSnapshots.SheetOneId], null, 1, 1,
+            null, null, null, null,
+            DetailUpdates: [detailUpdate]), snapshot);
+
+        Assert.True(plan.CanApply);
+        Assert.Equal(detailUpdate,
+            Assert.Single(Assert.IsType<BatchUpdateSheetsChange>(Assert.Single(plan.Changes)).DetailUpdates!));
+
+        var missing = new BatchUpdateSheetsPlanner().Plan(new BatchUpdateSheetsRequest(
+            42, 1, [TestSnapshots.SheetOneId], null, 1, 1,
+            null, null, null, null,
+            DetailUpdates: [detailUpdate with { AppearanceStateId = Guid.NewGuid() }]), snapshot);
+        Assert.False(missing.CanApply);
+        Assert.Contains(missing.Diagnostics,
+            item => item.Code == "batch.detail_appearance_state_missing");
+    }
+
+    [Fact]
+    public void InvalidPerDetailAssignmentsBlockApply()
+    {
+        var plan = new BatchUpdateSheetsPlanner().Plan(new BatchUpdateSheetsRequest(
+            42, 1, [TestSnapshots.SheetOneId], null, 1, 1,
+            null, null, null, null,
+            DetailUpdates:
+            [
+                new BatchDetailUpdate(
+                    Guid.NewGuid(),
+                    ChangeNamedView: true,
+                    NamedViewName: "Missing view",
+                    ChangeDisplayMode: true,
+                    DisplayModeId: Guid.NewGuid()),
+            ]), EnrichedSnapshot());
+
+        Assert.False(plan.CanApply);
+        Assert.Contains(plan.Diagnostics, item => item.Code == "batch.detail_missing");
+        Assert.Contains(plan.Diagnostics, item => item.Code == "batch.named_view_missing");
+        Assert.Contains(plan.Diagnostics, item => item.Code == "batch.detail_display_mode_missing");
+    }
+
     private static DocumentSnapshot EnrichedSnapshot()
     {
         var source = TestSnapshots.Create();

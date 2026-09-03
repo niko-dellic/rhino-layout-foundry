@@ -323,7 +323,8 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
                         StringComparison.Ordinal)
                         ? binding
                         : null,
-                    record.Notes ?? string.Empty));
+                    record.Notes ?? string.Empty,
+                    record.DetailNamedViewAssignments));
             }
 
             foreach (var rule in state.DisplayRules) referencedDisplayModes.Add(rule.DisplayModeId);
@@ -1184,6 +1185,12 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
                 .ToDictionary(
                     pair => detailsBySource[pair.Key],
                     pair => namedViewMap.GetValueOrDefault(pair.Value, pair.Value)) ?? [];
+            var remappedDetailNamedViews = (source.DetailNamedViewAssignments ??
+                                            new Dictionary<Guid, string>())
+                .Where(pair => detailsBySource.ContainsKey(pair.Key))
+                .ToDictionary(
+                    pair => detailsBySource[pair.Key],
+                    pair => namedViewMap.GetValueOrDefault(pair.Value, pair.Value));
             var namingBinding = source.NamingBinding is { } binding &&
                                 string.Equals(page.PageName, binding.LastGeneratedName, StringComparison.Ordinal) &&
                                 BindingSourcesUnchanged(
@@ -1209,7 +1216,8 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
                 source.IncludeInPrintAll,
                 source.TitleBlockData,
                 namingBinding,
-                source.Notes ?? string.Empty);
+                source.Notes ?? string.Empty,
+                remappedDetailNamedViews);
         }
 
         var recovery = (mode == LayoutPackageImportMode.Merge ? before.Recovery : [])

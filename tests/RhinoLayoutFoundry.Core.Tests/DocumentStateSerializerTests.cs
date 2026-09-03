@@ -40,6 +40,7 @@ public sealed class DocumentStateSerializerTests
         var folder = new FolderRecord(Guid.NewGuid(), WellKnownIds.UnorganizedFolderId, "Plans", 1,
             "Issued plan set");
         var sheetId = Guid.NewGuid();
+        var detailId = Guid.NewGuid();
         var detailLayerId = Guid.NewGuid();
         var appearanceStateId = Guid.NewGuid();
         var titleBlock = new TitleBlockRole(Guid.NewGuid(), Guid.NewGuid(), "LowerRight");
@@ -51,7 +52,11 @@ public sealed class DocumentStateSerializerTests
             new Dictionary<string, string> { ["discipline"] = "A" },
             titleBlock,
             IncludeInPrintAll: false,
-            Notes: "Coordinate with structural");
+            Notes: "Coordinate with structural",
+            DetailNamedViewAssignments: new Dictionary<Guid, string>
+            {
+                [detailId] = "Level 02",
+            });
         var rule = new DisplayRule(
             Guid.NewGuid(),
             "Plans shaded",
@@ -120,6 +125,7 @@ public sealed class DocumentStateSerializerTests
         Assert.Equal(titleBlock.InstanceObjectId, restored.Sheets[sheetId].TitleBlock!.InstanceObjectId);
         Assert.False(restored.Sheets[sheetId].IncludeInPrintAll);
         Assert.Equal("Coordinate with structural", restored.Sheets[sheetId].Notes);
+        Assert.Equal("Level 02", restored.Sheets[sheetId].DetailNamedViews[detailId]);
         Assert.Equal(rule.DisplayModeId, restored.DisplayRules.Single().DisplayModeId);
         Assert.Equal("Foundry", restored.Metadata["project"]);
         Assert.Equal("A3 plan", restored.Templates.Single().Name);

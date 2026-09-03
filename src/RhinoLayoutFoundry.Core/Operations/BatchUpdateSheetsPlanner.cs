@@ -26,7 +26,8 @@ public sealed record BatchUpdateSheetsRequest(
     Guid? AppearanceStateId = null,
     bool ChangeDetailLayer = false,
     bool UseDedicatedDetailLayer = true,
-    Guid? DetailLayerId = null);
+    Guid? DetailLayerId = null,
+    IReadOnlyList<BatchDetailUpdate>? DetailUpdates = null);
 
 public sealed class BatchUpdateSheetsPlanner : IOperationPlanner<BatchUpdateSheetsRequest>
 {
@@ -59,6 +60,46 @@ public sealed class BatchUpdateSheetsPlanner : IOperationPlanner<BatchUpdateShee
         if (request.ChangeDetailLayer && !request.UseDedicatedDetailLayer &&
             request.DetailLayerId is { } detailLayerId && !snapshot.Layers.ContainsKey(detailLayerId))
             diagnostics.Add(Error("batch.detail_layer_missing", "The selected detail layer is unavailable."));
+
+        var targetDetailIds = ids.Where(snapshot.Sheets.ContainsKey)
+            .SelectMany(id => snapshot.Sheets[id].DetailIds)
+            .ToHashSet();
+        var detailUpdates = (request.DetailUpdates ?? [])
+            .Where(update => update.ChangeNamedView || update.ChangeDisplayMode ||
+                             update.ChangeAppearanceState)
+            .GroupBy(update => update.DetailViewportId)
+            .Select(group => group.Last())
+            .ToArray();
+        foreach (var update in detailUpdates)
+        {
+            if (!targetDetailIds.Contains(update.DetailViewportId))
+                diagnostics.Add(new Diagnostic(
+                    "batch.detail_missing",
+                    DiagnosticSeverity.Error,
+                    "A detail selected for editing is no longer part of the targeted layouts.",
+                    update.DetailViewportId));
+            if (update.ChangeNamedView && !string.IsNullOrWhiteSpace(update.NamedViewName) &&
+                !snapshot.NamedViews.Contains(update.NamedViewName.Trim()))
+                diagnostics.Add(new Diagnostic(
+                    "batch.named_view_missing",
+                    DiagnosticSeverity.Error,
+                    "A named view selected for a detail is no longer available.",
+                    update.DetailViewportId));
+            if (update.ChangeDisplayMode &&
+                (update.DisplayModeId is not { } detailModeId || !snapshot.DisplayModeIds.Contains(detailModeId)))
+                diagnostics.Add(new Diagnostic(
+                    "batch.detail_display_mode_missing",
+                    DiagnosticSeverity.Error,
+                    "A display mode selected for a detail is no longer available.",
+                    update.DetailViewportId));
+            if (update.ChangeAppearanceState && update.AppearanceStateId is { } detailStateId &&
+                snapshot.AppearanceStates.All(state => state.Id != detailStateId))
+                diagnostics.Add(new Diagnostic(
+                    "batch.detail_appearance_state_missing",
+                    DiagnosticSeverity.Error,
+                    "An appearance state selected for a detail is no longer available.",
+                    update.DetailViewportId));
+        }
 
         var changesPaper = request.PaperWidth is not null || request.PaperHeight is not null ||
                            !string.IsNullOrWhiteSpace(request.PaperUnitSystem);
@@ -179,7 +220,8 @@ public sealed class BatchUpdateSheetsPlanner : IOperationPlanner<BatchUpdateShee
 
         if (string.IsNullOrWhiteSpace(pattern) && !changesPaper && request.DetailDisplayModeId is null &&
             !request.ChangeTitleBlock && request.ReplaceRevisionSchedule is null && request.AppendRevision is null &&
-            request.DestinationFolderId is null && !request.ChangeAppearanceState && !request.ChangeDetailLayer)
+            request.DestinationFolderId is null && !request.ChangeAppearanceState && !request.ChangeDetailLayer &&
+            detailUpdates.Length == 0)
             diagnostics.Add(Error("batch.no_changes", "Choose at least one property to change."));
 
         IReadOnlyList<OperationChange> changes = diagnostics.Any(item => item.Severity == DiagnosticSeverity.Error)
@@ -203,7 +245,8 @@ public sealed class BatchUpdateSheetsPlanner : IOperationPlanner<BatchUpdateShee
                 request.AppearanceStateId,
                 request.ChangeDetailLayer,
                 request.UseDedicatedDetailLayer,
-                request.DetailLayerId)];
+                request.DetailLayerId,
+                detailUpdates.Length == 0 ? null : detailUpdates)];
         if (changes.Count > 0)
             diagnostics.Add(new Diagnostic("batch.undo_unavailable", DiagnosticSeverity.Warning,
                 "Rhino does not expose native Undo for these layout properties. Foundry restores every before-value if Apply fails."));

@@ -302,21 +302,43 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
                         $"Rhino did not commit named view '{change.NamedViewName}' on detail '{detail.DescriptiveTitle}'.");
             }
 
+            var sheets = stateBefore.Sheets.ToDictionary(pair => pair.Key, pair => pair.Value);
+            var targetIds = change.DetailViewportIds.ToHashSet();
+            foreach (var page in document.Views.GetPageViews())
+            {
+                if (!sheets.TryGetValue(page.MainViewport.Id, out var sheet)) continue;
+                var assigned = sheet.DetailNamedViews
+                    .ToDictionary(pair => pair.Key, pair => pair.Value);
+                var changed = false;
+                foreach (var detailId in page.GetDetailViews()
+                             .Select(detail => detail.Viewport.Id)
+                             .Where(targetIds.Contains))
+                {
+                    assigned[detailId] = change.NamedViewName;
+                    changed = true;
+                }
+                if (changed)
+                    sheets[page.MainViewport.Id] = sheet with
+                    {
+                        DetailNamedViewAssignments = assigned,
+                    };
+            }
+
             if (linkedNames is not null)
             {
-                var sheets = stateBefore.Sheets.ToDictionary(pair => pair.Key, pair => pair.Value);
                 var bindingFailure = ApplyLinkedSheetBindings(sheets, linkedNames);
                 if (bindingFailure is not null)
                     throw new InvalidOperationException(bindingFailure.Diagnostics.First().Message);
-                var afterState = stateBefore with { Sheets = sheets };
-                _stateStore.SetCurrentSchema(document, afterState);
-                ApplyLinkedPageNames(document, linkedNames.NewNames, afterState);
-                if (!document.AddCustomUndoEvent(
-                        plan.UndoDescription,
-                        OnUndoDocumentState,
-                        new DocumentStateUndoTag(plan.UndoDescription, stateBefore, pageNamesBefore)))
-                    throw new InvalidOperationException("Rhino could not register linked naming metadata with Undo.");
             }
+            var afterState = stateBefore with { Sheets = sheets };
+            _stateStore.SetCurrentSchema(document, afterState);
+            if (linkedNames is not null)
+                ApplyLinkedPageNames(document, linkedNames.NewNames, afterState);
+            if (!document.AddCustomUndoEvent(
+                    plan.UndoDescription,
+                    OnUndoDocumentState,
+                    new DocumentStateUndoTag(plan.UndoDescription, stateBefore, pageNamesBefore)))
+                throw new InvalidOperationException("Rhino could not register named-view metadata with Undo.");
 
             _revisionTracker.Bump(document);
             document.Views.Redraw();
@@ -1905,6 +1927,7 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
                 ? null
                 : sourceSheet.TitleBlock with { InstanceObjectId = duplicateTitleBlock.Id },
             NamingBinding = null,
+            DetailNamedViewAssignments = null,
         };
     }
 
@@ -1917,13 +1940,21 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
             .Where(page => update.SheetPageViewIds.Contains(page.MainViewport.Id)).ToArray();
         if (pages.Length != update.SheetPageViewIds.Distinct().Count())
             return Failure("batch.sheet_missing", "An included layout no longer exists.");
+        var detailsById = pages.SelectMany(page => page.GetDetailViews())
+            .ToDictionary(detail => detail.Viewport.Id);
+        if ((update.DetailUpdates ?? []).Any(item => !detailsById.ContainsKey(item.DetailViewportId)))
+            return Failure("batch.detail_missing", "A detail selected for editing no longer exists.");
         var before = pages.Select(page => new PagePropertiesBefore(
             page,
             page.PageName,
             page.PageWidth,
             page.PageHeight,
             page.GetDetailViews().Select(detail =>
-                new DetailModeBefore(detail, detail.Viewport.DisplayMode.Id, detail.Attributes.LayerIndex)).ToArray())).ToArray();
+                new DetailModeBefore(
+                    detail,
+                    detail.Viewport.DisplayMode.Id,
+                    detail.Attributes.LayerIndex,
+                    new ViewportInfo(detail.Viewport))).ToArray())).ToArray();
         var stateBefore = WithCurrentPageRecords(document, _stateStore.Get(document));
         var titleBlocksBefore = pages.Select(page => CaptureTitleBlockBefore(
             document,
@@ -1960,6 +1991,32 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
                         }
                     }
                 }
+            }
+            foreach (var detailUpdate in update.DetailUpdates ?? [])
+            {
+                var detail = detailsById[detailUpdate.DetailViewportId];
+                var viewportChanged = false;
+                if (detailUpdate.ChangeNamedView && !string.IsNullOrWhiteSpace(detailUpdate.NamedViewName))
+                {
+                    var namedViewName = detailUpdate.NamedViewName.Trim();
+                    var namedViewIndex = document.NamedViews.FindByName(namedViewName);
+                    if (namedViewIndex < 0 ||
+                        !document.NamedViews.RestoreWithAspectRatio(namedViewIndex, detail.Viewport))
+                        throw new InvalidOperationException(
+                            $"Rhino could not apply named view '{namedViewName}' to a detail.");
+                    viewportChanged = true;
+                }
+                if ((detailUpdate.ChangeDisplayMode || detailUpdate.ChangeNamedView) &&
+                    detailUpdate.DisplayModeId is { } detailDisplayModeId)
+                {
+                    using var detailDisplayMode = DisplayModeDescription.GetDisplayMode(detailDisplayModeId)
+                        ?? throw new InvalidOperationException(
+                            "A display mode selected for a detail is unavailable.");
+                    detail.Viewport.DisplayMode = detailDisplayMode;
+                    viewportChanged = true;
+                }
+                if (viewportChanged && !detail.CommitViewportChanges())
+                    throw new InvalidOperationException("Rhino did not commit a detail assignment change.");
             }
             if (update.ChangeDetailLayer)
             {
@@ -2012,6 +2069,44 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
                         sheets[pageViewId] = sheet with { NamingBinding = null };
                 currentState = currentState with { Sheets = sheets };
             }
+            if (update.DetailUpdates is { Count: > 0 } &&
+                update.DetailUpdates.Any(item => item.ChangeNamedView))
+            {
+                var pageByDetail = pages.SelectMany(page => page.GetDetailViews()
+                        .Select(detail => (
+                            DetailId: detail.Viewport.Id,
+                            PageViewId: page.MainViewport.Id)))
+                    .ToDictionary(item => item.DetailId, item => item.PageViewId);
+                var sheets = currentState.Sheets.ToDictionary(pair => pair.Key, pair => pair.Value);
+                foreach (var detailUpdate in update.DetailUpdates.Where(item => item.ChangeNamedView))
+                {
+                    var pageViewId = pageByDetail[detailUpdate.DetailViewportId];
+                    if (!sheets.TryGetValue(pageViewId, out var sheet)) continue;
+                    var assignments = sheet.DetailNamedViews
+                        .ToDictionary(pair => pair.Key, pair => pair.Value);
+                    if (string.IsNullOrWhiteSpace(detailUpdate.NamedViewName))
+                        assignments.Remove(detailUpdate.DetailViewportId);
+                    else
+                        assignments[detailUpdate.DetailViewportId] = detailUpdate.NamedViewName.Trim();
+                    SheetNamingBinding? namingBinding = sheet.NamingBinding;
+                    if (namingBinding is not null)
+                    {
+                        var linkedAssignments = namingBinding.NamedViews
+                            .ToDictionary(pair => pair.Key, pair => pair.Value);
+                        if (string.IsNullOrWhiteSpace(detailUpdate.NamedViewName))
+                            linkedAssignments.Remove(detailUpdate.DetailViewportId);
+                        else
+                            linkedAssignments[detailUpdate.DetailViewportId] = detailUpdate.NamedViewName.Trim();
+                        namingBinding = namingBinding with { NamedViewAssignments = linkedAssignments };
+                    }
+                    sheets[pageViewId] = sheet with
+                    {
+                        NamingBinding = namingBinding,
+                        DetailNamedViewAssignments = assignments,
+                    };
+                }
+                currentState = currentState with { Sheets = sheets };
+            }
             if (update.ReplaceRevisionSchedule is not null || update.AppendRevision is not null)
             {
                 var sheets = currentState.Sheets.ToDictionary(pair => pair.Key, pair => pair.Value);
@@ -2061,6 +2156,30 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
                         new AppearanceStateAssignment(Guid.NewGuid(), target, stateId)));
                 currentState = currentState with { AppearanceStateAssignments = assignments };
             }
+            if (update.DetailUpdates is { Count: > 0 } &&
+                update.DetailUpdates.Any(item => item.ChangeAppearanceState))
+            {
+                var detailTargets = update.DetailUpdates
+                    .Where(item => item.ChangeAppearanceState)
+                    .Select(item => new HierarchyScope(
+                        HierarchyScopeKind.Detail,
+                        item.DetailViewportId))
+                    .ToHashSet();
+                var assignments = currentState.StateAssignments
+                    .Where(assignment => !detailTargets.Contains(assignment.Target)).ToList();
+                foreach (var detailUpdate in update.DetailUpdates.Where(item => item.ChangeAppearanceState))
+                {
+                    if (detailUpdate.AppearanceStateId is not { } stateId) continue;
+                    if (currentState.AppearanceStates.All(state => state.Id != stateId))
+                        throw new InvalidOperationException(
+                            "An appearance state selected for a detail is unavailable.");
+                    assignments.Add(new AppearanceStateAssignment(
+                        Guid.NewGuid(),
+                        new HierarchyScope(HierarchyScopeKind.Detail, detailUpdate.DetailViewportId),
+                        stateId));
+                }
+                currentState = currentState with { AppearanceStateAssignments = assignments };
+            }
             if (dedicatedDetailLayer is not null)
                 currentState = currentState with
                 {
@@ -2071,7 +2190,8 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
                          update.ReplaceRevisionSchedule is not null ||
                          update.AppendRevision is not null))
                 RefreshManagedTitleBlockAttributes(document, page, currentState);
-            if (update.DestinationFolderId is not null || update.ChangeAppearanceState)
+            if (update.DestinationFolderId is not null || update.ChangeAppearanceState ||
+                update.DetailUpdates?.Any(item => item.ChangeAppearanceState) == true)
             {
                 var rootScope = new HierarchyScope(HierarchyScopeKind.Folder, currentState.RootFolderId);
                 var rootRules = currentState.AppearanceRules.LastOrDefault(item => item.Scope == rootScope);
@@ -2106,6 +2226,7 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
                 {
                     detailBefore.Detail.Attributes.LayerIndex = detailBefore.LayerIndex;
                     detailBefore.Detail.CommitChanges();
+                    detailBefore.Detail.Viewport.SetViewProjection(detailBefore.Viewport, true);
                     using var mode = DisplayModeDescription.GetDisplayMode(detailBefore.DisplayModeId);
                     if (mode is null) continue;
                     detailBefore.Detail.Viewport.DisplayMode = mode;
@@ -2117,7 +2238,8 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
             else if (update.ReplaceRevisionSchedule is not null || update.AppendRevision is not null ||
                      update.NamingBindings is { Count: > 0 } || update.NamingBindingRemovals is { Count: > 0 } ||
                      update.DestinationFolderId is not null ||
-                     update.ChangeAppearanceState || update.ChangeDetailLayer)
+                     update.ChangeAppearanceState || update.ChangeDetailLayer ||
+                     update.DetailUpdates is { Count: > 0 })
                 _stateStore.Set(document, stateBefore);
             if (dedicatedDetailLayer is { Created: true })
                 document.Layers.Delete(dedicatedDetailLayer.LayerId, quiet: true);
@@ -2160,7 +2282,8 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
         var before = details.Select(detail => new DetailModeBefore(
             detail,
             detail.Viewport.DisplayMode.Id,
-            detail.Attributes.LayerIndex)).ToArray();
+            detail.Attributes.LayerIndex,
+            new ViewportInfo(detail.Viewport))).ToArray();
         try
         {
             using var mode = DisplayModeDescription.GetDisplayMode(update.DisplayModeId)
@@ -2530,6 +2653,7 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
                 createdPages.Add(page);
 
                 var namingViews = new Dictionary<Guid, string>();
+                var createdDetailIdsBySlot = new Dictionary<Guid, Guid>();
                 foreach (var slot in create.Template.DetailSlots)
                 {
                     var assignedView = create.NamedViewAssignments.GetValueOrDefault(slot.Id);
@@ -2542,6 +2666,7 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
                                 : null);
                     var effectiveView = assignedView ?? slot.DefaultNamedView;
                     if (!string.IsNullOrWhiteSpace(effectiveView)) namingViews[detailId] = effectiveView;
+                    createdDetailIdsBySlot[slot.Id] = detailId;
                 }
 
                 var revisions = create.InitialRevisions?.ToArray() ?? [];
@@ -2582,7 +2707,8 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
                             create.NamingPattern,
                             create.NamingIndex,
                             create.Name,
-                            namingViews));
+                            namingViews),
+                    DetailNamedViewAssignments: namingViews);
                 var sheetScope = new HierarchyScope(HierarchyScopeKind.Sheet, page.MainViewport.Id);
                 if (create.AppearanceStateId is { } appearanceStateId)
                 {
@@ -2590,6 +2716,20 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
                         throw new InvalidOperationException("The selected appearance state is no longer available.");
                     assignments.Add(new AppearanceStateAssignment(
                         Guid.NewGuid(), sheetScope, appearanceStateId));
+                }
+                foreach (var pair in create.DetailAppearanceStateAssignments ??
+                             new Dictionary<Guid, Guid>())
+                {
+                    if (!createdDetailIdsBySlot.TryGetValue(pair.Key, out var detailId))
+                        throw new InvalidOperationException(
+                            "A detail appearance-state assignment no longer matches the layout.");
+                    if (!beforeState.AppearanceStates.Any(state => state.Id == pair.Value))
+                        throw new InvalidOperationException(
+                            "A detail appearance state is no longer available.");
+                    assignments.Add(new AppearanceStateAssignment(
+                        Guid.NewGuid(),
+                        new HierarchyScope(HierarchyScopeKind.Detail, detailId),
+                        pair.Value));
                 }
             }
 
@@ -3365,7 +3505,11 @@ internal sealed class RhinoDocumentMutationService : IDocumentMutationService
         double Height,
         IReadOnlyList<DetailModeBefore> DetailModes);
 
-    private sealed record DetailModeBefore(DetailViewObject Detail, Guid DisplayModeId, int LayerIndex);
+    private sealed record DetailModeBefore(
+        DetailViewObject Detail,
+        Guid DisplayModeId,
+        int LayerIndex,
+        ViewportInfo Viewport);
 
     private sealed record TitleBlockBefore(
         Guid PageViewId,

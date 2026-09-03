@@ -83,12 +83,11 @@ internal sealed class RhinoNamedViewThumbnailProvider : INamedViewThumbnailProvi
         var objectBefore = new Dictionary<Guid, ObjectAttributes>();
         var documentWasModified = document.Modified;
         var undoRecordingWasEnabled = document.UndoRecordingEnabled;
-        var appliesAppearance = request.Appearance is { } appearance &&
-                                (appearance.Layers.Count > 0 || appearance.Objects.Count > 0);
         DisplayModeDescription? requestedDisplayMode = null;
+        using var transientChanges = RhinoThumbnailCaptureGate.BeginTransientDocumentChanges();
         try
         {
-            if (appliesAppearance) document.UndoRecordingEnabled = false;
+            document.UndoRecordingEnabled = false;
             if (!document.NamedViews.RestoreWithAspectRatio(namedViewIndex, view.ActiveViewport))
                 return Failure(request, "Rhino could not restore the named view for preview capture.");
             if (request.Key.DisplayModeId is { } displayModeId)
@@ -140,11 +139,8 @@ internal sealed class RhinoNamedViewThumbnailProvider : INamedViewThumbnailProvi
             if (previousDisplayMode is not null)
                 view.ActiveViewport.DisplayMode = previousDisplayMode;
             requestedDisplayMode?.Dispose();
-            if (appliesAppearance)
-            {
-                document.UndoRecordingEnabled = undoRecordingWasEnabled;
-                document.Modified = documentWasModified;
-            }
+            document.UndoRecordingEnabled = undoRecordingWasEnabled;
+            document.Modified = documentWasModified;
         }
     }
 

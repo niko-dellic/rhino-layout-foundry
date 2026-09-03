@@ -272,14 +272,30 @@ public static class LayoutFoundryUiHost
                    "Foundry is not connected to a draft-layout thumbnail provider."));
     }
 
+    public static void BeginDraftLayoutThumbnailSession(uint documentRuntimeSerialNumber) =>
+        _draftLayoutThumbnailProvider?.BeginSession(documentRuntimeSerialNumber);
+
+    public static Task<EditSheetThumbnailResult> CaptureEditSheetThumbnailAsync(
+        EditSheetThumbnailRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        return _draftLayoutThumbnailProvider?.CaptureEditAsync(request, cancellationToken) ??
+               Task.FromResult(new EditSheetThumbnailResult(
+                   request.Key,
+                   null,
+                   "Foundry is not connected to an edit-sheet thumbnail provider."));
+    }
+
     public static Task CompleteDraftLayoutThumbnailSessionAsync(
         uint documentRuntimeSerialNumber,
         bool restoreOriginalModifiedState,
+        bool endSession = true,
         CancellationToken cancellationToken = default)
     {
         return _draftLayoutThumbnailProvider?.CompleteSessionAsync(
                    documentRuntimeSerialNumber,
                    restoreOriginalModifiedState,
+                   endSession,
                    cancellationToken) ??
                Task.CompletedTask;
     }

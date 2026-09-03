@@ -16,6 +16,9 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
     private const string MixedDisplayMode = "Mixed";
     private const string InheritNamedView = "Use detail/template camera";
     private const string NoAppearanceState = "Inherit appearance state from folder";
+    private const string InheritSheetAppearanceState = "Use sheet appearance state";
+    private const int LayoutGroupRailWidth = 214;
+    private const int LayoutGroupButtonWidth = 192;
     private readonly DocumentSnapshot _snapshot;
     private readonly BatchTarget[] _editTargets;
     private readonly bool _isEditMode;
@@ -83,6 +86,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
     private long _draftLayoutPreviewVersion;
     private bool _editSheetPreviewInProgress;
     private bool _editSheetPreviewDirty;
+    private bool _preserveEditSheetPreviewWhileRendering;
     private long _editSheetPreviewVersion;
 
     internal BatchCreateLayoutsDialog(DocumentSnapshot snapshot, Guid? preferredFolderId)
@@ -101,6 +105,8 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         IReadOnlyList<BatchTarget>? editTargets)
     {
         _snapshot = snapshot;
+        LayoutFoundryUiHost.BeginDraftLayoutThumbnailSession(
+            snapshot.DocumentRuntimeSerialNumber);
         _editTargets = editTargets?.ToArray() ?? [];
         _isEditMode = _editTargets.Length > 0;
         _folders = FolderChoices(snapshot);
@@ -114,7 +120,11 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         Title = _isEditMode ? "Edit layouts" : "Create layouts";
         MinimumSize = new Size(1080, 760);
         Resizable = true;
-        Padding = new Padding(FoundryTheme.Space4);
+        Padding = new Padding(
+            FoundryTheme.Space4,
+            0,
+            FoundryTheme.Space4,
+            FoundryTheme.Space4);
         BackgroundColor = FoundryTheme.PanelBackground;
 
         _destinationDropDown = new DropDown { DataStore = _folders.Select(item => item.Label).ToArray() };
@@ -222,15 +232,18 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         _namedViewPreviewTray.PreviewsChanged += (_, _) => RefreshDetailAssignments();
         _layoutGroupChips = new StackLayout
         {
-            Orientation = Orientation.Horizontal,
+            Orientation = Orientation.Vertical,
             Spacing = FoundryTheme.Space1,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
         };
         _layoutGroupChipScroll = new Scrollable
         {
             Border = BorderType.None,
-            ExpandContentWidth = false,
-            ExpandContentHeight = false,
-            Height = 36,
+            ExpandContentWidth = true,
+            // Filling the viewport keeps a short list pinned to the top on
+            // AppKit while still allowing a longer list to scroll vertically.
+            ExpandContentHeight = true,
+            Width = LayoutGroupRailWidth,
             Content = _layoutGroupChips,
         };
         _previewGrid = CreatePreviewGrid();
@@ -241,7 +254,6 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             FoundryViewIcons.ClearSelection(),
             "Clear row selection and edit all layouts");
         _clearSelectionButton.Enabled = false;
-        _clearSelectionButton.Visible = false;
         _clearSelectionButton.Click += (_, _) => ClearPreviewSelection();
         _status = FoundryTheme.MutedLabel();
         _status.Wrap = WrapMode.Word;
@@ -253,7 +265,17 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         var cancel = new FoundryDialogButton(
             "Cancel",
             FoundryDialogButtonStyle.Secondary);
-        cancel.Click += (_, _) => Close();
+        cancel.Click += async (_, _) =>
+        {
+            cancel.Enabled = false;
+            _namedViewPreviewCancellation.Cancel();
+            _draftLayoutPreviewCancellation.Cancel();
+            await LayoutFoundryUiHost.CompleteDraftLayoutThumbnailSessionAsync(
+                _snapshot.DocumentRuntimeSerialNumber,
+                restoreOriginalModifiedState: true,
+                endSession: false);
+            Close();
+        };
         _createButton.Click += async (_, _) => await CreateAsync();
         FoundryDialogActions.Bind(this, _createButton, cancel);
 
@@ -307,6 +329,9 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             {
                 RefreshEditControlState();
                 RefreshPreview();
+                if (ReferenceEquals(check, _displayModeChangeCheck) ||
+                    ReferenceEquals(check, _appearanceStateChangeCheck))
+                    QueueEditSheetPreview(preserveCurrentPreview: true);
             };
         _detailLayerModeControl.SelectedIndexChanged += (_, _) => ApplyDetailLayerTargetToTargets();
         _detailLayerDropDown.SelectedIndexChanged += (_, _) => ApplyDetailLayerTargetToTargets();
@@ -325,17 +350,24 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         };
         Closed += async (_, _) =>
         {
-            _namedViewPreviewCancellation.Cancel();
-            _draftLayoutPreviewCancellation.Cancel();
-            CloseLayoutGallery();
-            CloseTitleBlockGallery();
-            _namedViewPreviewTray.DisposePreviews();
-            _layoutSelectorPreview.DisposePagePreview();
-            _namedViewPreviewCancellation.Dispose();
-            _draftLayoutPreviewCancellation.Dispose();
-            await LayoutFoundryUiHost.CompleteDraftLayoutThumbnailSessionAsync(
-                _snapshot.DocumentRuntimeSerialNumber,
-                restoreOriginalModifiedState: !Succeeded);
+            try
+            {
+                _namedViewPreviewCancellation.Cancel();
+                _draftLayoutPreviewCancellation.Cancel();
+                CloseLayoutGallery();
+                CloseTitleBlockGallery();
+                _namedViewPreviewTray.DisposePreviews();
+                _layoutSelectorPreview.DisposePagePreview();
+                _namedViewPreviewCancellation.Dispose();
+                _draftLayoutPreviewCancellation.Dispose();
+            }
+            finally
+            {
+                await LayoutFoundryUiHost.CompleteDraftLayoutThumbnailSessionAsync(
+                    _snapshot.DocumentRuntimeSerialNumber,
+                    restoreOriginalModifiedState: !Succeeded,
+                    endSession: false);
+            }
         };
         LocationChanged += (_, _) =>
         {
@@ -349,7 +381,6 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Items =
             {
-                Header(_isEditMode, _editTargets.Length),
                 new StackLayoutItem(CreateLayoutsTab(), true),
                 _status,
                 new StackLayout
@@ -359,6 +390,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                     Spacing = FoundryTheme.Space2,
                     Items =
                     {
+                        _clearSelectionButton,
                         _countLabel,
                         _selectionHint,
                         new StackLayoutItem(null, true),
@@ -454,19 +486,27 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             "settings and preview");
         var tablePane = new StackLayout
         {
-            Spacing = FoundryTheme.Space3,
+            Orientation = Orientation.Horizontal,
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            VerticalContentAlignment = VerticalAlignment.Stretch,
+            Spacing = FoundryTheme.Space2,
             Items =
             {
                 new StackLayout
                 {
-                    Orientation = Orientation.Horizontal,
-                    VerticalContentAlignment = VerticalAlignment.Center,
-                    Spacing = FoundryTheme.Space2,
+                    Width = LayoutGroupRailWidth,
+                    Spacing = FoundryTheme.Space1,
+                    HorizontalContentAlignment = HorizontalAlignment.Stretch,
                     Items =
                     {
+                        new Label
+                        {
+                            Text = "Layout types",
+                            Font = SystemFonts.Bold(9),
+                            TextColor = FoundryTheme.SecondaryText,
+                            TextAlignment = TextAlignment.Left,
+                        },
                         new StackLayoutItem(_layoutGroupChipScroll, true),
-                        _clearSelectionButton,
                     },
                 },
                 new StackLayoutItem(_previewGrid, true),
@@ -474,7 +514,6 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         };
         var layoutRoot = new StackLayout
         {
-            Padding = new Padding(0, FoundryTheme.Space3, 0, 0),
             Spacing = 0,
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Items =
@@ -615,11 +654,11 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                 new Label { Text = "Detail layout" },
                 new TableCell(_layoutPickerTrigger, true)));
         table.Rows.Add(new TableRow(
-            LayoutFieldKey("Appearance state", _appearanceStateChangeCheck),
-            new TableCell(PickerWithHelp(_appearanceStatePicker, appearanceStateHelp), true)));
-        table.Rows.Add(new TableRow(
             LayoutFieldKey("Sheet display mode", _displayModeChangeCheck),
             new TableCell(PickerWithHelp(_displayModePicker, sheetDisplayModeHelp), true)));
+        table.Rows.Add(new TableRow(
+            LayoutFieldKey("Appearance state", _appearanceStateChangeCheck),
+            new TableCell(PickerWithHelp(_appearanceStatePicker, appearanceStateHelp), true)));
         table.Rows.Add(new TableRow(
             LayoutFieldKey("Detail layer", _detailLayerChangeCheck),
             new TableCell(_detailLayerModeControl, true)));
@@ -678,6 +717,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         grid.Columns.Add(TextColumn("Layout type", row => row.LayoutType, 190, true));
         grid.Columns.Add(TextColumn("Paper", row => row.Paper, 170));
         grid.Columns.Add(TextColumn("Details", row => row.Details, 70));
+        grid.Columns.Add(TextColumn("Detail changes", row => row.DetailChanges, 110));
         grid.Columns.Add(TextColumn("Detail layer", row => row.DetailLayer, 105));
         grid.Columns.Add(TextColumn("Display mode", row => row.DisplayMode, 150, true));
         grid.Columns.Add(TextColumn("Title block", row => row.TitleBlock, 160, true));
@@ -712,10 +752,11 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         if (ReferenceEquals(column, grid.Columns[1])) return PreviewChangedProperty.Name;
         if (ReferenceEquals(column, grid.Columns[2])) return PreviewChangedProperty.Destination;
         if (ReferenceEquals(column, grid.Columns[4])) return PreviewChangedProperty.Paper;
-        if (ReferenceEquals(column, grid.Columns[6])) return PreviewChangedProperty.DetailLayer;
-        if (ReferenceEquals(column, grid.Columns[7])) return PreviewChangedProperty.DisplayMode;
-        if (ReferenceEquals(column, grid.Columns[8])) return PreviewChangedProperty.TitleBlock;
-        if (ReferenceEquals(column, grid.Columns[9])) return PreviewChangedProperty.AppearanceState;
+        if (ReferenceEquals(column, grid.Columns[6])) return PreviewChangedProperty.DetailAssignments;
+        if (ReferenceEquals(column, grid.Columns[7])) return PreviewChangedProperty.DetailLayer;
+        if (ReferenceEquals(column, grid.Columns[8])) return PreviewChangedProperty.DisplayMode;
+        if (ReferenceEquals(column, grid.Columns[9])) return PreviewChangedProperty.TitleBlock;
+        if (ReferenceEquals(column, grid.Columns[10])) return PreviewChangedProperty.AppearanceState;
         return null;
     }
 
@@ -775,7 +816,40 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             ChangeDetailLayer: _detailLayerChangeCheck.Checked == true,
             UseDedicatedDetailLayer:
                 _detailLayerModeControl.SelectedIndex == (int)DetailLayerTargetMode.Dedicated,
-            DetailLayerId: SelectedDetailLayerId());
+            DetailLayerId: SelectedDetailLayerId(),
+            DetailUpdates: DetailUpdates());
+    }
+
+    private IReadOnlyList<BatchDetailUpdate> DetailUpdates()
+    {
+        var updates = new List<BatchDetailUpdate>();
+        foreach (var targetIndex in TargetDraftIndices())
+        {
+            var draft = _drafts[targetIndex];
+            if (draft.ExistingPageViewId is not { } pageViewId ||
+                !_snapshot.Sheets.TryGetValue(pageViewId, out var sheet))
+                continue;
+            var detailCount = Math.Min(sheet.Details.Count, draft.NamedViewsByDetail.Count);
+            for (var detailIndex = 0; detailIndex < detailCount; detailIndex++)
+            {
+                var namedViewChanged = NamedViewAssignmentChanged(draft, detailIndex);
+                var displayModeChanged = DetailDisplayModeChanged(draft, detailIndex);
+                var reapplyDisplayModeOverride = _displayModeChangeCheck.Checked == true &&
+                                                 draft.DetailDisplayModesByDetail[detailIndex] is not null;
+                var appearanceStateChanged = DetailAppearanceStateChanged(draft, detailIndex);
+                if (!namedViewChanged && !displayModeChanged && !reapplyDisplayModeOverride &&
+                    !appearanceStateChanged) continue;
+                updates.Add(new BatchDetailUpdate(
+                    sheet.Details[detailIndex].DetailViewportId,
+                    namedViewChanged,
+                    NormalizeNamedView(draft.NamedViewsByDetail[detailIndex]),
+                    displayModeChanged || reapplyDisplayModeOverride,
+                    EffectiveDisplayMode(draft, detailIndex),
+                    appearanceStateChanged,
+                    draft.AppearanceStatesByDetail[detailIndex]));
+            }
+        }
+        return updates;
     }
 
     private void RefreshPreview(bool refreshDetailAssignments = true)
@@ -798,6 +872,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             change.Template.Name,
             $"{change.Template.Paper.Width:0.###} × {change.Template.Paper.Height:0.###} {change.Template.Paper.UnitSystem}",
             change.Template.DetailSlots.Count.ToString(),
+            "—",
             change.Template.DetailSlots.Count == 0
                 ? "—"
                 : change.UseDedicatedDetailLayer
@@ -876,6 +951,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                         ? _snapshot.Layers.GetValueOrDefault(layerId) ?? "Unavailable layer"
                         : "Active layer"
                 : DetailLayerSummary(sheet);
+            var detailChangeCount = targeted ? DetailChangeCount(draft) : 0;
             var changedProperties = PreviewChangedProperty.None;
             if (targeted && change is not null)
             {
@@ -894,6 +970,8 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                     changedProperties |= PreviewChangedProperty.TitleBlock;
                 if (change.ChangeAppearanceState)
                     changedProperties |= PreviewChangedProperty.AppearanceState;
+                if (detailChangeCount > 0)
+                    changedProperties |= PreviewChangedProperty.DetailAssignments;
             }
             return new CreationPreviewRow(
                 draft.DraftId,
@@ -906,6 +984,9 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                 draft.Layout.Label,
                 $"{paperWidth:0.###} × {paperHeight:0.###} {paperUnit}",
                 sheet.Details.Count.ToString(),
+                detailChangeCount == 0
+                    ? "—"
+                    : $"{detailChangeCount} changed",
                 detailLayer,
                 mode,
                 titleBlock,
@@ -965,13 +1046,21 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
     private string FolderLabel(Guid folderId) =>
         _folders.FirstOrDefault(folder => folder.Id == folderId).Label ?? "Unavailable folder";
 
-    private Guid? DirectAppearanceState(Guid sheetPageViewId) => _snapshot.StateAssignments
+    private Guid? DirectAppearanceState(Guid sheetPageViewId) =>
+        DirectAppearanceState(HierarchyScopeKind.Sheet, sheetPageViewId);
+
+    private Guid? DirectAppearanceState(HierarchyScopeKind kind, Guid targetId) =>
+        _snapshot.StateAssignments
         .LastOrDefault(assignment => assignment.Target ==
-            new HierarchyScope(HierarchyScopeKind.Sheet, sheetPageViewId))?.StateId;
+            new HierarchyScope(kind, targetId))?.StateId;
 
     private void QueueRefreshPreview()
     {
-        Application.Instance.AsyncInvoke(() => RefreshPreview());
+        Application.Instance.AsyncInvoke(() =>
+        {
+            RefreshPreview();
+            if (!_isEditMode) QueueDraftLayoutPreview();
+        });
     }
 
     private string? PickerError()
@@ -1140,18 +1229,26 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         var displayModeId = _snapshot.DisplayModes.FirstOrDefault(pair => string.Equals(
             pair.Value, _displayModePicker.Text.Trim(), StringComparison.OrdinalIgnoreCase)).Key;
         var titleBlock = _titleBlockChoices[Math.Max(0, _titleBlockPreviewTray.SelectedIndex)];
+        var layout = _layoutChoices[Math.Max(0, _layoutPreviewTray.SelectedIndex)];
+        var namedViews = DefaultNamedViews(layout);
+        var detailDisplayModes = DefaultDetailDisplayModes(layout);
+        var detailAppearanceStates = DefaultDetailAppearanceStates(layout);
         return new CreationDraft(
             Guid.NewGuid(),
             null,
-            _layoutChoices[Math.Max(0, _layoutPreviewTray.SelectedIndex)],
+            layout,
             CurrentPaper(),
             displayModeId == Guid.Empty ? null : displayModeId,
             _detailLayerModeControl.SelectedIndex == (int)DetailLayerTargetMode.Dedicated,
             SelectedDetailLayerId(),
             titleBlock,
-            DefaultNamedViews(_layoutChoices[Math.Max(0, _layoutPreviewTray.SelectedIndex)]),
-            DefaultDetailDisplayModes(_layoutChoices[Math.Max(0, _layoutPreviewTray.SelectedIndex)]),
-            SelectedCapabilityTemplate(_appearanceStatePicker, _appearanceStateByLabel));
+            namedViews,
+            detailDisplayModes,
+            detailAppearanceStates,
+            SelectedCapabilityTemplate(_appearanceStatePicker, _appearanceStateByLabel),
+            namedViews,
+            detailDisplayModes,
+            detailAppearanceStates);
     }
 
     private CreationDraft DraftFromSheet(SheetSnapshot sheet)
@@ -1177,6 +1274,14 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             not null => _titleBlockChoices[1],
             _ => _titleBlockChoices[0],
         };
+        var namedViews = sheet.Details.Select(detail =>
+            sheet.DetailNamedViews.GetValueOrDefault(detail.DetailViewportId) ??
+            sheet.NamingBinding?.NamedViews.GetValueOrDefault(detail.DetailViewportId)).ToArray();
+        var detailDisplayModes = sheet.Details.Select(detail => pageMode == detail.DisplayModeId
+            ? (Guid?)null
+            : detail.DisplayModeId).ToArray();
+        var detailAppearanceStates = sheet.Details.Select(detail =>
+            DirectAppearanceState(HierarchyScopeKind.Detail, detail.DetailViewportId)).ToArray();
         return new CreationDraft(
             Guid.NewGuid(),
             sheet.PageViewId,
@@ -1189,11 +1294,13 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             usesDedicatedDetailLayer,
             usesDedicatedDetailLayer ? null : detailLayerId,
             titleBlock,
-            DefaultNamedViews(layout),
-            sheet.Details.Select(detail => pageMode == detail.DisplayModeId
-                ? (Guid?)null
-                : detail.DisplayModeId).ToArray(),
-            DirectAppearanceState(sheet.PageViewId));
+            namedViews,
+            detailDisplayModes,
+            detailAppearanceStates,
+            DirectAppearanceState(sheet.PageViewId),
+            namedViews,
+            detailDisplayModes,
+            detailAppearanceStates);
     }
 
     private void ApplyLayoutToTargets()
@@ -1207,9 +1314,11 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                 Layout = layout,
                 NamedViewsByDetail = DefaultNamedViews(layout),
                 DetailDisplayModesByDetail = DefaultDetailDisplayModes(layout),
+                AppearanceStatesByDetail = DefaultDetailAppearanceStates(layout),
             };
         _activeGroupFilter = LayoutGroupKey.For(layout);
         RefreshPreview();
+        if (!_isEditMode) QueueDraftLayoutPreview();
         if (selected.Count > 0) SelectDrafts(selected);
     }
 
@@ -1611,12 +1720,13 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         }
     }
 
-    private void QueueEditSheetPreview()
+    private void QueueEditSheetPreview(bool preserveCurrentPreview = false)
     {
         if (!_dialogShown || !_isEditMode || _draftLayoutPreviewCancellation.IsCancellationRequested)
             return;
         _editSheetPreviewVersion++;
         _editSheetPreviewDirty = true;
+        _preserveEditSheetPreviewWhileRendering |= preserveCurrentPreview;
         if (_editSheetPreviewInProgress) return;
         _ = LoadEditSheetPreviewAsync();
     }
@@ -1632,6 +1742,8 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             {
                 _editSheetPreviewDirty = false;
                 var version = _editSheetPreviewVersion;
+                var preserveCurrentPreview = _preserveEditSheetPreviewWhileRendering;
+                _preserveEditSheetPreviewWhileRendering = false;
                 var targets = TargetDraftIndices();
                 if (targets.Count != 1)
                 {
@@ -1652,33 +1764,67 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                     (int)Math.Round(previewWidth * sheet.PageHeight / Math.Max(0.001, sheet.PageWidth)),
                     180,
                     900);
-                var key = new OverviewThumbnailKey(
-                    _snapshot.DocumentRuntimeSerialNumber,
-                    pageViewId,
-                    previewWidth,
-                    previewHeight,
-                    _snapshot.Revision + version,
-                    BackgroundArgb: PreviewBackgroundArgb(FoundryTheme.CanvasPreviewBackground));
-                _layoutSelectorPreview.SetPagePreview(null, "Rendering sheet preview…");
-                var result = await LayoutFoundryUiHost.CaptureThumbnailAsync(
-                    new OverviewThumbnailRequest(key, Priority: -1),
-                    _draftLayoutPreviewCancellation.Token);
+                if (!preserveCurrentPreview || !_layoutSelectorPreview.HasPagePreview)
+                    _layoutSelectorPreview.SetPagePreview(null, "Rendering sheet preview…");
+
+                byte[]? pngBytes;
+                string? error;
+                if (HasStagedVisualChanges(draft))
+                {
+                    var key = new EditSheetThumbnailKey(
+                        _snapshot.DocumentRuntimeSerialNumber,
+                        pageViewId,
+                        previewWidth,
+                        previewHeight,
+                        _snapshot.Revision + version,
+                        PreviewBackgroundArgb(FoundryTheme.CanvasPreviewBackground));
+                    var detailAssignments = sheet.Details.Select((detail, detailIndex) =>
+                        new EditDetailPreviewAssignment(
+                            detail.DetailViewportId,
+                            NormalizeNamedView(draft.NamedViewsByDetail[detailIndex]),
+                            EffectiveDisplayMode(draft, detailIndex),
+                            draft.AppearanceStatesByDetail[detailIndex])).ToArray();
+                    var result = await LayoutFoundryUiHost.CaptureEditSheetThumbnailAsync(
+                        new EditSheetThumbnailRequest(
+                            key,
+                            PreviewFolderId(draft),
+                            draft.AppearanceStateId,
+                            detailAssignments),
+                        _draftLayoutPreviewCancellation.Token);
+                    pngBytes = result.PngBytes;
+                    error = result.Error;
+                }
+                else
+                {
+                    var key = new OverviewThumbnailKey(
+                        _snapshot.DocumentRuntimeSerialNumber,
+                        pageViewId,
+                        previewWidth,
+                        previewHeight,
+                        _snapshot.Revision + version,
+                        BackgroundArgb: PreviewBackgroundArgb(FoundryTheme.CanvasPreviewBackground));
+                    var result = await LayoutFoundryUiHost.CaptureThumbnailAsync(
+                        new OverviewThumbnailRequest(key, Priority: -1),
+                        _draftLayoutPreviewCancellation.Token);
+                    pngBytes = result.PngBytes;
+                    error = result.Error;
+                }
                 if (_draftLayoutPreviewCancellation.IsCancellationRequested) return;
                 if (version != _editSheetPreviewVersion)
                 {
                     _editSheetPreviewDirty = true;
                     continue;
                 }
-                if (!result.Succeeded)
+                if (pngBytes is not { Length: > 0 } || error is not null)
                 {
                     _layoutSelectorPreview.SetPagePreview(
                         null,
-                        $"Preview unavailable: {result.Error ?? "Rhino did not return an image."}");
+                        $"Preview unavailable: {error ?? "Rhino did not return an image."}");
                     continue;
                 }
 
                 _layoutSelectorPreview.SetPagePreview(
-                    new Bitmap(result.PngBytes!),
+                    new Bitmap(pngBytes),
                     null,
                     overlayDetails: false);
             }
@@ -1699,6 +1845,11 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                 _ = LoadEditSheetPreviewAsync();
         }
     }
+
+    private bool HasStagedVisualChanges(CreationDraft draft) =>
+        _displayModeChangeCheck.Checked == true ||
+        _appearanceStateChangeCheck.Checked == true ||
+        DetailChangeCount(draft) > 0;
 
     private void ShowSharedEditStructure(IReadOnlyList<int> targets)
     {
@@ -1788,6 +1939,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         _titleBlockPreviewTray.SetPaper(paper);
         _titleBlockSelectorPreview.SetPaper(paper);
         ApplyToTargets(draft => draft with { Paper = paper });
+        if (!_isEditMode) QueueDraftLayoutPreview();
     }
 
     private void ApplyDisplayModeToTargets()
@@ -1807,6 +1959,10 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             displayModeId = match.Key;
         }
         ApplyToTargets(draft => draft with { PageDisplayModeId = displayModeId });
+        if (_isEditMode)
+            QueueEditSheetPreview(preserveCurrentPreview: true);
+        else
+            QueueDraftLayoutPreview();
     }
 
     private void ApplyAppearanceStateToTargets()
@@ -1815,6 +1971,10 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         var source = SelectedCapabilityTemplate(
             _appearanceStatePicker, _appearanceStateByLabel);
         ApplyToTargets(draft => draft with { AppearanceStateId = source });
+        if (_isEditMode)
+            QueueEditSheetPreview(preserveCurrentPreview: true);
+        else
+            QueueDraftLayoutPreview();
     }
 
     private static Guid? SelectedCapabilityTemplate(
@@ -1860,6 +2020,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         if (_updatingEditors) return;
         var titleBlock = _titleBlockChoices[Math.Max(0, _titleBlockPreviewTray.SelectedIndex)];
         ApplyToTargets(draft => draft with { TitleBlock = titleBlock });
+        if (!_isEditMode) QueueDraftLayoutPreview();
     }
 
     private void OnTitleBlockSelectionChanged(object? sender, EventArgs eventArgs)
@@ -1919,6 +2080,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         if (_isEditMode)
         {
             RefreshPreview(refreshDetailAssignments: false);
+            QueueEditSheetPreview();
             return;
         }
         RefreshDetailAssignments();
@@ -1931,6 +2093,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         if (_isEditMode)
         {
             RefreshPreview(refreshDetailAssignments: false);
+            QueueEditSheetPreview();
             return;
         }
         RefreshDetailAssignments();
@@ -1945,7 +2108,6 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                 : $"No rows selected — property changes apply to {ActiveGroupLabel()}."
             : $"{selectedCount} selected — property changes apply only to selected rows.";
         _clearSelectionButton.Enabled = selectedCount > 0;
-        _clearSelectionButton.Visible = selectedCount > 0;
     }
 
     private void EnsureActiveGroupExists()
@@ -1970,7 +2132,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         var button = new FoundryDialogButton(
             text,
             FoundryDialogButtonStyle.Secondary,
-            Math.Max(68, (text.Length * 7) + 24))
+            LayoutGroupButtonWidth)
         {
             ToolTip = key is null
                 ? "Show the whole batch; with no selected rows, edits apply to all layouts."
@@ -1988,6 +2150,8 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         RefreshPreview();
         var first = TargetDraftIndices().FirstOrDefault(-1);
         if (first >= 0) LoadEditors(_drafts[first]);
+        if (_isEditMode) QueueEditSheetPreview();
+        else QueueDraftLayoutPreview();
     }
 
     private string ActiveGroupLabel()
@@ -2014,6 +2178,8 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         }
         UpdateSelectionHint();
         RefreshDetailAssignments();
+        if (_isEditMode) QueueEditSheetPreview();
+        else QueueDraftLayoutPreview();
     }
 
     private void RefreshDetailAssignments()
@@ -2065,6 +2231,10 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                 : displayModeValues[0] is { } displayModeId
                     ? _snapshot.DisplayModes.GetValueOrDefault(displayModeId) ?? "Unavailable mode"
                     : "Rhino default";
+            var changed = _isEditMode && targets.Any(index =>
+                NamedViewAssignmentChanged(_drafts[index], detailIndex) ||
+                DetailDisplayModeChanged(_drafts[index], detailIndex) ||
+                DetailAppearanceStateChanged(_drafts[index], detailIndex));
             states[detailIndex] = new DetailPreviewState(
                 details[detailIndex],
                 namedViewLabel,
@@ -2074,16 +2244,13 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                 namedViewValues.Any(value => !string.IsNullOrWhiteSpace(value)),
                 displayModeValues.Any(value => value is not null),
                 mixedNamedViews,
-                mixedDisplayModes);
+                mixedDisplayModes,
+                changed);
         }
 
         _layoutSelectorPreview.SetDetailStates(states);
         _layoutSelectorPreview.ToolTip =
-            "Choose a numbered detail to set its named view and display mode.";
-        if (_isEditMode)
-            QueueEditSheetPreview();
-        else
-            QueueDraftLayoutPreview();
+            "Choose a numbered detail to set its named view, display mode, and appearance state.";
     }
 
     private static Guid? EffectiveDisplayMode(CreationDraft draft, int detailIndex)
@@ -2097,11 +2264,65 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         return null;
     }
 
+    private static string? NormalizeNamedView(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static bool NamedViewAssignmentChanged(CreationDraft draft, int detailIndex)
+    {
+        var current = detailIndex < draft.NamedViewsByDetail.Count
+            ? NormalizeNamedView(draft.NamedViewsByDetail[detailIndex])
+            : null;
+        var original = detailIndex < draft.OriginalNamedViewsByDetail.Count
+            ? NormalizeNamedView(draft.OriginalNamedViewsByDetail[detailIndex])
+            : null;
+        return !string.Equals(current, original, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool DetailDisplayModeChanged(CreationDraft draft, int detailIndex)
+    {
+        var current = detailIndex < draft.DetailDisplayModesByDetail.Count
+            ? draft.DetailDisplayModesByDetail[detailIndex]
+            : null;
+        var original = detailIndex < draft.OriginalDetailDisplayModesByDetail.Count
+            ? draft.OriginalDetailDisplayModesByDetail[detailIndex]
+            : null;
+        return current != original;
+    }
+
+    private static bool DetailAppearanceStateChanged(CreationDraft draft, int detailIndex)
+    {
+        var current = detailIndex < draft.AppearanceStatesByDetail.Count
+            ? draft.AppearanceStatesByDetail[detailIndex]
+            : null;
+        var original = detailIndex < draft.OriginalAppearanceStatesByDetail.Count
+            ? draft.OriginalAppearanceStatesByDetail[detailIndex]
+            : null;
+        return current != original;
+    }
+
+    private static int DetailChangeCount(CreationDraft draft)
+    {
+        var detailCount = Math.Max(
+            draft.NamedViewsByDetail.Count,
+            Math.Max(
+                draft.OriginalDetailDisplayModesByDetail.Count,
+                draft.OriginalAppearanceStatesByDetail.Count));
+        return Enumerable.Range(0, detailCount).Count(index =>
+            NamedViewAssignmentChanged(draft, index) ||
+            DetailDisplayModeChanged(draft, index) ||
+            DetailAppearanceStateChanged(draft, index));
+    }
+
     private PreviewAppearance ResolvePreviewAppearance(CreationDraft draft, int detailIndex)
     {
         var folderId = PreviewFolderId(draft);
-        var sheetScope = new HierarchyScope(HierarchyScopeKind.Sheet, draft.DraftId);
-        var detailSlotId = draft.Layout.Template is { } template &&
+        var sheetScopeId = draft.ExistingPageViewId ?? draft.DraftId;
+        var sheetScope = new HierarchyScope(HierarchyScopeKind.Sheet, sheetScopeId);
+        var detailSlotId = draft.ExistingPageViewId is { } existingPageViewId &&
+                           _snapshot.Sheets.TryGetValue(existingPageViewId, out var existingSheet) &&
+                           detailIndex >= 0 && detailIndex < existingSheet.Details.Count
+            ? existingSheet.Details[detailIndex].DetailViewportId
+            : draft.Layout.Template is { } template &&
                            detailIndex >= 0 && detailIndex < template.DetailSlots.Count
             ? template.DetailSlots[detailIndex].Id
             : PreviewDetailScopeId(draft.DraftId, detailIndex);
@@ -2124,12 +2345,21 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         }
 
         var assignments = _snapshot.StateAssignments.ToList();
+        assignments.RemoveAll(item => item.Target == sheetScope || item.Target == detailScope);
         if (draft.AppearanceStateId is { } appearanceStateId)
         {
             assignments.Add(new AppearanceStateAssignment(
-                draft.DraftId,
+                Guid.NewGuid(),
                 sheetScope,
                 appearanceStateId));
+        }
+        if (detailIndex >= 0 && detailIndex < draft.AppearanceStatesByDetail.Count &&
+            draft.AppearanceStatesByDetail[detailIndex] is { } detailAppearanceStateId)
+        {
+            assignments.Add(new AppearanceStateAssignment(
+                Guid.NewGuid(),
+                detailScope,
+                detailAppearanceStateId));
         }
         var effective = ViewportAppearanceResolver.Resolve(
             scopes,
@@ -2208,9 +2438,12 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         if (detailIndex < 0 || detailIndex >= detailLabels.Count) return;
         var namedViews = targets.Select(index => _drafts[index].NamedViewsByDetail[detailIndex]).ToArray();
         var displayModes = targets.Select(index => _drafts[index].DetailDisplayModesByDetail[detailIndex]).ToArray();
+        var appearanceStates = targets.Select(index =>
+            _drafts[index].AppearanceStatesByDetail[detailIndex]).ToArray();
         var mixedNamedViews = namedViews.Skip(1).Any(value => !string.Equals(
             value, namedViews[0], StringComparison.OrdinalIgnoreCase));
         var mixedDisplayModes = displayModes.Skip(1).Any(value => value != displayModes[0]);
+        var mixedAppearanceStates = appearanceStates.Skip(1).Any(value => value != appearanceStates[0]);
 
         HideLayoutGallery();
         HideTitleBlockGallery();
@@ -2224,7 +2457,10 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             namedViews[0],
             mixedNamedViews,
             displayModes[0],
-            mixedDisplayModes);
+            mixedDisplayModes,
+            _appearanceStateByLabel,
+            appearanceStates[0],
+            mixedAppearanceStates);
         dialog.ShowModal(this);
         if (!dialog.Succeeded) return;
 
@@ -2232,16 +2468,26 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         {
             var namedViewAssignments = _drafts[targetIndex].NamedViewsByDetail.ToArray();
             var displayModeAssignments = _drafts[targetIndex].DetailDisplayModesByDetail.ToArray();
-            if (detailIndex >= namedViewAssignments.Length || detailIndex >= displayModeAssignments.Length) continue;
+            var appearanceStateAssignments = _drafts[targetIndex].AppearanceStatesByDetail.ToArray();
+            if (detailIndex >= namedViewAssignments.Length ||
+                detailIndex >= displayModeAssignments.Length ||
+                detailIndex >= appearanceStateAssignments.Length) continue;
             if (dialog.ChangeNamedView) namedViewAssignments[detailIndex] = dialog.NamedView;
             if (dialog.ChangeDisplayMode) displayModeAssignments[detailIndex] = dialog.DisplayModeId;
+            if (dialog.ChangeAppearanceState)
+                appearanceStateAssignments[detailIndex] = dialog.AppearanceStateId;
             _drafts[targetIndex] = _drafts[targetIndex] with
             {
                 NamedViewsByDetail = namedViewAssignments,
                 DetailDisplayModesByDetail = displayModeAssignments,
+                AppearanceStatesByDetail = appearanceStateAssignments,
             };
         }
         RefreshPreview();
+        if (_isEditMode)
+            QueueEditSheetPreview(preserveCurrentPreview: true);
+        else
+            QueueDraftLayoutPreview();
     }
 
     private static IReadOnlyList<string> DetailLabels(LayoutChoice layout)
@@ -2264,6 +2510,9 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         Enumerable.Repeat<string?>(null, DetailLabels(layout).Count).ToArray();
 
     private static IReadOnlyList<Guid?> DefaultDetailDisplayModes(LayoutChoice layout) =>
+        Enumerable.Repeat<Guid?>(null, DetailLabels(layout).Count).ToArray();
+
+    private static IReadOnlyList<Guid?> DefaultDetailAppearanceStates(LayoutChoice layout) =>
         Enumerable.Repeat<Guid?>(null, DetailLabels(layout).Count).ToArray();
 
     private void LoadEditors(CreationDraft draft)
@@ -2532,23 +2781,6 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             .Select(folder => (folder.Id, Path(folder.Id))).ToArray();
     }
 
-    private static Control Header(bool editMode, int targetCount) => new StackLayout
-    {
-        Spacing = FoundryTheme.Space1,
-        Items =
-        {
-            new Label
-            {
-                Text = editMode ? "Edit layouts" : "Create layouts",
-                Font = SystemFonts.Bold(17),
-                TextColor = FoundryTheme.PrimaryText,
-            },
-            FoundryTheme.MutedLabel(editMode
-                ? $"Review {targetCount} existing layout{(targetCount == 1 ? string.Empty : "s")}, then apply only the enabled fields."
-                : "Configure the batch once, review every resulting layout, then create it atomically."),
-        },
-    };
-
     private static readonly string[] Units = ["Millimeters", "Centimeters", "Meters", "Inches", "Feet"];
 
     private static readonly IndexModeChoice[] CreateIndexModes =
@@ -2611,7 +2843,11 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         TitleBlockChoice TitleBlock,
         IReadOnlyList<string?> NamedViewsByDetail,
         IReadOnlyList<Guid?> DetailDisplayModesByDetail,
-        Guid? AppearanceStateId)
+        IReadOnlyList<Guid?> AppearanceStatesByDetail,
+        Guid? AppearanceStateId,
+        IReadOnlyList<string?> OriginalNamedViewsByDetail,
+        IReadOnlyList<Guid?> OriginalDetailDisplayModesByDetail,
+        IReadOnlyList<Guid?> OriginalAppearanceStatesByDetail)
     {
         internal LayoutCreationSpec ToSpec() => new(
             Quantity: 1,
@@ -2626,7 +2862,8 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             NamedViewsByDetail: NamedViewsByDetail,
             DetailDisplayModesByDetail: DetailDisplayModesByDetail,
             DetailLayerId: DetailLayerId,
-            AppearanceStateId: AppearanceStateId);
+            AppearanceStateId: AppearanceStateId,
+            AppearanceStatesByDetail: AppearanceStatesByDetail);
     }
 
     private enum DetailLayerTargetMode
@@ -2645,6 +2882,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         string LayoutType,
         string Paper,
         string Details,
+        string DetailChanges,
         string DetailLayer,
         string DisplayMode,
         string TitleBlock,
@@ -2662,6 +2900,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         DisplayMode = 1 << 4,
         TitleBlock = 1 << 5,
         AppearanceState = 1 << 6,
+        DetailAssignments = 1 << 7,
     }
 
     private sealed record DetailPreviewState(
@@ -2673,7 +2912,8 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         bool HasNamedView,
         bool HasDisplayMode,
         bool NamedViewIsMixed,
-        bool DisplayModeIsMixed);
+        bool DisplayModeIsMixed,
+        bool Changed);
 
     private sealed record PreviewAppearance(
         EffectiveViewportAppearance Effective,
@@ -2694,6 +2934,9 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         private readonly DetailNamedViewTray _namedViewTray;
         private readonly FilteredPicker _displayModePicker;
         private readonly DetailDisplayModeChoice[] _displayModeChoices;
+        private readonly bool _mixedAppearanceStates;
+        private readonly FilteredPicker _appearanceStatePicker;
+        private readonly DetailAppearanceStateChoice[] _appearanceStateChoices;
         private readonly Label _displayModeError;
         private readonly NamedViewPreviewTray _previewSource;
 
@@ -2706,11 +2949,15 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             string? namedView,
             bool mixedNamedViews,
             Guid? displayModeId,
-            bool mixedDisplayModes)
+            bool mixedDisplayModes,
+            IReadOnlyDictionary<string, Guid> appearanceStates,
+            Guid? appearanceStateId,
+            bool mixedAppearanceStates)
         {
             _namedViewChoices = namedViewChoices;
             _mixedNamedViews = mixedNamedViews;
             _mixedDisplayModes = mixedDisplayModes;
+            _mixedAppearanceStates = mixedAppearanceStates;
             _previewSource = previewSource;
             var namedViewIndex = Array.FindIndex(namedViewChoices, choice => string.Equals(
                 choice.Name, namedView, StringComparison.OrdinalIgnoreCase));
@@ -2755,8 +3002,25 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                 _displayModeError.Visible = false;
             };
 
+            var appearanceStateChoices = new List<DetailAppearanceStateChoice>();
+            if (mixedAppearanceStates)
+                appearanceStateChoices.Add(new DetailAppearanceStateChoice(MixedDisplayMode, null));
+            appearanceStateChoices.Add(new DetailAppearanceStateChoice(InheritSheetAppearanceState, null));
+            appearanceStateChoices.AddRange(appearanceStates.Select(pair =>
+                new DetailAppearanceStateChoice(pair.Key, pair.Value)));
+            _appearanceStateChoices = appearanceStateChoices.ToArray();
+            var initialAppearanceState = mixedAppearanceStates
+                ? _appearanceStateChoices[0]
+                : _appearanceStateChoices.FirstOrDefault(choice => choice.Id == appearanceStateId) ??
+                  _appearanceStateChoices.First(choice => choice.Label == InheritSheetAppearanceState);
+            _appearanceStatePicker = new FilteredPicker(
+                _appearanceStateChoices.Select(choice => choice.Label),
+                "Search appearance states");
+            _appearanceStatePicker.Width = 280;
+            _appearanceStatePicker.Text = initialAppearanceState.Label;
+
             Title = $"{detailLabel} settings";
-            MinimumSize = new Size(610, 500);
+            MinimumSize = new Size(610, 460);
             Resizable = true;
             Padding = new Padding(FoundryTheme.Space4);
             BackgroundColor = FoundryTheme.PanelBackground;
@@ -2770,6 +3034,14 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                     _displayModeError.Text = "Choose an available display mode or use the page setting.";
                     _displayModeError.Visible = true;
                     _displayModePicker.Focus();
+                    return;
+                }
+                if (!_appearanceStatePicker.ContainsChoice(_appearanceStatePicker.Text))
+                {
+                    _displayModeError.Text =
+                        "Choose an available appearance state or use the sheet setting.";
+                    _displayModeError.Visible = true;
+                    _appearanceStatePicker.Focus();
                     return;
                 }
 
@@ -2807,28 +3079,24 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                 {
                     new Label
                     {
-                        Text = detailLabel,
-                        Font = SystemFonts.Bold(17),
-                        TextColor = FoundryTheme.PrimaryText,
-                    },
-                    FoundryTheme.MutedLabel(targetCount == 1
-                        ? "Assign this detail's camera and optional display-mode override."
-                        : $"Apply this detail slot's settings to {targetCount} targeted layouts."),
-                    new Label
-                    {
                         Text = "Named view",
                         Font = SystemFonts.Bold(13),
                         TextColor = FoundryTheme.PrimaryText,
                     },
                     new StackLayoutItem(namedViewScroll, true),
-                    new Label
+                    new TableLayout
                     {
-                        Text = "Display mode",
-                        Font = SystemFonts.Bold(13),
-                        TextColor = FoundryTheme.PrimaryText,
+                        Spacing = new Size(FoundryTheme.Space2, FoundryTheme.Space1),
+                        Rows =
+                        {
+                            new TableRow(
+                                new Label { Text = "Display mode" },
+                                new TableCell(_displayModePicker, true)),
+                            new TableRow(
+                                new Label { Text = "Appearance state" },
+                                new TableCell(_appearanceStatePicker, true)),
+                        },
                     },
-                    FoundryTheme.MutedLabel("Use the sheet display mode or override it for this detail."),
-                    new Panel { Width = 300, Content = _displayModePicker },
                     _displayModeError,
                     new TableLayout
                     {
@@ -2861,10 +3129,21 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                 choice.Label,
                 _displayModePicker.Text.Trim(),
                 StringComparison.OrdinalIgnoreCase))?.Id;
+        internal bool ChangeAppearanceState => !_mixedAppearanceStates ||
+                                               !string.Equals(
+                                                   _appearanceStatePicker.Text.Trim(),
+                                                   MixedDisplayMode,
+                                                   StringComparison.OrdinalIgnoreCase);
+        internal Guid? AppearanceStateId => _appearanceStateChoices.FirstOrDefault(choice =>
+            string.Equals(
+                choice.Label,
+                _appearanceStatePicker.Text.Trim(),
+                StringComparison.OrdinalIgnoreCase))?.Id;
 
         private void OnPreviewsChanged(object? sender, EventArgs eventArgs) => _namedViewTray.Invalidate();
 
         private sealed record DetailDisplayModeChoice(string Label, Guid? Id);
+        private sealed record DetailAppearanceStateChoice(string Label, Guid? Id);
     }
 
     private sealed class DetailNamedViewTray : Drawable
@@ -3790,6 +4069,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
         }
 
         internal event EventHandler<DetailActivatedEventArgs>? DetailActivated;
+        internal bool HasPagePreview => _pagePreview is not null;
 
         internal void SetSelection(int selectedIndex)
         {
@@ -3873,6 +4153,19 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             }
             if (_pagePreview is not null && !_overlayPagePreviewDetails)
             {
+                var previewDetails = PreviewDetailBounds(page);
+                for (var detailIndex = 0;
+                     detailIndex < previewDetails.Count && detailIndex < _detailStates.Length;
+                     detailIndex++)
+                {
+                    var highlighted = detailIndex == _hoveredDetailIndex ||
+                                      detailIndex == _keyboardDetailIndex;
+                    var changed = _detailStates[detailIndex].Changed;
+                    if (!highlighted && !changed) continue;
+                    graphics.DrawRectangle(new Pen(
+                        changed ? FoundryTheme.WarningAccent : FoundryTheme.PrimaryText,
+                        2), previewDetails[detailIndex]);
+                }
                 if (HasFocus)
                     graphics.DrawRectangle(new Pen(FoundryTheme.PrimaryText, 2), page);
                 return;
@@ -3916,9 +4209,7 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                 }
                 else
                 {
-                    graphics.FillRectangle(
-                        highlighted ? FoundryTheme.ToolbarActiveBackground : FoundryTheme.ToolbarButtonBackground,
-                        detail);
+                    graphics.FillRectangle(FoundryTheme.ToolbarButtonBackground, detail);
                     if (!string.IsNullOrWhiteSpace(state?.PreviewMessage) && detail.Height >= 46)
                     {
                         var messageY = detail.Y + Math.Max(22, (detail.Height - 10) / 2);
@@ -3932,8 +4223,12 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                     }
                 }
                 graphics.DrawRectangle(new Pen(
-                    highlighted ? FoundryTheme.PrimaryText : FoundryTheme.CanvasBorder,
-                    highlighted ? 2 : 1), detail);
+                    state?.Changed == true
+                        ? FoundryTheme.WarningAccent
+                        : highlighted
+                            ? FoundryTheme.PrimaryText
+                            : FoundryTheme.CanvasBorder,
+                    state?.Changed == true || highlighted ? 2 : 1), detail);
                 if (!interactive) continue;
                 var previewState = _detailStates[detailIndex];
                 if (detail.Width < 28 || detail.Height < 20)

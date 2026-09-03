@@ -977,7 +977,7 @@ public sealed class ObserverFoundryPanel : Panel
         }
     }
 
-    private void OpenBatchProperties()
+    private async void OpenBatchProperties()
     {
         var snapshot = LayoutFoundryUiHost.CaptureSnapshot();
         if (snapshot is null) return;
@@ -1006,6 +1006,9 @@ public sealed class ObserverFoundryPanel : Panel
 
         var dialog = new BatchCreateLayoutsDialog(snapshot, targets);
         dialog.ShowModal(this);
+        await LayoutFoundryUiHost.CompleteDraftLayoutThumbnailSessionAsync(
+            snapshot.DocumentRuntimeSerialNumber,
+            restoreOriginalModifiedState: !dialog.Succeeded);
         if (dialog.Succeeded) RefreshSnapshot(fit: false);
     }
 

@@ -63,7 +63,8 @@ public sealed record LayoutPackageSheet(
     bool IncludeInPrintAll,
     SheetTitleBlockData? TitleBlockData = null,
     SheetNamingBinding? NamingBinding = null,
-    string Notes = "");
+    string Notes = "",
+    IReadOnlyDictionary<Guid, string>? DetailNamedViewAssignments = null);
 
 public sealed record LayoutPackageDetail(
     Guid SourceDetailViewportId,

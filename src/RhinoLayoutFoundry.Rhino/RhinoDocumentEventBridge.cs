@@ -183,7 +183,8 @@ internal sealed class RhinoDocumentEventBridge : IDisposable
         OverviewInvalidationKind kind,
         Guid? entityId = null)
     {
-        if (document is null)
+        if (document is null ||
+            RhinoThumbnailCaptureGate.IsApplyingTransientDocumentChanges)
         {
             return;
         }

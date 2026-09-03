@@ -80,10 +80,13 @@ public sealed record SheetSnapshot(
     BuiltInTitleBlockKind? TitleBlockBuiltInKind = null,
     IReadOnlyList<string>? SheetTags = null,
     SheetNamingBinding? NamingBinding = null,
-    string Notes = "")
+    string Notes = "",
+    IReadOnlyDictionary<Guid, string>? DetailNamedViewAssignments = null)
 {
     public IReadOnlyList<DetailSnapshot> Details => DetailSettings ?? [];
     public IReadOnlyList<string> Tags => SheetTags ?? [];
+    public IReadOnlyDictionary<Guid, string> DetailNamedViews =>
+        DetailNamedViewAssignments ?? new Dictionary<Guid, string>();
 }
 
 public sealed record DetailSnapshot(

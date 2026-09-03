@@ -3315,7 +3315,7 @@ public sealed partial class LayoutFoundryPanel : Panel
         return string.Join(" ", result.Diagnostics.Select(item => item.Message));
     }
 
-    private void OpenBatchProperties()
+    private async void OpenBatchProperties()
     {
         var snapshot = LayoutFoundryUiHost.CaptureSnapshot();
         if (snapshot is null)
@@ -3356,6 +3356,9 @@ public sealed partial class LayoutFoundryPanel : Panel
         }
         var dialog = new BatchCreateLayoutsDialog(snapshot, targets);
         dialog.ShowModal(this);
+        await LayoutFoundryUiHost.CompleteDraftLayoutThumbnailSessionAsync(
+            snapshot.DocumentRuntimeSerialNumber,
+            restoreOriginalModifiedState: !dialog.Succeeded);
         if (dialog.Succeeded)
         {
             _statusLabel.Text = $"Updated {targets.Count} layout{(targets.Count == 1 ? string.Empty : "s")}.";

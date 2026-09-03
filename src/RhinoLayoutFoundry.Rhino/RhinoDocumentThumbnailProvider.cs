@@ -158,4 +158,26 @@ internal sealed class RhinoDocumentThumbnailProvider : IDocumentThumbnailProvide
 internal static class RhinoThumbnailCaptureGate
 {
     internal static readonly SemaphoreSlim Gate = new(1, 1);
+
+    private static int _transientDocumentChangeDepth;
+
+    internal static bool IsApplyingTransientDocumentChanges =>
+        Volatile.Read(ref _transientDocumentChangeDepth) > 0;
+
+    internal static IDisposable BeginTransientDocumentChanges()
+    {
+        Interlocked.Increment(ref _transientDocumentChangeDepth);
+        return new TransientDocumentChangeScope();
+    }
+
+    private sealed class TransientDocumentChangeScope : IDisposable
+    {
+        private int _disposed;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 0)
+                Interlocked.Decrement(ref _transientDocumentChangeDepth);
+        }
+    }
 }

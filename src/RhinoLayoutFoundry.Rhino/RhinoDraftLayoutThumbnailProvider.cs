@@ -19,6 +19,13 @@ internal sealed class RhinoDraftLayoutThumbnailProvider : IDraftLayoutThumbnailP
         _stateStore = stateStore ?? throw new ArgumentNullException(nameof(stateStore));
     }
 
+    public void BeginSession(uint documentRuntimeSerialNumber)
+    {
+        var document = RhinoDoc.FromRuntimeSerialNumber(documentRuntimeSerialNumber);
+        if (document is not null)
+            _modifiedBeforePreview.TryAdd(documentRuntimeSerialNumber, document.Modified);
+    }
+
     public async Task<DraftLayoutThumbnailResult> CaptureAsync(
         DraftLayoutThumbnailRequest request,
         CancellationToken cancellationToken)
@@ -60,17 +67,64 @@ internal sealed class RhinoDraftLayoutThumbnailProvider : IDraftLayoutThumbnailP
         }
     }
 
+    public async Task<EditSheetThumbnailResult> CaptureEditAsync(
+        EditSheetThumbnailRequest request,
+        CancellationToken cancellationToken)
+    {
+        var enteredGate = false;
+        try
+        {
+            await RhinoThumbnailCaptureGate.Gate.WaitAsync(cancellationToken);
+            enteredGate = true;
+            if (!RhinoApp.InvokeRequired)
+                return CaptureEditOnUiThread(request, cancellationToken);
+
+            var completion = new TaskCompletionSource<EditSheetThumbnailResult>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            RhinoApp.InvokeOnUiThread((Action)(() =>
+            {
+                try
+                {
+                    completion.SetResult(CaptureEditOnUiThread(request, cancellationToken));
+                }
+                catch (Exception exception)
+                {
+                    completion.SetResult(Failure(request, exception.Message));
+                }
+            }));
+            return await completion.Task;
+        }
+        catch (OperationCanceledException)
+        {
+            return Failure(request, "Edit preview capture was cancelled.");
+        }
+        catch (Exception exception)
+        {
+            return Failure(request, exception.Message);
+        }
+        finally
+        {
+            if (enteredGate) RhinoThumbnailCaptureGate.Gate.Release();
+        }
+    }
+
     public async Task CompleteSessionAsync(
         uint documentRuntimeSerialNumber,
         bool restoreOriginalModifiedState,
+        bool endSession = true,
         CancellationToken cancellationToken = default)
     {
         await RhinoThumbnailCaptureGate.Gate.WaitAsync(cancellationToken);
         try
         {
-            if (!_modifiedBeforePreview.TryRemove(
+            var found = endSession
+                ? _modifiedBeforePreview.TryRemove(
                     documentRuntimeSerialNumber,
-                    out var originalModifiedState) ||
+                    out var originalModifiedState)
+                : _modifiedBeforePreview.TryGetValue(
+                    documentRuntimeSerialNumber,
+                    out originalModifiedState);
+            if (!found ||
                 !restoreOriginalModifiedState)
                 return;
 
@@ -119,6 +173,7 @@ internal sealed class RhinoDraftLayoutThumbnailProvider : IDraftLayoutThumbnailP
         var undoRecordingWasEnabled = source.UndoRecordingEnabled;
         var layerBefore = new Dictionary<Guid, Layer>();
         var objectBefore = new Dictionary<Guid, ObjectAttributes>();
+        using var transientChanges = RhinoThumbnailCaptureGate.BeginTransientDocumentChanges();
         try
         {
             source.UndoRecordingEnabled = false;
@@ -149,6 +204,214 @@ internal sealed class RhinoDraftLayoutThumbnailProvider : IDraftLayoutThumbnailP
                 request.Key.DocumentRuntimeSerialNumber,
                 documentWasModified);
         }
+    }
+
+    private EditSheetThumbnailResult CaptureEditOnUiThread(
+        EditSheetThumbnailRequest request,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var document = RhinoDoc.FromRuntimeSerialNumber(request.Key.DocumentRuntimeSerialNumber);
+        var sourcePage = document?.Views.GetPageViews().FirstOrDefault(page =>
+            page.MainViewport.Id == request.Key.SheetPageViewId);
+        if (document is null || sourcePage is null)
+            return Failure(request, "The selected layout sheet is no longer available.");
+
+        RhinoPageView? previewPage = null;
+        var previousActiveView = document.Views.ActiveView;
+        var documentWasModified = _modifiedBeforePreview.GetOrAdd(
+            request.Key.DocumentRuntimeSerialNumber,
+            document.Modified);
+        var undoRecordingWasEnabled = document.UndoRecordingEnabled;
+        var layerBefore = new Dictionary<Guid, Layer>();
+        var objectBefore = new Dictionary<Guid, ObjectAttributes>();
+        using var transientChanges = RhinoThumbnailCaptureGate.BeginTransientDocumentChanges();
+        try
+        {
+            document.UndoRecordingEnabled = false;
+            previewPage = sourcePage.Duplicate(duplicatePageGeometry: true)
+                ?? throw new InvalidOperationException("Rhino could not duplicate the sheet for preview.");
+            previewPage.PageName = $"__FoundryEditPreview_{Guid.NewGuid():N}";
+            document.Views.ActiveView = previewPage;
+            previewPage.SetPageAsActive();
+            ApplyEditAssignments(
+                document,
+                sourcePage,
+                previewPage,
+                request,
+                _stateStore.Get(document),
+                layerBefore,
+                objectBefore);
+            document.Views.Redraw();
+            previewPage.Redraw();
+            cancellationToken.ThrowIfCancellationRequested();
+            return CapturePage(request, document, previewPage);
+        }
+        finally
+        {
+            RestoreAppearance(document, layerBefore, objectBefore);
+            if (previewPage is not null) previewPage.Close();
+            if (previousActiveView is not null)
+                document.Views.ActiveView = previousActiveView;
+            document.Views.Redraw();
+            document.UndoRecordingEnabled = undoRecordingWasEnabled;
+            document.Modified = documentWasModified;
+            RestoreModifiedStateOnIdle(request.Key.DocumentRuntimeSerialNumber, documentWasModified);
+        }
+    }
+
+    private static void ApplyEditAssignments(
+        RhinoDoc document,
+        RhinoPageView sourcePage,
+        RhinoPageView previewPage,
+        EditSheetThumbnailRequest request,
+        DocumentState state,
+        IDictionary<Guid, Layer> layerBefore,
+        IDictionary<Guid, ObjectAttributes> objectBefore)
+    {
+        var sourceDetails = sourcePage.GetDetailViews().ToArray();
+        if (request.DetailAssignments.Count != sourceDetails.Length)
+            throw new InvalidOperationException("The sheet details changed before the preview could be rendered.");
+
+        var requestedById = request.DetailAssignments.ToDictionary(item => item.DetailViewportId);
+        var previewDetails = previewPage.GetDetailViews().ToArray();
+        if (previewDetails.Length != sourceDetails.Length)
+            throw new InvalidOperationException("Rhino did not preserve the sheet details in the preview copy.");
+
+        for (var index = 0; index < sourceDetails.Length; index++)
+        {
+            var sourceDetail = sourceDetails[index];
+            var previewDetail = previewDetails[index];
+            if (!requestedById.TryGetValue(sourceDetail.Viewport.Id, out var requested))
+                throw new InvalidOperationException("A detail preview assignment is unavailable.");
+
+            var cameraChanged = !string.IsNullOrWhiteSpace(requested.NamedViewName);
+            var displayModeChanged = requested.DisplayModeId is { } displayModeId &&
+                                     previewDetail.Viewport.DisplayMode.Id != displayModeId;
+            if (!cameraChanged && !displayModeChanged) continue;
+
+            // A duplicated detail can retain Rhino's cached display pipeline after
+            // its camera changes. Rebuild only the changed detail so the capture is
+            // fresh while every untouched sibling keeps its exact duplicated camera.
+            var sourceViewport = sourceDetail.Viewport;
+            var bounds = sourceDetail.DetailGeometry.GetBoundingBox(true);
+            var slot = new DetailSlotRecipe(
+                Guid.NewGuid(),
+                string.IsNullOrWhiteSpace(sourceDetail.Attributes.Name)
+                    ? sourceViewport.Name
+                    : sourceDetail.Attributes.Name,
+                bounds.Min.X,
+                bounds.Min.Y,
+                bounds.Max.X,
+                bounds.Max.Y,
+                sourceViewport.IsPerspectiveProjection ? "Perspective" : "Top",
+                sourceDetail.DetailGeometry.IsParallelProjection
+                    ? sourceDetail.DetailGeometry.PageToModelRatio
+                    : null,
+                sourceDetail.DetailGeometry.IsProjectionLocked,
+                requested.DisplayModeId,
+                null,
+                [sourceViewport.CameraLocation.X, sourceViewport.CameraLocation.Y, sourceViewport.CameraLocation.Z],
+                [sourceViewport.CameraTarget.X, sourceViewport.CameraTarget.Y, sourceViewport.CameraTarget.Z],
+                [sourceViewport.CameraUp.X, sourceViewport.CameraUp.Y, sourceViewport.CameraUp.Z]);
+            var rebuiltViewportId = RhinoDocumentMutationService.CreateDetail(
+                document,
+                previewPage,
+                slot,
+                document.PageUnitSystem,
+                1.0,
+                requested.NamedViewName,
+                sourceDetail.Attributes.LayerIndex);
+            var rebuilt = previewPage.GetDetailViews().FirstOrDefault(detail =>
+                detail.Viewport.Id == rebuiltViewportId)
+                ?? throw new InvalidOperationException("Rhino could not find a rebuilt preview detail.");
+            if (!cameraChanged)
+            {
+                rebuilt.Viewport.SetViewProjection(new ViewportInfo(sourceViewport), true);
+                if (requested.DisplayModeId is { } inheritedDisplayModeId)
+                {
+                    using var inheritedDisplayMode = DisplayModeDescription.GetDisplayMode(inheritedDisplayModeId)
+                        ?? throw new InvalidOperationException("A detail display mode is unavailable.");
+                    rebuilt.Viewport.DisplayMode = inheritedDisplayMode;
+                }
+                if (!rebuilt.CommitViewportChanges())
+                    throw new InvalidOperationException("Rhino could not restore a preview detail camera.");
+            }
+            previewDetails[index] = rebuilt;
+        }
+        previewPage.SetPageAsActive();
+
+        var assignments = state.StateAssignments.ToList();
+        var sourceSheetScope = new HierarchyScope(
+            HierarchyScopeKind.Sheet,
+            request.Key.SheetPageViewId);
+        ReplaceDirectAssignment(assignments, sourceSheetScope, request.SheetAppearanceStateId);
+
+        var rules = state.AppearanceRules
+            .GroupBy(item => item.Scope)
+            .ToDictionary(group => group.Key, group => group.Last());
+        var layers = document.Layers
+            .Where(layer => !layer.IsDeleted && !layer.IsReference)
+            .ToDictionary(
+                layer => layer.Id,
+                layer => new LayerSnapshot(
+                    layer.Id,
+                    layer.ParentLayerId == Guid.Empty ? null : layer.ParentLayerId,
+                    layer.FullPath,
+                    layer.IsVisible));
+        var objects = document.Objects
+            .Where(item => item is not DetailViewObject &&
+                           item.Attributes.Space == ActiveSpace.ModelSpace)
+            .Select(item =>
+            {
+                var layer = document.Layers[item.Attributes.LayerIndex];
+                return new ModelObjectSnapshot(
+                    item.Id,
+                    string.IsNullOrWhiteSpace(item.Attributes.Name)
+                        ? item.ObjectType.ToString()
+                        : item.Attributes.Name,
+                    layer.Id,
+                    layer.FullPath,
+                    item is InstanceObject);
+            })
+            .ToDictionary(item => item.Id);
+        var states = state.AppearanceStates.ToDictionary(item => item.Id);
+        var folderScopes = FolderScopes(request.FolderId, state).ToArray();
+
+        for (var index = 0; index < sourceDetails.Length; index++)
+        {
+            var sourceDetail = sourceDetails[index];
+            var previewDetail = previewDetails[index];
+            var requested = requestedById[sourceDetail.Viewport.Id];
+
+            var sourceDetailScope = new HierarchyScope(
+                HierarchyScopeKind.Detail,
+                sourceDetail.Viewport.Id);
+            ReplaceDirectAssignment(assignments, sourceDetailScope, requested.AppearanceStateId);
+            var effective = ViewportAppearanceResolver.Resolve(
+                folderScopes.Append(sourceSheetScope).Append(sourceDetailScope),
+                rules,
+                layers,
+                objects,
+                states,
+                assignments);
+            ApplyAppearance(
+                document,
+                previewDetail.Viewport.Id,
+                effective,
+                layerBefore,
+                objectBefore);
+        }
+    }
+
+    private static void ReplaceDirectAssignment(
+        List<AppearanceStateAssignment> assignments,
+        HierarchyScope target,
+        Guid? stateId)
+    {
+        assignments.RemoveAll(item => item.Target == target);
+        if (stateId is { } id)
+            assignments.Add(new AppearanceStateAssignment(Guid.NewGuid(), target, id));
     }
 
     private static void RestoreModifiedState(
@@ -297,9 +560,20 @@ internal sealed class RhinoDraftLayoutThumbnailProvider : IDraftLayoutThumbnailP
             .ToDictionary(item => item.Id);
         var states = state.AppearanceStates.ToDictionary(item => item.Id);
 
-        foreach (var detail in page.GetDetailViews())
+        var details = page.GetDetailViews().ToArray();
+        for (var index = 0; index < details.Length; index++)
         {
+            var detail = details[index];
             var detailScope = new HierarchyScope(HierarchyScopeKind.Detail, detail.Viewport.Id);
+            if (index < create.Template.DetailSlots.Count &&
+                create.DetailAppearanceStateAssignments?.GetValueOrDefault(
+                    create.Template.DetailSlots[index].Id) is { } detailAppearanceStateId)
+            {
+                assignments.Add(new AppearanceStateAssignment(
+                    Guid.NewGuid(),
+                    detailScope,
+                    detailAppearanceStateId));
+            }
             var effective = ViewportAppearanceResolver.Resolve(
                 folderScopes.Append(sheetScope).Append(detailScope),
                 rules,
@@ -441,7 +715,55 @@ internal sealed class RhinoDraftLayoutThumbnailProvider : IDraftLayoutThumbnailP
         return new DraftLayoutThumbnailResult(request.Key, stream.ToArray());
     }
 
+    private static EditSheetThumbnailResult CapturePage(
+        EditSheetThumbnailRequest request,
+        RhinoDoc document,
+        RhinoPageView page)
+    {
+        var pageWidthInches = page.PageWidth * RhinoMath.UnitScale(
+            document.PageUnitSystem,
+            UnitSystem.Inches);
+        var pageHeightInches = page.PageHeight * RhinoMath.UnitScale(
+            document.PageUnitSystem,
+            UnitSystem.Inches);
+        if (!double.IsFinite(pageWidthInches) || pageWidthInches <= 0 ||
+            !double.IsFinite(pageHeightInches) || pageHeightInches <= 0)
+            return Failure(request, "The edit preview has an invalid paper size.");
+
+        var requestedSize = new System.Drawing.Size(request.Key.Width, request.Key.Height);
+        var captureDpi = Math.Min(
+            request.Key.Width / pageWidthInches,
+            request.Key.Height / pageHeightInches);
+        using var settings = new ViewCaptureSettings(page, requestedSize, captureDpi)
+        {
+            DrawBackground = false,
+            DrawBackgroundBitmap = false,
+            DrawWallpaper = false,
+            DrawGrid = false,
+            DrawAxis = false,
+            RasterMode = true,
+            OutputColor = ViewCaptureSettings.ColorMode.PrintColor,
+            UsePrintWidths = false,
+        };
+        settings.SetLayout(
+            requestedSize,
+            new System.Drawing.Rectangle(System.Drawing.Point.Empty, requestedSize));
+        using var bitmap = RhinoDocumentThumbnailProvider.CaptureToBitmap(
+            settings,
+            request.Key.BackgroundArgb);
+        if (bitmap is null)
+            return Failure(request, "Rhino did not return an edit preview.");
+
+        using var stream = new MemoryStream();
+        bitmap.Save(stream, ImageFormat.Png);
+        return new EditSheetThumbnailResult(request.Key, stream.ToArray());
+    }
+
     private static DraftLayoutThumbnailResult Failure(
         DraftLayoutThumbnailRequest request,
+        string message) => new(request.Key, null, message);
+
+    private static EditSheetThumbnailResult Failure(
+        EditSheetThumbnailRequest request,
         string message) => new(request.Key, null, message);
 }

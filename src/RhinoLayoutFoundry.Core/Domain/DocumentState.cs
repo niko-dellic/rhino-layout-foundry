@@ -178,7 +178,13 @@ public sealed record SheetRecord(
     bool IncludeInPrintAll = true,
     SheetTitleBlockData? TitleBlockData = null,
     SheetNamingBinding? NamingBinding = null,
-    string Notes = "");
+    string Notes = "",
+    IReadOnlyDictionary<Guid, string>? DetailNamedViewAssignments = null)
+{
+    [JsonIgnore]
+    public IReadOnlyDictionary<Guid, string> DetailNamedViews =>
+        DetailNamedViewAssignments ?? new Dictionary<Guid, string>();
+}
 
 public sealed record SheetNamingBinding(
     string Pattern,

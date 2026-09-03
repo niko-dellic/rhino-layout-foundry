@@ -88,7 +88,8 @@ public sealed record LayoutCreationSpec(
     IReadOnlyList<string?>? NamedViewsByDetail = null,
     IReadOnlyList<Guid?>? DetailDisplayModesByDetail = null,
     Guid? DetailLayerId = null,
-    Guid? AppearanceStateId = null);
+    Guid? AppearanceStateId = null,
+    IReadOnlyList<Guid?>? AppearanceStatesByDetail = null);
 
 public sealed record BatchCreateSheetsRequest(
     uint DocumentRuntimeSerialNumber,
@@ -123,7 +124,8 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
         var templates = snapshot.Templates.ToDictionary(item => item.Id);
         var expanded = new List<(Guid DraftId, SheetTemplateRecipe Template,
             IReadOnlyDictionary<Guid, string> NamedViewAssignments, bool UseDedicatedDetailLayer,
-            Guid? DetailLayerId, Guid? AppearanceStateId)>();
+            Guid? DetailLayerId, Guid? AppearanceStateId,
+            IReadOnlyDictionary<Guid, Guid> DetailAppearanceStateAssignments)>();
         if (hasCreationSpecs)
         {
             foreach (var spec in request.CreationSpecs!)
@@ -152,7 +154,8 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
                     expanded.Add((Guid.NewGuid(), resolved.Template, resolved.NamedViewAssignments,
                         spec.UseDedicatedDetailLayer,
                         spec.UseDedicatedDetailLayer ? null : spec.DetailLayerId,
-                        spec.AppearanceStateId));
+                        spec.AppearanceStateId,
+                        resolved.DetailAppearanceStateAssignments));
             }
         }
         else foreach (var item in request.TemplateQuantities)
@@ -170,7 +173,8 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
             ValidateTemplate(template, snapshot, request.NamedViewAssignments, diagnostics);
             for (var index = 0; index < item.Quantity; index++)
                 expanded.Add((Guid.NewGuid(), template,
-                    request.NamedViewAssignments ?? new Dictionary<Guid, string>(), true, null, null));
+                    request.NamedViewAssignments ?? new Dictionary<Guid, string>(), true, null, null,
+                    new Dictionary<Guid, Guid>()));
         }
 
         var pattern = request.NamingPattern?.Trim() ?? string.Empty;
@@ -233,7 +237,8 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
                     expanded[index].DetailLayerId,
                     expanded[index].AppearanceStateId,
                     resolvedPattern,
-                    namingIndex));
+                    namingIndex,
+                    expanded[index].DetailAppearanceStateAssignments));
             }
             diagnostics.Add(new Diagnostic("batch.undo_unavailable", DiagnosticSeverity.Warning,
                 "Rhino does not expose native Undo for layout creation. Foundry will roll back the entire batch if any sheet fails."));
@@ -358,6 +363,26 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
         }).ToArray();
 
         ValidateAppearanceState(spec.AppearanceStateId, snapshot, diagnostics);
+        var detailAppearanceStateAssignments = new Dictionary<Guid, Guid>();
+        if (spec.AppearanceStatesByDetail is not null)
+        {
+            if (spec.AppearanceStatesByDetail.Count != details.Length)
+            {
+                diagnostics.Add(CaptureSheetTemplatePlanner.Error(
+                    "template.appearance_state_assignment_count",
+                    $"Layout '{source.Name}' has {details.Length} details but received " +
+                    $"{spec.AppearanceStatesByDetail.Count} detail appearance-state assignments."));
+            }
+            else
+            {
+                for (var index = 0; index < details.Length; index++)
+                {
+                    if (spec.AppearanceStatesByDetail[index] is not { } stateId) continue;
+                    ValidateAppearanceState(stateId, snapshot, diagnostics);
+                    detailAppearanceStateAssignments[details[index].Id] = stateId;
+                }
+            }
+        }
 
         var namedViewAssignments = new Dictionary<Guid, string>();
         if (spec.NamedViewsByDetail is not null)
@@ -426,7 +451,10 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
             DetailSlots = details,
             TitleBlock = titleBlock,
         };
-        return new ResolvedCreationSpec(template, namedViewAssignments);
+        return new ResolvedCreationSpec(
+            template,
+            namedViewAssignments,
+            detailAppearanceStateAssignments);
     }
 
     private static void ValidateAppearanceState(
@@ -454,7 +482,8 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
 
     private sealed record ResolvedCreationSpec(
         SheetTemplateRecipe Template,
-        IReadOnlyDictionary<Guid, string> NamedViewAssignments);
+        IReadOnlyDictionary<Guid, string> NamedViewAssignments,
+        IReadOnlyDictionary<Guid, Guid> DetailAppearanceStateAssignments);
 
     private static SheetTemplateRecipe BuiltInTemplate(BuiltInLayoutKind kind, PaperRecipe paper)
     {

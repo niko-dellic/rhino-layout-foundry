@@ -326,7 +326,7 @@ internal sealed class ThumbnailFoundryPanel : Panel
         SetStatus(result.Succeeded ? string.Empty : result.Message);
     }
 
-    private void OpenBatchProperties()
+    private async void OpenBatchProperties()
     {
         var snapshot = LayoutFoundryUiHost.CaptureSnapshot();
         if (snapshot is null) return;
@@ -339,6 +339,9 @@ internal sealed class ThumbnailFoundryPanel : Panel
 
         var dialog = new BatchCreateLayoutsDialog(snapshot, targets);
         dialog.ShowModal(this);
+        await LayoutFoundryUiHost.CompleteDraftLayoutThumbnailSessionAsync(
+            snapshot.DocumentRuntimeSerialNumber,
+            restoreOriginalModifiedState: !dialog.Succeeded);
         if (dialog.Succeeded) RefreshSnapshot();
     }
 

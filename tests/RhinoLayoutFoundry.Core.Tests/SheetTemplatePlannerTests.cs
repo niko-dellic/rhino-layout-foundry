@@ -227,6 +227,38 @@ public sealed class SheetTemplatePlannerTests
     }
 
     [Fact]
+    public void BatchCreationMapsAppearanceStatesToResolvedDetailSlots()
+    {
+        var firstStateId = Guid.NewGuid();
+        var secondStateId = Guid.NewGuid();
+        var snapshot = WithTemplates(TestSnapshots.Create(), []) with
+        {
+            AppearanceStateResources =
+            [
+                new AppearanceStateRecord(firstStateId, TestSnapshots.RootFolderId, 0, "First", [], []),
+                new AppearanceStateRecord(secondStateId, TestSnapshots.RootFolderId, 1, "Second", [], []),
+            ],
+        };
+        var plan = new BatchCreateSheetsPlanner().Plan(new BatchCreateSheetsRequest(
+            42, 1, TestSnapshots.RootFolderId, [], "Page {index}", 1, 1,
+            CreationSpecs:
+            [
+                new LayoutCreationSpec(
+                    1,
+                    new PaperRecipe(594, 420, "Millimeters"),
+                    BuiltInLayoutKind.TwoDetailsHorizontal,
+                    AppearanceStatesByDetail: [firstStateId, secondStateId]),
+            ]), snapshot);
+
+        Assert.True(plan.CanApply);
+        var change = Assert.IsType<CreateSheetFromTemplateChange>(Assert.Single(plan.Changes));
+        Assert.Equal(
+            [firstStateId, secondStateId],
+            change.Template.DetailSlots.Select(slot =>
+                change.DetailAppearanceStateAssignments!.GetValueOrDefault(slot.Id)));
+    }
+
+    [Fact]
     public void WrongPerDetailDisplayModeCountBlocksBatch()
     {
         var snapshot = WithTemplates(TestSnapshots.Create(), []);

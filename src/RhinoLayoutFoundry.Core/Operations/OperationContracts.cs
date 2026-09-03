@@ -156,7 +156,8 @@ public sealed record CreateSheetFromTemplateChange(
     Guid? DetailLayerId = null,
     Guid? AppearanceStateId = null,
     string NamingPattern = "",
-    int NamingIndex = 0) : OperationChange;
+    int NamingIndex = 0,
+    IReadOnlyDictionary<Guid, Guid>? DetailAppearanceStateAssignments = null) : OperationChange;
 
 public sealed record UpdateProjectInformationChange(
     ProjectInformation ExpectedInformation,
@@ -181,7 +182,17 @@ public sealed record BatchUpdateSheetsChange(
     Guid? AppearanceStateId = null,
     bool ChangeDetailLayer = false,
     bool UseDedicatedDetailLayer = true,
-    Guid? DetailLayerId = null) : OperationChange;
+    Guid? DetailLayerId = null,
+    IReadOnlyList<BatchDetailUpdate>? DetailUpdates = null) : OperationChange;
+
+public sealed record BatchDetailUpdate(
+    Guid DetailViewportId,
+    bool ChangeNamedView,
+    string? NamedViewName,
+    bool ChangeDisplayMode,
+    Guid? DisplayModeId,
+    bool ChangeAppearanceState = false,
+    Guid? AppearanceStateId = null);
 
 public sealed record UpdateDetailDisplayModesChange(
     IReadOnlyList<Guid> DetailViewportIds,

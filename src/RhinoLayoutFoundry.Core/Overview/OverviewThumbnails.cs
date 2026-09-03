@@ -112,15 +112,50 @@ public sealed record DraftLayoutThumbnailResult(
     public bool Succeeded => PngBytes is { Length: > 0 } && Error is null;
 }
 
+public readonly record struct EditSheetThumbnailKey(
+    uint DocumentRuntimeSerialNumber,
+    Guid SheetPageViewId,
+    int Width,
+    int Height,
+    long ContentVersion,
+    uint BackgroundArgb = 0);
+
+public sealed record EditDetailPreviewAssignment(
+    Guid DetailViewportId,
+    string? NamedViewName,
+    Guid? DisplayModeId,
+    Guid? AppearanceStateId);
+
+public sealed record EditSheetThumbnailRequest(
+    EditSheetThumbnailKey Key,
+    Guid FolderId,
+    Guid? SheetAppearanceStateId,
+    IReadOnlyList<EditDetailPreviewAssignment> DetailAssignments);
+
+public sealed record EditSheetThumbnailResult(
+    EditSheetThumbnailKey Key,
+    byte[]? PngBytes,
+    string? Error = null)
+{
+    public bool Succeeded => PngBytes is { Length: > 0 } && Error is null;
+}
+
 public interface IDraftLayoutThumbnailProvider
 {
+    void BeginSession(uint documentRuntimeSerialNumber);
+
     Task<DraftLayoutThumbnailResult> CaptureAsync(
         DraftLayoutThumbnailRequest request,
+        CancellationToken cancellationToken);
+
+    Task<EditSheetThumbnailResult> CaptureEditAsync(
+        EditSheetThumbnailRequest request,
         CancellationToken cancellationToken);
 
     Task CompleteSessionAsync(
         uint documentRuntimeSerialNumber,
         bool restoreOriginalModifiedState,
+        bool endSession = true,
         CancellationToken cancellationToken = default);
 }
 
