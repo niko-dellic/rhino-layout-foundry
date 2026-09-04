@@ -577,7 +577,7 @@ public sealed partial class LayoutFoundryPanel : Panel
         if (_treeDrop is { IsValid: true, HighlightFolderId: { } highlight } &&
             item.Node.Key.Kind == OverviewNodeKind.Folder && item.Node.Key.Id == highlight)
         {
-            eventArgs.BackgroundColor = FoundryTheme.HierarchyDropBackground;
+            FoundryTable.SetCellBackground(eventArgs, FoundryTheme.HierarchyDropBackground);
             eventArgs.ForegroundColor = FoundryTheme.HierarchyDropForeground;
             return;
         }
@@ -585,9 +585,9 @@ public sealed partial class LayoutFoundryPanel : Panel
         if (item.Node.Key.Kind != OverviewNodeKind.Folder)
             return;
 
-        eventArgs.BackgroundColor = item.Node.IsDocumentRoot
+        FoundryTable.SetCellBackground(eventArgs, item.Node.IsDocumentRoot
             ? FoundryTheme.HierarchyDocumentBackground
-            : FoundryTheme.HierarchyFolderBackground;
+            : FoundryTheme.HierarchyFolderBackground);
     }
 
     private static Cell CreateLayoutsDataCell()

@@ -9,9 +9,9 @@ internal static partial class FoundryTable
     static partial void ConfigureNativeAppearance(Grid grid)
     {
         if (FindTable(MacOSHelpers.ToNative(grid, false)) is { } table)
-            // Foundry formats populated rows consistently on both platforms.
-            // AppKit's own striping also paints empty space below tree rows.
-            table.UsesAlternatingRowBackgroundColors = false;
+            // AppKit paints striping beneath its live row selection. Opaque Eto
+            // cell backgrounds cover that selection during native mouse tracking.
+            table.UsesAlternatingRowBackgroundColors = true;
     }
 
     private static NSTableView? FindTable(NSView? view)

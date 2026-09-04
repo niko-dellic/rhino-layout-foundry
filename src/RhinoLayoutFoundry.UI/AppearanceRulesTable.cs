@@ -1,6 +1,7 @@
 using Eto.Drawing;
 using Eto.Forms;
 using RhinoLayoutFoundry.Core.Domain;
+using RhinoLayoutFoundry.Core.Overview;
 
 namespace RhinoLayoutFoundry.UI;
 
@@ -197,8 +198,13 @@ internal sealed class AppearanceRulesTable : Panel
 
         foreach (var root in _roots) ExpandToPicked(root);
         _tree.ReloadData();
-        var first = Flatten(_roots).FirstOrDefault(row => _pickedTargets.Contains(row.Target));
-        if (first is not null) _tree.SelectedItem = first;
+        // Use real row selection for picked objects as well, so AppKit owns the
+        // complete highlight instead of a synthetic cell background.
+        _tree.SelectedRows = VisibleTreeRows.Flatten(_roots,
+                row => row.Children.OfType<AppearanceRow>(), row => row.Expanded)
+            .Select((row, index) => (row, index))
+            .Where(item => _pickedTargets.Contains(item.row.Target))
+            .Select(item => item.index).ToArray();
     }
 
     private CustomCell CreateDisplayModeCell()

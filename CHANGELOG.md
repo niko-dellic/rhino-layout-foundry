@@ -2,6 +2,8 @@
 
 ## Unreleased — v1 hardening
 
+- Keep Mac table cells transparent so native full-row selection remains visible throughout dragging in the hierarchy, appearance editor, and creation review.
+
 - Resolve current native detail objects between sheet display-mode and named-view commits; preserve explicit sheet/detail display-mode precedence.
 - Check detail restoration, attempt remaining recovery steps, and report incomplete recovery rather than claiming rollback succeeded unconditionally.
 - Share table density, typography, selection, and populated-row striping across the hierarchy, appearance editor, and layout review.

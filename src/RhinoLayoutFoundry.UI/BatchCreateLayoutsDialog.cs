@@ -714,7 +714,7 @@ PreviewCleanup = CleanupPreviewsAsync();
                 PreviewPropertyForColumn(grid, eventArgs.Column) is { } property &&
                 row.ChangedProperties.HasFlag(property))
             {
-                eventArgs.BackgroundColor = FoundryTheme.WarningSurface;
+                FoundryTable.SetCellBackground(eventArgs, FoundryTheme.WarningSurface);
                 eventArgs.ForegroundColor = FoundryTheme.WarningAccent;
                 eventArgs.Font = FoundryTheme.HierarchyTableBadgeFont;
             }

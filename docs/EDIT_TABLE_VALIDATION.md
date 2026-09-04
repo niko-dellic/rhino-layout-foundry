@@ -3,6 +3,45 @@
 This development bundle follows the pre-release cleanup candidate. It is not a
 published release or a completed Windows/macOS release sign-off.
 
+## Follow-up: live drag-selection painting
+
+Mac cells now remain transparent and AppKit owns alternating row backgrounds and
+live selection. Opaque Eto zebra and semantic cell fills were covering AppKit's
+highlight during mouse tracking. Folder/drop and changed-value cell backgrounds
+also respect this policy; changed values retain their bold warning text. Picking
+objects for an appearance state now selects the actual corresponding native rows.
+The attempted notification/reload workaround was removed.
+
+Tested the installed controls in restarted Rhino 8.34.26223.11002, in dark mode:
+
+| Surface | Downward drag | Upward drag | Native event before release |
+| --- | --- | --- | --- |
+| Main table | 6 sheets | 4 sheets | LeftMouseDragged |
+| Appearance layer table | 9 layers | 6 layers | LeftMouseDragged |
+| Creation review | 6 draft rows | 4 draft rows | LeftMouseDragged |
+
+Each surface displayed full-width gray selection. Native selection-change records
+show no opaque selected-cell backgrounds while the mouse is held, with native
+striping enabled. Appearance and creation checks covered 36 and 66 formatted cells
+respectively. Both dialogs were cancelled without saving/applying. Tests used six
+empty pages and disposable layers in a fresh unsaved model, not a user project.
+
+`scripts/rhino-table-selection-check.py` runs the three actual installed controls,
+one surface per invocation. Its report supplements visual checks; core tests alone
+cannot verify AppKit drawing. Evidence is in
+`artifacts/v1-native-selection-evidence/three-tables.json`. The raw report retains
+an initial diagnostic-only GridView ReloadData overload error; that harness call
+was corrected before the successful creation-table checks.
+
+Release/MacOS and Release/Windows configuration builds: zero warnings/errors.
+Core suite: 350 passed. `git diff --check` passed. Native Windows and light-theme
+checks remain pending. Assembled/installed/companion hashes match; UI SHA-256:
+`049cfcc38ef49d58d2630ea73bcdedf114d80986a9e6aea78d8a04ce36f410e7`.
+See `artifacts/v1-native-selection-evidence/installed-hashes.json`. Rhino was fully
+restarted after installation for these checks. Future bundle updates likewise
+require a full quit/reopen. Package results below refer to the preceding candidate;
+no replacement Yak was built for this local UI follow-up.
+
 ## Changes and evidence
 
 - Reproduced the cached-detail failure in native Rhino: committing a display mode
