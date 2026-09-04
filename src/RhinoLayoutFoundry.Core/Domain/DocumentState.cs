@@ -7,89 +7,68 @@ public static class WellKnownIds
     public static readonly Guid UnorganizedFolderId = new("f3b9cf54-a8bf-43af-bbac-6575373199af");
 }
 
+/// <summary>The current document format. Collections have one name and are always present.</summary>
 public sealed record DocumentState(
     int SchemaVersion,
     Guid RootFolderId,
-    IReadOnlyList<FolderRecord> Folders,
-    IReadOnlyDictionary<Guid, SheetRecord> Sheets,
-    IReadOnlyList<DisplayRule> DisplayRules,
-    IReadOnlyDictionary<string, string> Metadata,
-    IReadOnlyList<SheetTemplateRecipe>? SheetTemplates = null,
-    ObserverCanvasState? ObserverCanvas = null,
-    IReadOnlyList<ImportRecoveryRecord>? ImportRecovery = null,
-    Guid? DedicatedDetailLayerId = null,
-    ProjectInformation? ProjectData = null,
-    IReadOnlyList<HierarchyViewportRuleSet>? ViewportRuleSets = null,
-    IReadOnlyList<CapabilityTemplateRegistration>? CapabilityTemplates = null,
-    IReadOnlyList<CapabilityTemplateLink>? CapabilityLinks = null,
-    IReadOnlyList<AppearanceStateRecord>? AppearanceStateResources = null,
-    IReadOnlyList<AppearanceStateAssignment>? AppearanceStateAssignments = null)
+    [property: System.Text.Json.Serialization.JsonRequired] IReadOnlyList<FolderRecord> Folders,
+    [property: System.Text.Json.Serialization.JsonRequired] IReadOnlyDictionary<Guid, SheetRecord> Sheets,
+    [property: System.Text.Json.Serialization.JsonRequired] IReadOnlyDictionary<string, string> Metadata)
 {
-    public const int CurrentSchemaVersion = 15;
+    public const int CurrentSchemaVersion = 16;
 
-    [JsonIgnore]
-    public IReadOnlyList<SheetTemplateRecipe> Templates => SheetTemplates ?? [];
+    [JsonRequired]
+    public ObserverCanvasState Canvas { get; init; } = ObserverCanvasState.Empty;
 
-    [JsonIgnore]
-    public ObserverCanvasState Canvas => ObserverCanvas ?? ObserverCanvasState.Empty;
+    [JsonRequired]
+    public IReadOnlyList<ImportRecoveryRecord> Recovery { get; init; } = [];
 
-    [JsonIgnore]
-    public IReadOnlyList<ImportRecoveryRecord> Recovery => ImportRecovery ?? [];
+    [JsonRequired]
+    public ProjectInformation ProjectInfo { get; init; } = ProjectInformation.Empty;
 
-    [JsonIgnore]
-    public ProjectInformation ProjectInfo => ProjectData ?? ProjectInformation.Empty;
+    [JsonRequired]
+    public IReadOnlyList<HierarchyViewportRuleSet> AppearanceRules { get; init; } = [];
 
-    [JsonIgnore]
-    public IReadOnlyList<HierarchyViewportRuleSet> AppearanceRules => ViewportRuleSets ?? [];
+    [JsonRequired]
+    public IReadOnlyList<LayoutTemplateRegistration> TemplateRegistrations { get; init; } = [];
 
-    [JsonIgnore]
-    public IReadOnlyList<CapabilityTemplateRegistration> TemplateRegistrations => CapabilityTemplates ?? [];
+    [JsonRequired]
+    public IReadOnlyList<AppearanceStateRecord> AppearanceStates { get; init; } = [];
 
-    [JsonIgnore]
-    public IReadOnlyList<CapabilityTemplateLink> TemplateLinks => CapabilityLinks ?? [];
+    [JsonRequired]
+    public IReadOnlyList<AppearanceStateAssignment> StateAssignments { get; init; } = [];
 
-    [JsonIgnore]
-    public IReadOnlyList<AppearanceStateRecord> AppearanceStates => AppearanceStateResources ?? [];
+    public Guid? DedicatedDetailLayerId { get; init; }
 
-    [JsonIgnore]
-    public IReadOnlyList<AppearanceStateAssignment> StateAssignments => AppearanceStateAssignments ?? [];
-
-    public DocumentState RemoveTemplatesForMissingSources(IReadOnlySet<Guid> existingPageViewIds)
+    public DocumentState RemoveMissingReferences(IReadOnlySet<Guid> pageIds, IReadOnlySet<Guid> detailIds)
     {
-        ArgumentNullException.ThrowIfNull(existingPageViewIds);
-        var retained = Templates
-            .Where(template => template.SourcePageViewId is not { } sourceId ||
-                               existingPageViewIds.Contains(sourceId))
-            .ToArray();
+        bool Exists(HierarchyScope scope) => scope.Kind switch
+        {
+            HierarchyScopeKind.Folder => Folders.Any(folder => folder.Id == scope.Id),
+            HierarchyScopeKind.Sheet => pageIds.Contains(scope.Id),
+            HierarchyScopeKind.Detail => detailIds.Contains(scope.Id)
+,
+            _ => false,
+        };
         var registrations = TemplateRegistrations.Where(item =>
-                item.Source.Kind != HierarchyScopeKind.Sheet || existingPageViewIds.Contains(item.Source.Id))
+Exists(item.Source))
             .ToArray();
-        var registrationIds = registrations.Select(item => item.Id).ToHashSet();
         var rules = AppearanceRules.Where(item =>
-                item.Scope.Kind != HierarchyScopeKind.Sheet || existingPageViewIds.Contains(item.Scope.Id))
-            .ToList();
-        var links = TemplateLinks.Where(item =>
-                registrationIds.Contains(item.SourceRegistrationId) &&
-                (item.Target.Kind != HierarchyScopeKind.Sheet || existingPageViewIds.Contains(item.Target.Id)))
+Exists(item.Scope))
             .ToArray();
         var stateIds = AppearanceStates.Select(item => item.Id).ToHashSet();
         var assignments = StateAssignments.Where(item =>
                 stateIds.Contains(item.StateId) &&
-                (item.Target.Kind != HierarchyScopeKind.Sheet || existingPageViewIds.Contains(item.Target.Id)))
+Exists(item.Target))
             .ToArray();
-        return retained.Length == Templates.Count &&
-               registrations.Length == TemplateRegistrations.Count &&
-               links.Length == TemplateLinks.Count &&
-               assignments.Length == StateAssignments.Count &&
-               rules.Count == AppearanceRules.Count
-            ? this
+        return registrations.Length == TemplateRegistrations.Count &&
+rules.Length == AppearanceRules.Count &&
+               assignments.Length == StateAssignments.Count ? this
             : this with
             {
-                SheetTemplates = retained,
-                CapabilityTemplates = registrations,
-                CapabilityLinks = links,
-                ViewportRuleSets = rules.ToArray(),
-                AppearanceStateAssignments = assignments,
+                TemplateRegistrations = registrations,
+                AppearanceRules = rules,
+                StateAssignments = assignments
             };
     }
 
@@ -102,11 +81,7 @@ public sealed record DocumentState(
             root.Id,
             [root],
             new Dictionary<Guid, SheetRecord>(),
-            [],
-            new Dictionary<string, string>(StringComparer.Ordinal),
-            [],
-            ObserverCanvasState.Empty,
-            []);
+            new Dictionary<string, string>(StringComparer.Ordinal));
     }
 }
 
@@ -115,7 +90,7 @@ public sealed record ImportRecoveryRecord(
     string Name,
     string Message,
     Guid? EntityId = null,
-    IReadOnlyDictionary<string, string>? Data = null);
+    [property: System.Text.Json.Serialization.JsonRequired] IReadOnlyDictionary<string, string>? Data = null);
 
 /// <summary>
 /// Document-shared observer-board organization. Camera, selection, hover, and
@@ -123,9 +98,9 @@ public sealed record ImportRecoveryRecord(
 /// </summary>
 public sealed record ObserverCanvasState(
     int LayoutAlgorithmVersion,
-    IReadOnlyDictionary<Guid, ObserverPointRecord> FolderOrigins,
-    IReadOnlyDictionary<Guid, ObserverPointRecord> SheetPlacements,
-    IReadOnlyDictionary<Guid, ObserverPointRecord>? AppearanceStatePlacements = null)
+    [property: System.Text.Json.Serialization.JsonRequired] IReadOnlyDictionary<Guid, ObserverPointRecord> FolderOrigins,
+    [property: System.Text.Json.Serialization.JsonRequired] IReadOnlyDictionary<Guid, ObserverPointRecord> SheetPlacements,
+    [property: System.Text.Json.Serialization.JsonRequired] IReadOnlyDictionary<Guid, ObserverPointRecord> StatePlacements)
 {
     public const int CurrentLayoutAlgorithmVersion = 1;
 
@@ -134,10 +109,6 @@ public sealed record ObserverCanvasState(
         new Dictionary<Guid, ObserverPointRecord>(),
         new Dictionary<Guid, ObserverPointRecord>(),
         new Dictionary<Guid, ObserverPointRecord>());
-
-    [JsonIgnore]
-    public IReadOnlyDictionary<Guid, ObserverPointRecord> StatePlacements =>
-        AppearanceStatePlacements ?? new Dictionary<Guid, ObserverPointRecord>();
 }
 
 public readonly record struct ObserverPointRecord(double X, double Y);
@@ -172,33 +143,27 @@ public sealed record SheetRecord(
     Guid PageViewId,
     Guid FolderId,
     int Order,
-    IReadOnlyList<string> Tags,
-    IReadOnlyDictionary<string, string> Metadata,
+    [property: System.Text.Json.Serialization.JsonRequired] IReadOnlyDictionary<string, string> Metadata,
     TitleBlockRole? TitleBlock,
     bool IncludeInPrintAll = true,
     SheetTitleBlockData? TitleBlockData = null,
     SheetNamingBinding? NamingBinding = null,
-    string Notes = "",
-    IReadOnlyDictionary<Guid, string>? DetailNamedViewAssignments = null)
+    string Notes = "")
 {
-    [JsonIgnore]
-    public IReadOnlyDictionary<Guid, string> DetailNamedViews =>
-        DetailNamedViewAssignments ?? new Dictionary<Guid, string>();
+    [JsonRequired]
+    public IReadOnlyDictionary<Guid, string> DetailNamedViews { get; init; } = new Dictionary<Guid, string>();
 }
 
 public sealed record SheetNamingBinding(
     string Pattern,
     int Index,
-    string LastGeneratedName,
-    IReadOnlyDictionary<Guid, string>? NamedViewAssignments = null)
+    string LastGeneratedName)
 {
-    [JsonIgnore]
-    public IReadOnlyDictionary<Guid, string> NamedViews =>
-        NamedViewAssignments ?? new Dictionary<Guid, string>();
+    [JsonRequired]
+    public IReadOnlyDictionary<Guid, string> NamedViewAssignments { get; init; } = new Dictionary<Guid, string>();
 }
 
 public sealed record TitleBlockRole(
     Guid InstanceObjectId,
     Guid InstanceDefinitionId,
-    string AnchorName,
-    BuiltInTitleBlockKind? BuiltInKind = null);
+    [property: JsonRequired] BuiltInTitleBlockKind BuiltInKind);

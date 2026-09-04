@@ -47,7 +47,6 @@ public sealed class LayoutFoundryPlugin : PlugIn
             namedViewThumbnailProvider,
             new RhinoDraftLayoutThumbnailProvider(_stateStore),
             new RhinoMutationCapabilityProvider(),
-            new RhinoTemplateCaptureContextProvider(),
             new RhinoDocumentObserverSnapshotProvider(_stateStore, _revisionTracker),
             new RhinoModelObjectSelectionService(),
             RhinoProjectIconLoader.Load());

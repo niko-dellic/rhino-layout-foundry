@@ -13,8 +13,8 @@ An open-source layout manager for Rhino. Foundry organizes folders, layout sheet
 ## Current capabilities
 
 - Nested folders and batch hierarchy operations, shared selection, filtering, sorting, copy/paste, and notes.
-- Layout creation and editing with naming, page sizes, detail assignments, and managed title blocks.
-- Document templates and reusable appearance states with per-detail layer/display rules.
+- Layout creation and editing with naming, page sizes, per-detail named views, built-in None/Right/Bottom title blocks, project information, and per-sheet revisions.
+- Live layout/detail template registration and reusable appearance states with per-detail layer/display rules.
 - List, Thumbnail, and spatial Canvas views with lazy previews.
 - Ordered PDF output and portable `.rlf` package import/export with dependency conflict choices.
 - An [experimental companion API](docs/AUTOMATION_SDK.md) for trusted in-process integrations.
@@ -25,7 +25,7 @@ Foundry calls a Rhino page layout a **sheet**; a **detail** is its model-space v
 
 Some Rhino layout operations are not natively undoable. Foundry uses validation, compensating rollback, and recovery packages where applicable; read each operation's warning. Do not assume one Undo will reverse layout creation, deletion, rename, or package replacement. Platform-specific Undo verification remains a release gate.
 
-Unsupported or malformed Foundry metadata is protected from Foundry edits. Recoverable archive envelopes are preserved on save. Supported old metadata is migrated in memory; a successful intentional edit causes the current schema to be written. See [Recovery](docs/RECOVERY.md).
+Unsupported or malformed Foundry metadata is protected from Foundry edits. Recoverable archive envelopes are preserved on save. Only document schema **16** and package format **6** are accepted. Historical formats are unsupported; there are no migrations or conversion tools. See [Recovery](docs/RECOVERY.md).
 
 Live previews temporarily create Rhino page content. Canceling a preview can leave an unsaved-change indicator: Foundry deliberately does not clear that flag after deferred native events, because doing so could hide a real edit.
 
@@ -54,7 +54,7 @@ Fully quit Rhino before building into its usual load directory or installing. On
 open -a "Rhino 8"
 ```
 
-The script copies a complete bundle from `src/RhinoLayoutFoundry.Rhino/bin/Debug/net8.0` to `~/Library/Application Support/McNeel/Rhinoceros/8.0/MacPlugIns/RhinoLayoutFoundry.rhp`. It also synchronizes shared assemblies in an existing companion development bundle. Run `LayoutFoundry` in Rhino; `LayoutFoundryObserver` opens Canvas mode.
+The script copies a complete bundle from `src/RhinoLayoutFoundry.Rhino/bin/Debug/net8.0` to `~/Library/Application Support/McNeel/Rhinoceros/8.0/MacPlugIns/RhinoLayoutFoundry.rhp`. It also synchronizes shared assemblies in an existing companion development bundle. Run `LayoutFoundry` in Rhino; choose Canvas in the main Foundry panel.
 
 When Rhino is running, build to an isolated `BaseOutputPath`; follow [Contributing](CONTRIBUTING.md) before assembling and installing. Fully quit and reopen Rhino after a bundle update.
 

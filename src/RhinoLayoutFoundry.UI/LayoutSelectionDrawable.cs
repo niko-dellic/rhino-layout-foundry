@@ -109,7 +109,7 @@ internal sealed class LayoutSelectionDrawable : Drawable
         {
             TitleBlockPreviewTray.DrawTitleBlock(
                 graphics,
-                _titleBlock ?? new TitleBlockChoice(false, null, null, "None", null),
+                _titleBlock ?? new TitleBlockChoice(BuiltInKind: null, Label: "None"),
                 _paper,
                 page,
                 showEmptyMarker: false);
@@ -390,4 +390,3 @@ internal sealed class LayoutSelectionDrawable : Drawable
         return -1;
     }
 }
-

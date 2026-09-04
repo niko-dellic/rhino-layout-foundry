@@ -192,32 +192,7 @@ internal static class FoundryAutomationBridge
     private static OperationPlan LayoutPlan(IFoundryAutomationHost host, JsonElement arguments)
     {
         var snapshot = host.CaptureSnapshot();
-        var templates = arguments.TryGetProperty("templates", out var templateItems)
-            ? templateItems.EnumerateArray().Select(item => new TemplateQuantity(
-                GuidValue(item, "template_id"), Int32(item, "quantity"))).ToArray()
-            : [];
-        IReadOnlyList<LayoutCreationSpec>? specs = null;
-        if (arguments.TryGetProperty("layouts", out var layoutItems))
-        {
-            specs = layoutItems.EnumerateArray().Select(item => new LayoutCreationSpec(
-                Int32(item, "quantity"),
-                new PaperRecipe(
-                    Double(item, "page_width"),
-                    Double(item, "page_height"),
-                    String(item, "page_units")),
-                ParseLayoutKind(OptionalString(item, "layout_kind")),
-                OptionalGuid(item, "template_id"))).ToArray();
-        }
-        var plan = new BatchCreateSheetsPlanner().Plan(new BatchCreateSheetsRequest(
-            snapshot.DocumentRuntimeSerialNumber,
-            snapshot.Revision,
-            GuidValue(arguments, "destination_folder_id"),
-            templates,
-            String(arguments, "naming_pattern"),
-            1,
-            1,
-            CreationSpecs: specs), snapshot);
-        return plan;
+        return new BatchCreateSheetsPlanner().Plan(AutomationLayoutRequest.Parse(arguments, snapshot), snapshot);
     }
 
     private static OperationPlan AssignmentPlan(IFoundryAutomationHost host, JsonElement arguments)
@@ -278,15 +253,6 @@ internal static class FoundryAutomationBridge
         host.AbandonPlan(planId);
         return Json(new { abandoned = true });
     }
-
-    private static BuiltInLayoutKind ParseLayoutKind(string? value) => value?.ToLowerInvariant() switch
-    {
-        "blank" => BuiltInLayoutKind.Blank,
-        "two_details_horizontal" => BuiltInLayoutKind.TwoDetailsHorizontal,
-        "two_details_vertical" => BuiltInLayoutKind.TwoDetailsVertical,
-        "four_details_grid" => BuiltInLayoutKind.FourDetailsGrid,
-        _ => BuiltInLayoutKind.SingleDetail,
-    };
 
     private static Point3Coordinates Point(JsonElement value) =>
         new(Double(value, "x"), Double(value, "y"), Double(value, "z"));

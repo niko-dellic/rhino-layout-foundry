@@ -21,9 +21,9 @@ Undo support depends on the native operation. Metadata uses custom Undo state; n
 
 ## Persistence
 
-The 3DM plug-in archive contains an ArchivableDictionary with `SchemaVersion` and a JSON `Payload`. DocumentStateSerializer owns schema migration and structural validation. Schema 15 is current; schemas 1–10 and 12–14 migrate, while the deliberately incompatible pre-release schema 11 remains unsupported.
+The 3DM plug-in archive contains an ArchivableDictionary with `SchemaVersion` and a JSON `Payload`. DocumentStateSerializer validates the single current format: schema **16**. Package archives accept format **6** only. Other versions are rejected without conversion. Required collections have one serialized name, are initialized explicitly for new state, and reject missing/null stored values. Unknown state fields are rejected so editing cannot silently discard them.
 
-DocumentStateStore is UI-thread-owned and separates Loaded, Unsupported and Invalid states. It retains the original envelope after reading, including unknown fields. Snapshot reads do not prune metadata or set Rhino's modified flag. A successful intentional state mutation drops that original envelope and writes the current schema on the next save. Explicit reconciliation handles stale template sources at relevant mutation boundaries.
+DocumentStateStore is UI-thread-owned and separates Loaded, Unsupported and Invalid states. It retains the original envelope after reading, including unknown fields. Snapshot reads do not prune metadata or set Rhino's modified flag. A successful intentional state mutation drops that original envelope and writes the current schema on the next save. Explicit reconciliation handles stale template sources, appearance rules, and assignments at relevant mutation boundaries.
 
 Protected states allow overview/navigation but reject Foundry mutation before native writes. The panel displays a persistent diagnostic. Recoverable original envelopes pass through unchanged when saving; an entirely unreadable archive must not be replaced with empty metadata. Recovery guidance is in RECOVERY.md.
 
@@ -31,7 +31,7 @@ Protected states allow overview/navigation but reject Foundry mutation before na
 
 `RhinoPreviewSession` registers a temporary page immediately after acquisition, before details or title blocks are constructed. It attempts all cleanup and restores Undo recording even after another cleanup step fails. It owns no delayed dirty-flag resets. A canceled preview can leave the document marked modified because native teardown cannot reliably distinguish preview changes from real edits.
 
-`BatchLayoutSession` owns dialog drafts, cancellation sources, and separate coalescing schedulers for creation/edit previews. Render callbacks reject stale results before updating controls. Gallery controls own and dispose their images. Native Rhino captures still pass through the shared capture gate.
+`BatchLayoutSession` owns dialog drafts, cancellation sources, and separate coalescing schedulers for creation/edit previews. Render callbacks reject stale results before updating controls. Gallery controls own and dispose their images. Native Rhino captures still pass through the shared capture gate. The dialog owns close cancellation and `PreviewCleanup`; modal callers await that task. `WaitForPendingCapturesAsync` is a completion barrier, with no session flags or deferred dirty-state restoration.
 
 `RhinoImportTransaction` journals temporary pages, display modes, new definitions/materials/line styles, overwritten named views/layer states, and metadata. Rollback runs in reverse resource order, attempts all actions, and reports failures. A recovery package is captured before dependencies are imported; Replace restoration uses that package after cutover. Recreated native IDs may differ.
 
@@ -50,3 +50,13 @@ Protected states allow overview/navigation but reject Foundry mutation before na
 Version.props owns the release version. global.json and Directory.Packages.props plus lock files own the build inputs. Platform markers are embedded in assemblies and verified during staging. Portable CI cannot establish native Mac behavior.
 
 README describes the product as it exists. TESTING_AND_RELEASE describes acceptance evidence. PRODUCT_SPEC describes intent. Historical records are in history/; their sample schemas and milestone statuses are not canonical APIs.
+
+## Templates, appearance, and title blocks
+
+`LayoutTemplateRegistration` is an identity plus a live sheet/detail scope. The checkbox registers that source; folders cannot be templates. Snapshot capture derives `SheetTemplateRecipe` values from the source's current paper and detail geometry. These recipes are transient planning inputs, never a second persisted library. Deleting a source removes its registration at explicit reconciliation. No capability links or cached linked payloads remain.
+
+Appearance states and local hierarchy rules are separate from layout templates. Their existing resolver establishes inherited and local layer/object display behavior. The former display-rule selector system and tags do not exist in the current model.
+
+Foundry manages only built-in Right and Bottom blocks (None removes its managed block). `TitleBlockRole` records the native instance/definition IDs and built-in kind. Project information and per-sheet revision schedules supply content. Ordinary Rhino blocks remain ordinary page geometry, transported with their definition dependencies in packages; import does not classify them as managed blocks.
+
+Creation accepts a required `CreationSpecs` collection. Each specification owns its paper size/units, quantity, optional live template identity, built-in title-block choice, and ordered per-detail named-view assignments. A null per-detail entry preserves the source camera; assignment counts must match resolved slots. The UI and experimental automation use this same planner contract. There are no quantity-only, singular-view, or request-wide assignment fallbacks.

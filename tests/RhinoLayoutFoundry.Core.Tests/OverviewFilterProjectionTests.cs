@@ -69,17 +69,16 @@ public sealed class OverviewFilterProjectionTests
         "Test",
         RootId,
         [
-            new FolderOverview(RootId, null, "Root", 0),
-            new FolderOverview(PlansId, RootId, "Plans", 0),
+            new FolderOverview(Id: RootId, ParentId: null, Name: "Root", Order: 0),
+            new FolderOverview(Id: PlansId, ParentId: RootId, Name: "Plans", Order: 0),
         ],
         [
             new SheetOverview(
-                SheetOneId,
-                PlansId,
-                "A-001",
-                0,
-                [],
-                [new DetailOverview(DetailId, "Ceiling Plan", 0)]),
-            new SheetOverview(SheetTwoId, RootId, "A-100", 1, [], []),
+                PageViewId:                 SheetOneId,
+                FolderId:                 PlansId,
+                Name:                 "A-001",
+                Order:                 0,
+                Details:                 [new DetailOverview(DetailViewportId: DetailId, Name: "Ceiling Plan", Order: 0)]),
+            new SheetOverview(PageViewId: SheetTwoId, FolderId: RootId, Name: "A-100", Order: 1, Details: []),
         ]);
 }

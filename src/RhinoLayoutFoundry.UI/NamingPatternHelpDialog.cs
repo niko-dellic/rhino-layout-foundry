@@ -26,7 +26,6 @@ internal sealed class NamingPatternHelpDialog : Dialog
                 TokenRow("{project}", "Project value from the document metadata."),
                 TokenRow("{discipline}", "Discipline value from the document metadata."),
                 TokenRow("{folder}", "Destination folder name."),
-                TokenRow("{tag}", "First tag from the selected layout template."),
                 TokenRow("{view}", "First assigned named view, or the template's default view."),
             },
         };

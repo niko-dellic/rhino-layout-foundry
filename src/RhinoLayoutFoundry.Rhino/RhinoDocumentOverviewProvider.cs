@@ -36,8 +36,8 @@ internal sealed class RhinoDocumentOverviewProvider : IDocumentOverviewProvider
             .GroupBy(item => item.Target)
             .ToDictionary(group => group.Key, group => group.Last());
         var registrations = state.TemplateRegistrations
-            .GroupBy(item => item.Source)
-            .ToDictionary(group => group.Key, group => group.Last().Capabilities);
+            .Select(item => item.Source)
+            .ToHashSet();
         var pageViews = document.Views.GetPageViews()
             .OrderBy(page => page.PageNumber)
             .ToArray();
@@ -71,34 +71,32 @@ internal sealed class RhinoDocumentOverviewProvider : IDocumentOverviewProvider
                             .Append(new HierarchyScope(HierarchyScopeKind.Sheet, pageId))
                             .Append(detailScope).ToArray();
                         return new DetailOverview(
-                            detail.Viewport.Id,
-                            string.IsNullOrWhiteSpace(detail.DescriptiveTitle)
+                            DetailViewportId: detail.Viewport.Id,
+                            Name: string.IsNullOrWhiteSpace(detail.DescriptiveTitle)
                                 ? $"Detail {index + 1}"
                                 : detail.DescriptiveTitle,
-                            index,
-                            detail.Viewport.DisplayMode.Id,
-                            detail.Viewport.DisplayMode.LocalName,
-                            registrations.GetValueOrDefault(detailScope),
-                            detailAppearances.GetValueOrDefault(detail.Viewport.Id),
-                            Binding(chain, detailScope, assignments, appearanceStates));
+                            Order: index,
+                            DisplayModeId: detail.Viewport.DisplayMode.Id,
+                            DisplayModeName: detail.Viewport.DisplayMode.LocalName,
+                            IsTemplate: registrations.Contains(detailScope),
+                            Appearance: detailAppearances.GetValueOrDefault(detail.Viewport.Id),
+                            AppearanceState: Binding(chain, detailScope, assignments, appearanceStates));
                     })
                     .ToArray();
-                var sheetCapabilities = registrations.GetValueOrDefault(
+                var sheetCapabilities = registrations.Contains(
                     new HierarchyScope(HierarchyScopeKind.Sheet, pageId));
 
                 var sheet = new SheetOverview(
-                    pageId,
-                    folderId,
-                    page.PageName,
-                    record?.Order ?? page.PageNumber,
-                    record?.Tags ?? [],
-                    details,
+                    PageViewId: pageId,
+                    FolderId: folderId,
+                    Name: page.PageName,
+                    Order: record?.Order ?? page.PageNumber,
+                    Details: details,
                     PageWidth: page.PageWidth,
                     PageHeight: page.PageHeight,
                     PageUnitSystem: document.PageUnitSystem.ToString(),
                     IncludeInPrintAll: record?.IncludeInPrintAll ?? true,
-                    IsTemplate: sheetCapabilities != TemplateCapability.None,
-                    TemplateCapabilities: sheetCapabilities,
+                    IsTemplate: sheetCapabilities,
                     Appearance: AggregateAppearance(details.Select(detail => detail.Appearance)),
                     AppearanceState: Binding(
                         folderChain.Append(new HierarchyScope(HierarchyScopeKind.Sheet, pageId)),
@@ -125,17 +123,15 @@ internal sealed class RhinoDocumentOverviewProvider : IDocumentOverviewProvider
                     .SelectMany(sheet => sheet.Details)
                     .Select(detail => detail.Appearance));
                 return new FolderOverview(
-                    folder.Id,
-                    folder.ParentId,
-                    folder.Name,
-                    folder.Order,
-                    registrations.GetValueOrDefault(new HierarchyScope(
-                        HierarchyScopeKind.Folder, folder.Id)),
-                    appearance,
-                    Binding(ScopeChain(folder.Id, state.Folders),
+                    Id: folder.Id,
+                    ParentId: folder.ParentId,
+                    Name: folder.Name,
+                    Order: folder.Order,
+                    Appearance: appearance,
+                    AppearanceState: Binding(ScopeChain(folder.Id, state.Folders),
                         new HierarchyScope(HierarchyScopeKind.Folder, folder.Id),
                         assignments, appearanceStates),
-                    folder.Notes ?? string.Empty);
+                            Notes: folder.Notes ?? string.Empty);
             })
             .ToArray();
 
@@ -158,20 +154,22 @@ internal sealed class RhinoDocumentOverviewProvider : IDocumentOverviewProvider
         var documentName = DisplayName(document);
 
         return new DocumentOverview(
-            document.RuntimeSerialNumber,
-            documentName,
-            state.RootFolderId,
-            folders,
-            sheets,
-            state.Recovery.Select(item => new OverviewIssue(
+            DocumentRuntimeSerialNumber: document.RuntimeSerialNumber,
+            DocumentName: documentName,
+            RootFolderId: state.RootFolderId,
+            Folders: folders,
+            Sheets: sheets,
+            Diagnostics: state.Recovery.Select(item => new OverviewIssue(
                 $"import.{item.Kind}",
                 OverviewIssueSeverity.Warning,
                 item.Message,
                 item.EntityId)).Concat(_stateStore.Diagnostic(document) is { } diagnostic
                     ? new[] { new OverviewIssue("metadata.protected", OverviewIssueSeverity.Error, diagnostic) }
                     : Array.Empty<OverviewIssue>()).ToArray(),
-            stateOverviews,
-            CaptureFileDates(document));
+                        FileDates: CaptureFileDates(document))
+        {
+            AppearanceStates = stateOverviews
+        };
     }
 
     private static DocumentFileDates? CaptureFileDates(RhinoDoc document)

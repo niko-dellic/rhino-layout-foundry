@@ -137,17 +137,6 @@ public sealed record CreateSheetChange(
     string Name,
     int Order) : OperationChange;
 
-public sealed record CaptureSheetTemplateChange(
-    Guid TemplateId,
-    Guid SourcePageViewId,
-    string Name,
-    string DefaultNamingPattern,
-    Guid? TitleBlockInstanceObjectId) : OperationChange;
-
-public sealed record DeleteSheetTemplateChange(
-    Guid TemplateId,
-    string ExpectedName) : OperationChange;
-
 public sealed record CreateSheetFromTemplateChange(
     Guid DestinationFolderId,
     string Name,
@@ -156,7 +145,7 @@ public sealed record CreateSheetFromTemplateChange(
     IReadOnlyDictionary<Guid, string> NamedViewAssignments,
     bool UseDedicatedDetailLayer = true,
     string SheetNumber = "",
-    ProjectInformation? ProjectData = null,
+    ProjectInformation? ProjectInfo = null,
     IReadOnlyList<SheetRevisionRecord>? InitialRevisions = null,
     Guid? DetailLayerId = null,
     Guid? AppearanceStateId = null,
@@ -176,7 +165,6 @@ public sealed record BatchUpdateSheetsChange(
     string? PaperUnitSystem,
     Guid? DetailDisplayModeId,
     bool ChangeTitleBlock = false,
-    Guid? TitleBlockSourceInstanceObjectId = null,
     IReadOnlyList<SheetRevisionRecord>? ReplaceRevisionSchedule = null,
     SheetRevisionRecord? AppendRevision = null,
     BuiltInTitleBlockKind? BuiltInTitleBlock = null,
@@ -222,16 +210,10 @@ public sealed record SetHierarchyViewportRulesChange(
     HierarchyViewportRuleSet? ExpectedRules,
     HierarchyViewportRuleSet? NewRules) : OperationChange;
 
-public sealed record SetTemplateCapabilitiesChange(
+public sealed record SetLayoutTemplateRegistrationChange(
     HierarchyScope Source,
-    CapabilityTemplateRegistration? ExpectedRegistration,
-    CapabilityTemplateRegistration? NewRegistration) : OperationChange;
-
-public sealed record SetCapabilityTemplateLinkChange(
-    HierarchyScope Target,
-    TemplateCapability Capability,
-    CapabilityTemplateLink? ExpectedLink,
-    CapabilityTemplateLink? NewLink) : OperationChange;
+LayoutTemplateRegistration? ExpectedRegistration,
+LayoutTemplateRegistration? NewRegistration) : OperationChange;
 
 public sealed record SetAppearanceStateResourceChange(
     Guid StateId,

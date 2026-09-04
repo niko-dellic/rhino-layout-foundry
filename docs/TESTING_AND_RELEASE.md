@@ -37,7 +37,7 @@ Use a fresh staging directory each time. On Windows use equivalent absolute path
 
 Fully restart Rhino with the candidate installed. Open a **disposable copy** of a representative document named `foundry-boundary-fixture.3dm`. Include model views, layouts/details, named resources and title-block/page objects; never rename your original model for this purpose.
 
-Run `scripts/rhino-boundary-checks.py` using Rhino's `RunPythonScript`. It exercises partial preview construction, cleanup failure, future-metadata archive pass-through, Merge failures at display modes/named views/layer states/page/page objects/metadata, injected cancellation, and Replace cutover recovery. The private checkpoint seams are internal test hooks, not public contracts. The import check compares native resource inventories; it does not prove every object's appearance or full before/after content equivalence. Recovery packages are intentionally retained in the OS temporary directory.
+Run `scripts/rhino-boundary-checks.py` using Rhino's `RunPythonScript`. It exercises partial preview construction, cleanup failure, future-metadata archive pass-through, Merge failures at display modes/named views/layer states/page/page objects/metadata, injected cancellation, and Replace cutover recovery. Run `scripts/rhino-current-contracts.py` once on a fresh single-sheet/detail boundary fixture for live registration and built-in/imperial creation. It schedules modeless mutations after RunPythonScript releases its Undo record. The private checkpoint seams are internal test hooks, not public contracts. The import check compares native resource inventories; it does not prove every object's appearance or full before/after content equivalence. Recovery packages are intentionally retained in the OS temporary directory.
 
 For the real-edit regression, start a fresh Rhino session and prepare three disposable copies named `foundry-preview-control.3dm`, `foundry-preview-before.3dm`, and `foundry-preview-after.3dm`. For each copy:
 
@@ -56,7 +56,7 @@ Run on disposable copies or newly created test documents. Preserve source fixtur
 
 | Area | Required scenarios and success condition |
 | --- | --- |
-| Metadata | Empty/current state save/reopen and Save As; supported historical schemas; future version; malformed JSON; missing/null collections; envelope/payload mismatch. Opening/reading does not change state. Protected metadata remains preserved on save and Foundry rejects changes. |
+| Metadata | Empty/current state save/reopen and Save As; supported schema 16; future version; malformed JSON; missing/null collections; envelope/payload mismatch. Opening/reading does not change state. Protected metadata remains preserved on save and Foundry rejects changes. |
 | Preview ownership | Inject failure after page acquisition, after a detail, and during appearance/title-block work. No temporary pages/definitions remain; original appearance and Undo-recording state survive. A cleanup failure does not prevent other restoration and is reported. |
 | Preview lifecycle | Cancel/close while rendering; make a real edit immediately afterward; run several idle turns. The real edit remains unsaved in the host (native Edited/save prompt on Mac; Modified plus save prompt on Windows). Switch/close documents and confirm stale images are not presented. |
 | Import | Merge and Replace, including an empty destination. Inject failure after each dependency family, first/last page, page-space objects, replacement cutover, and metadata update. Cancel at safe boundaries. Compare named views, layer states, definitions, materials, line/hatch/dimension styles, pages, and metadata to before-state. Verify recovery diagnostics and usable recovery package. |
@@ -85,3 +85,32 @@ Run `scripts/rhino-canvas-scroll-check.py` through Rhino's RunPythonScript to ch
 - [ ] Maintainer approves the exact package hashes for publication.
 
 After approval, publish immutable GitHub/Yak artifacts and verify Package Manager discovery/install on both platforms. Preserve the packages and evidence. A failed release requires a new version; never replace an existing published package. Uninstall must not remove document metadata or user recovery files.
+
+## Current-format cleanup acceptance
+
+Use fresh fixtures created by this candidate. Schema 16/package 6 are required; historical-project compatibility is outside acceptance.
+
+- [ ] Register/unregister live sheets and details; change the source, reopen creation, and confirm the preview follows it. Delete a source and confirm it disappears. Folders expose no template checkbox.
+- [ ] Create None/Right/Bottom blocks, edit project fields, append per-sheet revisions, and save/reopen. Ordinary block instances must remain ordinary page geometry through package round trips.
+- [ ] Exercise canonical per-detail creation through UI and the experimental companion, including absent views, wrong assignment counts, stale plans, cancellation, and single-use approval.
+- [ ] Cancel/close creation while captures are queued and in progress. Confirm the dialog's cleanup barrier completes and temporary resources are gone.
+- [ ] Repeat the accordion scrolling and canvas/tree gesture checks on this build, including focus changes, dark/light, and high DPI.
+
+## Edit and table regressions
+
+On a fresh unsaved diagnostic model, run `scripts/rhino-batch-edit-checks.py` through
+Rhino RunPythonScript. It schedules execution on Idle and creates its own layouts
+and named view. Never run it in a user's project. It checks combined sheet mode /
+named-view edits and an injected failure after the first detail edit, for both
+active and inactive details. Compare native cameras, display modes, and metadata.
+The JSON report is `foundry-batch-edit-checks.json` in the OS temp directory.
+`CANDIDATE_HOST` can point to an isolated RHP for development checks; the default
+uses the installed bundle after restarting Rhino.
+
+For table interaction, drag from layout/folder names. Confirm short/slow starts,
+single and multiple selected rows, insertion before/after siblings, folder drops,
+Escape cancellation, and a subsequent drag after cancellation. Property cells
+remain editors; dragging a detail must not move its parent layout. Verify common
+row height/font/striping in hierarchy, appearance rules, and creation review;
+native selection colors must take priority. Repeat with keyboard selection,
+light/dark themes, and Retina/high-DPI on both platforms.

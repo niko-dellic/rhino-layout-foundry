@@ -45,10 +45,10 @@ public sealed class OverviewBenchmarkContractTests
         for (var index = 0; index < 10; index++)
         {
             folders.Add(new FolderOverview(
-                DeterministicId(1, index),
-                rootId,
-                $"Folder {index:D2}",
-                index));
+                Id: DeterministicId(1, index),
+                ParentId: rootId,
+                Name: $"Folder {index:D2}",
+                Order: index));
         }
 
         var sheets = new List<SheetOverview>();
@@ -56,20 +56,19 @@ public sealed class OverviewBenchmarkContractTests
         {
             var details = Enumerable.Range(0, 5)
                 .Select(detailIndex => new DetailOverview(
-                    DeterministicId(3, (sheetIndex * 5) + detailIndex),
-                    $"Detail {sheetIndex:D4}-{detailIndex + 1}",
-                    detailIndex))
+                    DetailViewportId: DeterministicId(3, (sheetIndex * 5) + detailIndex),
+                    Name: $"Detail {sheetIndex:D4}-{detailIndex + 1}",
+                    Order: detailIndex))
                 .ToArray();
             sheets.Add(new SheetOverview(
-                DeterministicId(2, sheetIndex),
-                folders[1 + (sheetIndex % 10)].Id,
-                $"Sheet {sheetIndex:D4}",
-                sheetIndex,
-                [$"Tag-{sheetIndex % 5}"],
-                details));
+                PageViewId: DeterministicId(2, sheetIndex),
+                FolderId: folders[1 + (sheetIndex % 10)].Id,
+                Name: $"Sheet {sheetIndex:D4}",
+                Order: sheetIndex,
+                Details: details));
         }
 
-        return new DocumentOverview(42, "Benchmark", rootId, folders, sheets);
+        return new DocumentOverview(DocumentRuntimeSerialNumber: 42, DocumentName: "Benchmark", RootFolderId: rootId, Folders: folders, Sheets: sheets);
     }
 
     private static Guid DeterministicId(int category, int index)

@@ -17,8 +17,7 @@ internal sealed partial class RhinoMutationExecutor
         RhinoDoc document,
         OperationPlan plan,
         SetHierarchyViewportRulesChange change,
-        IReadOnlyList<CapabilityTemplateLink>? afterLinksOverride = null,
-        IReadOnlyList<CapabilityTemplateRegistration>? afterRegistrationsOverride = null,
+        IReadOnlyList<LayoutTemplateRegistration>? afterRegistrationsOverride = null,
         IReadOnlyList<AppearanceStateRecord>? afterStatesOverride = null,
         IReadOnlyList<AppearanceStateAssignment>? afterAssignmentsOverride = null,
         DocumentState? afterDocumentStateOverride = null)
@@ -35,15 +34,13 @@ internal sealed partial class RhinoMutationExecutor
             .Where(item => item.Scope != change.Scope)
             .Concat(change.NewRules is null ? [] : [change.NewRules])
             .ToArray();
-        var afterLinks = afterLinksOverride?.ToArray() ?? beforeState.TemplateLinks.ToArray();
         var afterState = baseAfterState with
         {
             SchemaVersion = DocumentState.CurrentSchemaVersion,
-            ViewportRuleSets = afterRules,
-            CapabilityLinks = afterLinks,
-            CapabilityTemplates = afterRegistrationsOverride ?? baseAfterState.TemplateRegistrations,
-            AppearanceStateResources = afterStatesOverride ?? baseAfterState.AppearanceStates,
-            AppearanceStateAssignments = afterAssignmentsOverride ?? baseAfterState.StateAssignments,
+            AppearanceRules = afterRules,
+            TemplateRegistrations = afterRegistrationsOverride ?? baseAfterState.TemplateRegistrations,
+            AppearanceStates = afterStatesOverride ?? baseAfterState.AppearanceStates,
+            StateAssignments = afterAssignmentsOverride ?? baseAfterState.StateAssignments,
         };
         var pages = document.Views.GetPageViews();
         var details = afterStatesOverride is not null || afterAssignmentsOverride is not null
@@ -184,23 +181,19 @@ internal sealed partial class RhinoMutationExecutor
         }
     }
 
-    private OperationResult ApplyViewportTemplateCapabilities(
+    private OperationResult ApplyTemplateRegistration(
         RhinoDoc document,
         OperationPlan plan,
-        SetTemplateCapabilitiesChange change)
+SetLayoutTemplateRegistrationChange change)
     {
-        var state = WithCurrentPageRecords(document, _stateStore.Get(document));
-        var registrations = state.TemplateRegistrations.ToList();
-        var links = state.TemplateLinks.ToList();
-        var failure = ApplyTemplateCapabilities(registrations, links, change);
+        var before = _stateStore.Get(document);
+        var registrations = before.TemplateRegistrations.ToList();
+        var failure = UpdateTemplateRegistration(registrations, change);
         if (failure is not null) return failure;
-        var current = state.AppearanceRules.LastOrDefault(item => item.Scope == change.Source);
-        return ApplyViewportAppearanceRules(
+        return ApplyStateOnlyChange(
             document,
             plan,
-            new SetHierarchyViewportRulesChange(change.Source, current, current),
-            links,
-            registrations);
+before, before with { TemplateRegistrations = registrations.ToArray() });
     }
 
     private OperationResult ApplyAppearanceStateChanges(
@@ -256,11 +249,11 @@ internal sealed partial class RhinoMutationExecutor
             var after = before with
             {
                 SchemaVersion = DocumentState.CurrentSchemaVersion,
-                AppearanceStateResources = resources,
-                AppearanceStateAssignments = assignments,
-                ObserverCanvas = before.Canvas with
+                AppearanceStates = resources,
+                StateAssignments = assignments,
+                Canvas = before.Canvas with
                 {
-                    AppearanceStatePlacements = statePlacements,
+                    StatePlacements = statePlacements,
                 },
             };
             return ApplyStateOnlyChange(document, plan, storedBefore, after);
@@ -276,47 +269,23 @@ internal sealed partial class RhinoMutationExecutor
             afterAssignmentsOverride: assignments,
             afterDocumentStateOverride: before with
             {
-                ObserverCanvas = before.Canvas with
+                Canvas = before.Canvas with
                 {
-                    AppearanceStatePlacements = statePlacements,
+                    StatePlacements = statePlacements,
                 },
             });
     }
 
-    private static OperationResult? ApplyTemplateCapabilities(
-        IList<CapabilityTemplateRegistration> registrations,
-        IList<CapabilityTemplateLink> links,
-        SetTemplateCapabilitiesChange change)
+    private static OperationResult? UpdateTemplateRegistration(
+        IList<LayoutTemplateRegistration> registrations,
+SetLayoutTemplateRegistrationChange change)
     {
         var existing = registrations.LastOrDefault(item => item.Source == change.Source);
         if (existing != change.ExpectedRegistration)
             return Failure("template.before_value_changed",
-                "Template roles changed before this edit was applied.");
+"Template registration changed before this edit was applied.");
         if (existing is not null) registrations.Remove(existing);
         if (change.NewRegistration is not null) registrations.Add(change.NewRegistration);
-
-        var retainedCapabilities = change.NewRegistration?.Capabilities ?? TemplateCapability.None;
-        var registrationId = existing?.Id ?? change.NewRegistration?.Id;
-        if (registrationId is { } id)
-        {
-            foreach (var link in links.Where(link => link.SourceRegistrationId == id &&
-                         !retainedCapabilities.HasFlag(link.Capability)).ToArray())
-                links.Remove(link);
-        }
-        return null;
-    }
-
-    private static OperationResult? ApplyTemplateLink(
-        IList<CapabilityTemplateLink> links,
-        SetCapabilityTemplateLinkChange change)
-    {
-        var existing = links.LastOrDefault(link =>
-            link.Target == change.Target && link.Capability == change.Capability);
-        if (existing != change.ExpectedLink)
-            return Failure("template.link_before_value_changed",
-                "The capability link changed before this edit was applied.");
-        if (existing is not null) links.Remove(existing);
-        if (change.NewLink is not null) links.Add(change.NewLink);
         return null;
     }
 

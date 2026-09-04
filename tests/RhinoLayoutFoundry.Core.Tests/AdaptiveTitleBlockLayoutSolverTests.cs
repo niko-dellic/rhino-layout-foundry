@@ -35,9 +35,9 @@ public sealed class AdaptiveTitleBlockLayoutSolverTests
             Assert.Equal(0, layout.VisibleRevisionRows);
             Assert.All(layout.Fields, field => Assert.True(Contains(layout.Block, field.Bounds)));
             for (var first = 0; first < layout.Fields.Count; first++)
-            for (var second = first + 1; second < layout.Fields.Count; second++)
-                Assert.False(Intersects(layout.Fields[first].Bounds, layout.Fields[second].Bounds),
-                    $"{kind}: {layout.Fields[first].Key} overlaps {layout.Fields[second].Key}");
+                for (var second = first + 1; second < layout.Fields.Count; second++)
+                    Assert.False(Intersects(layout.Fields[first].Bounds, layout.Fields[second].Bounds),
+                        $"{kind}: {layout.Fields[first].Key} overlaps {layout.Fields[second].Key}");
         }
     }
 
@@ -45,10 +45,10 @@ public sealed class AdaptiveTitleBlockLayoutSolverTests
     public void MetricAndImperialEquivalentPapersProduceEquivalentPhysicalGeometry()
     {
         var metric = AdaptiveTitleBlockLayoutSolver.Solve(
-            BuiltInTitleBlockKind.CompactLowerRight,
+            BuiltInTitleBlockKind.RightSidebar,
             new PaperRecipe(431.8, 279.4, "Millimeters"));
         var imperial = AdaptiveTitleBlockLayoutSolver.Solve(
-            BuiltInTitleBlockKind.CompactLowerRight,
+            BuiltInTitleBlockKind.RightSidebar,
             new PaperRecipe(17, 11, "Inches"));
 
         Assert.Equal(metric.Block.Width, imperial.Block.Width * 25.4, 5);
@@ -85,7 +85,7 @@ public sealed class AdaptiveTitleBlockLayoutSolverTests
         {
             ProjectName = string.Empty,
             FirmName = "Hidden firm",
-            TitleBlockOptions = new TitleBlockContentOptions(
+            ContentOptions = new TitleBlockContentOptions(
                 [TitleBlockContentField.ProjectName], [], false),
         };
 
@@ -124,8 +124,7 @@ public sealed class AdaptiveTitleBlockLayoutSolverTests
     {
         var project = ProjectInformation.Empty with
         {
-            TitleBlockOptions = new TitleBlockContentOptions([], [], true),
-            DefaultRevision = new SheetRevisionRecord("P01", "2026-08-31", "Permit", "ND", "QA"),
+            ContentOptions = new TitleBlockContentOptions([], [], true),
         };
 
         var layout = AdaptiveTitleBlockLayoutSolver.Solve(
@@ -142,12 +141,12 @@ public sealed class AdaptiveTitleBlockLayoutSolverTests
         var expanded = ProjectInformation.Empty with
         {
             CustomFields = custom,
-            TitleBlockOptions = new TitleBlockContentOptions(
+            ContentOptions = new TitleBlockContentOptions(
                 [], custom.Keys.Select(key => new CustomTitleBlockFieldOption(key)).ToArray(), false),
         };
         var compact = ProjectInformation.Empty with
         {
-            TitleBlockOptions = new TitleBlockContentOptions([], [], false),
+            ContentOptions = new TitleBlockContentOptions([], [], false),
         };
         var paper = new PaperRecipe(297, 210, "Millimeters");
 

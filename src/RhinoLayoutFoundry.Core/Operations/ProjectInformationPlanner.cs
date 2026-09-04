@@ -14,7 +14,7 @@ public sealed class UpdateProjectInformationPlanner : IOperationPlanner<UpdatePr
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(snapshot);
-        var diagnostics = CaptureSheetTemplatePlanner.ValidateContext(
+        var diagnostics = SheetPlanValidation.ValidateContext(
             request.DocumentRuntimeSerialNumber, request.SourceRevision, snapshot);
         Validate(request.Information, diagnostics);
         IReadOnlyList<OperationChange> changes = diagnostics.Any(item => item.Severity == DiagnosticSeverity.Error)
@@ -47,7 +47,7 @@ public sealed class UpdateProjectInformationPlanner : IOperationPlanner<UpdatePr
         }
 
         var configured = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var option in information.TitleBlockOptions?.CustomFields ?? [])
+        foreach (var option in information.ContentOptions?.CustomFields ?? [])
         {
             if (string.IsNullOrWhiteSpace(option.Label) || !information.CustomFields.ContainsKey(option.Label))
                 diagnostics.Add(Error("project.custom_option_missing",

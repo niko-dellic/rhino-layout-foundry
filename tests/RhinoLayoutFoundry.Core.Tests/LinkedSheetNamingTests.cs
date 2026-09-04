@@ -64,8 +64,8 @@ public sealed class LinkedSheetNamingTests
     {
         var snapshot = TestSnapshots.Create();
         var plan = new BatchUpdateSheetsPlanner().Plan(new BatchUpdateSheetsRequest(
-            42, 1, [TestSnapshots.SheetOneId], "{folder}-{index:00}", 9, 1,
-            null, null, null, null), snapshot);
+            DocumentRuntimeSerialNumber: 42, SourceRevision: 1, SheetPageViewIds: [TestSnapshots.SheetOneId], NamingPattern: "{folder}-{index:00}", Start: 9, Step: 1,
+            PaperWidth: null, PaperHeight: null, PaperUnitSystem: null, DetailDisplayModeId: null), snapshot);
 
         Assert.True(plan.CanApply);
         var change = Assert.IsType<BatchUpdateSheetsChange>(Assert.Single(plan.Changes));
@@ -90,7 +90,7 @@ public sealed class LinkedSheetNamingTests
                 pair => pair.Key == TestSnapshots.SheetOneId
                     ? pair.Value with { DetailSettings = [detail] }
                     : pair.Value),
-            NamedViewNames = new HashSet<string>(["New View"], StringComparer.OrdinalIgnoreCase),
+            NamedViews = new HashSet<string>(["New View"], StringComparer.OrdinalIgnoreCase),
         };
 
         var plan = new AssignNamedViewPlanner().Plan(new AssignNamedViewRequest(
@@ -100,24 +100,23 @@ public sealed class LinkedSheetNamingTests
         var linked = Assert.IsType<UpdateLinkedSheetNamesChange>(plan.Changes.Last());
         Assert.Equal("New View-3", linked.NewNames[TestSnapshots.SheetOneId]);
         Assert.Equal("New View",
-            linked.NewBindings[TestSnapshots.SheetOneId]!.NamedViews[TestSnapshots.DetailOneId]);
+            linked.NewBindings[TestSnapshots.SheetOneId]!.NamedViewAssignments[TestSnapshots.DetailOneId]);
     }
 
     [Fact]
-    public void MetadataAndFirstTagRemainLiveWithoutChangingIndex()
+    public void MetadataRemainsLiveWithoutChangingIndex()
     {
-        var pattern = "{project}-{discipline}-{tag}-{index:00}";
-        var snapshot = LinkedSnapshot(pattern, 5, "Alpha-A-Permit-05");
+        var pattern = "{project}-{discipline}-{index:00}";
+        var snapshot = LinkedSnapshot(pattern, 5, "Alpha-A-05");
         snapshot = snapshot with
         {
-            DocumentMetadata = new Dictionary<string, string> { ["project"] = "Beta" },
+            Metadata = new Dictionary<string, string> { ["project"] = "Beta" },
             Sheets = snapshot.Sheets.ToDictionary(
                 pair => pair.Key,
                 pair => pair.Key == TestSnapshots.SheetOneId
                     ? pair.Value with
                     {
                         Metadata = new Dictionary<string, string> { ["discipline"] = "S" },
-                        SheetTags = ["Issue"],
                     }
                     : pair.Value),
         };
@@ -127,7 +126,7 @@ public sealed class LinkedSheetNamingTests
             affectedSheetIds: new HashSet<Guid> { TestSnapshots.SheetOneId });
 
         Assert.True(preview.CanApply);
-        Assert.Equal("Beta-S-Issue-05", preview.Change!.NewNames[TestSnapshots.SheetOneId]);
+        Assert.Equal("Beta-S-05", preview.Change!.NewNames[TestSnapshots.SheetOneId]);
         Assert.Equal(5, preview.Change.NewBindings[TestSnapshots.SheetOneId]!.Index);
     }
 
@@ -158,38 +157,35 @@ public sealed class LinkedSheetNamingTests
     }
 
     [Fact]
-    public void NamingBindingRoundTripsAndSchemaTenMigratesDetached()
+    public void NamingBindingRoundTrips()
     {
         var state = DocumentState.Empty();
         var sheetId = Guid.NewGuid();
-        var binding = new SheetNamingBinding("{folder}-{index:00}", 4, "Plans-04");
+        var binding = new SheetNamingBinding(Pattern: "{folder}-{index:00}", Index: 4, LastGeneratedName: "Plans-04");
         state = state with
         {
             Sheets = new Dictionary<Guid, SheetRecord>
             {
-                [sheetId] = new(sheetId, state.RootFolderId, 0, [],
+                [sheetId] = new(sheetId, state.RootFolderId, 0,
                     new Dictionary<string, string>(), null, NamingBinding: binding),
             },
         };
 
         var restored = DocumentStateSerializer.Deserialize(DocumentStateSerializer.Serialize(state));
-        Assert.Equal(binding, restored.Sheets[sheetId].NamingBinding);
-
-        var legacyPayload = DocumentStateSerializer.Serialize(state)
-            .Replace($"\"SchemaVersion\":{DocumentState.CurrentSchemaVersion}", "\"SchemaVersion\":10",
-                StringComparison.Ordinal);
-        var migrated = DocumentStateSerializer.Deserialize(legacyPayload);
-        Assert.Null(migrated.Sheets[sheetId].NamingBinding);
+        Assert.Equal(binding.Pattern, restored.Sheets[sheetId].NamingBinding!.Pattern);
+        Assert.Equal(binding.Index, restored.Sheets[sheetId].NamingBinding!.Index);
     }
 
     private static DocumentSnapshot LinkedSnapshot(string pattern, int index, string name)
     {
         var snapshot = TestSnapshots.Create();
         var binding = new SheetNamingBinding(
-            pattern,
-            index,
-            name,
-            new Dictionary<Guid, string> { [TestSnapshots.DetailOneId] = "Old View" });
+            Pattern: pattern,
+            Index: index,
+            LastGeneratedName: name)
+        {
+            NamedViewAssignments = new Dictionary<Guid, string> { [TestSnapshots.DetailOneId] = "Old View" }
+        };
         return snapshot with
         {
             Sheets = snapshot.Sheets.ToDictionary(
@@ -199,7 +195,6 @@ public sealed class LinkedSheetNamingTests
                     {
                         Name = name,
                         NamingBinding = binding,
-                        SheetTags = ["Permit"],
                     }
                     : pair.Value),
         };

@@ -18,11 +18,8 @@ public sealed record SelectionInspectorModel(
     double? PaperWidth,
     double? PaperHeight,
     string PaperUnitSystem,
-    bool TitleBlockIsMixed,
-    Guid? TitleBlockSourceInstanceId,
     bool DisplayModeIsMixed,
     Guid? DisplayModeId,
-    bool? TemplateRegistered,
     IReadOnlyList<OverviewNodeKey>? NotesTargets = null,
     bool NotesIsMixed = false,
     string NotesValue = "")
@@ -66,11 +63,7 @@ public sealed record SelectionInspectorModel(
         var paperValues = layouts.Select(sheet =>
                 (sheet.PageWidth, sheet.PageHeight, Unit: sheet.PageUnitSystem ?? string.Empty))
             .Distinct().ToArray();
-        var titleBlocks = layouts.Select(sheet => sheet.TitleBlockInstanceObjectId).Distinct().ToArray();
         var displayModes = details.Select(detail => detail.DisplayModeId).Distinct().ToArray();
-        bool? templateRegistered = keys.Length == 1 && keys[0].Kind == OverviewNodeKind.Sheet
-            ? snapshot.Templates.Any(template => template.SourcePageViewId == keys[0].Id)
-            : null;
         var notesTargets = keys.Where(key => key.Kind is OverviewNodeKind.Folder or OverviewNodeKind.Sheet)
             .ToArray();
         var noteValues = notesTargets.Select(key => key.Kind == OverviewNodeKind.Folder
@@ -93,11 +86,8 @@ public sealed record SelectionInspectorModel(
             paperValues.Length == 1 ? paperValues[0].PageWidth : null,
             paperValues.Length == 1 ? paperValues[0].PageHeight : null,
             paperValues.Length == 1 ? paperValues[0].Unit : string.Empty,
-            titleBlocks.Length > 1,
-            titleBlocks.Length == 1 ? titleBlocks[0] : null,
             displayModes.Length > 1,
             displayModes.Length == 1 ? displayModes[0] : null,
-            templateRegistered,
             notesTargets,
             noteValues.Length > 1,
             noteValues.Length == 1 ? noteValues[0] : string.Empty);

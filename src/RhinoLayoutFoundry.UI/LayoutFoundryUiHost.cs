@@ -32,11 +32,10 @@ public static class LayoutFoundryUiHost
         INamedViewThumbnailProvider namedViewThumbnailProvider,
         IDraftLayoutThumbnailProvider draftLayoutThumbnailProvider,
         IMutationCapabilityProvider capabilityProvider,
-        ITemplateCaptureContextProvider templateCaptureContextProvider,
         IDocumentObserverSnapshotProvider observerSnapshotProvider,
         IModelObjectSelectionService modelObjectSelectionService,
         Image? projectIcon = null) =>
-        Service.Configure(overviewProvider, snapshotProvider, mutationService, navigationService, pdfExportService, printDialogService, layoutPackageService, thumbnailProvider, namedViewThumbnailProvider, draftLayoutThumbnailProvider, capabilityProvider, templateCaptureContextProvider, observerSnapshotProvider, modelObjectSelectionService, projectIcon);
+        Service.Configure(overviewProvider, snapshotProvider, mutationService, navigationService, pdfExportService, printDialogService, layoutPackageService, thumbnailProvider, namedViewThumbnailProvider, draftLayoutThumbnailProvider, capabilityProvider, observerSnapshotProvider, modelObjectSelectionService, projectIcon);
 
     public static ObserverSnapshot CaptureObserverSnapshot() =>
         Service.CaptureObserverSnapshot();
@@ -52,9 +51,6 @@ public static class LayoutFoundryUiHost
 
     public static DocumentSnapshot? CaptureSnapshot() =>
         Service.CaptureSnapshot();
-
-    public static TemplateCaptureContext? CaptureTemplateContext(Guid sourcePageViewId) =>
-        Service.CaptureTemplateContext(sourcePageViewId);
 
     public static void NotifyOverviewChanged(OverviewInvalidation? invalidation = null) =>
         Service.NotifyOverviewChanged(invalidation);
@@ -112,20 +108,14 @@ public static class LayoutFoundryUiHost
         CancellationToken cancellationToken = default) =>
         Service.CaptureDraftLayoutThumbnailAsync(request, cancellationToken);
 
-    public static void BeginDraftLayoutThumbnailSession(uint documentRuntimeSerialNumber) =>
-        Service.BeginDraftLayoutThumbnailSession(documentRuntimeSerialNumber);
-
     public static Task<EditSheetThumbnailResult> CaptureEditSheetThumbnailAsync(
         EditSheetThumbnailRequest request,
         CancellationToken cancellationToken = default) =>
         Service.CaptureEditSheetThumbnailAsync(request, cancellationToken);
 
-    public static Task CompleteDraftLayoutThumbnailSessionAsync(
-        uint documentRuntimeSerialNumber,
-        bool restoreOriginalModifiedState,
-        bool endSession = true,
+    public static Task WaitForPendingDraftCapturesAsync(
         CancellationToken cancellationToken = default) =>
-        Service.CompleteDraftLayoutThumbnailSessionAsync(documentRuntimeSerialNumber, restoreOriginalModifiedState, endSession, cancellationToken);
+        Service.WaitForPendingDraftCapturesAsync(cancellationToken);
 
     public static FoundryMutationCapabilities CaptureMutationCapabilities() =>
         Service.CaptureMutationCapabilities();
@@ -213,25 +203,11 @@ public static class LayoutFoundryUiHost
         CancellationToken cancellationToken = default) =>
         Service.CreateSheetAsync(destinationFolderId, name, cancellationToken);
 
-    public static Task<OperationResult> CaptureSheetTemplateAsync(
-        Guid sourcePageViewId,
-        string name,
-        string defaultNamingPattern,
-        Guid? titleBlockInstanceObjectId,
-        CancellationToken cancellationToken = default) =>
-        Service.CaptureSheetTemplateAsync(sourcePageViewId, name, defaultNamingPattern, titleBlockInstanceObjectId, cancellationToken);
-
-    public static Task<OperationResult> SetSheetTemplateRegistrationAsync(
+    public static Task<OperationResult> SetLayoutTemplateRegistrationAsync(
         IReadOnlyList<OverviewNodeKey> targets,
         bool registered,
         CancellationToken cancellationToken = default) =>
-        Service.SetSheetTemplateRegistrationAsync(targets, registered, cancellationToken);
-
-    public static Task<OperationResult> SetTemplateCapabilitiesAsync(
-        IReadOnlyList<OverviewNodeKey> targets,
-        TemplateCapability capabilities,
-        CancellationToken cancellationToken = default) =>
-        Service.SetTemplateCapabilitiesAsync(targets, capabilities, cancellationToken);
+        Service.SetLayoutTemplateRegistrationAsync(targets, registered, cancellationToken);
 
     public static Task<OperationResult> SetLayerVisibilityRulesAsync(
         IReadOnlyList<OverviewNodeKey> targets,
@@ -286,27 +262,8 @@ public static class LayoutFoundryUiHost
         CancellationToken cancellationToken = default) =>
         Service.MoveAppearanceStatesAsync(stateIds, destinationFolderId, cancellationToken);
 
-    public static Task<OperationResult> LinkTemplateCapabilityAsync(
-        IReadOnlyList<OverviewNodeKey> targets,
-        Guid sourceRegistrationId,
-        TemplateCapability capability,
-        CancellationToken cancellationToken = default) =>
-        Service.LinkTemplateCapabilityAsync(targets, sourceRegistrationId, capability, cancellationToken);
-
-    public static Task<OperationResult> DetachTemplateCapabilityAsync(
-        IReadOnlyList<OverviewNodeKey> targets,
-        TemplateCapability capability,
-        CancellationToken cancellationToken = default) =>
-        Service.DetachTemplateCapabilityAsync(targets, capability, cancellationToken);
-
     internal static HierarchyScope ToHierarchyScope(OverviewNodeKey key) =>
         Service.ToHierarchyScope(key);
-
-    public static Task<OperationResult> SetSheetTemplateRegistrationAsync(
-        Guid sourcePageViewId,
-        bool registered,
-        CancellationToken cancellationToken = default) =>
-        Service.SetSheetTemplateRegistrationAsync(sourcePageViewId, registered, cancellationToken);
 
     public static Task<OperationResult> BatchCreateSheetsAsync(
         BatchCreateSheetsRequest request,

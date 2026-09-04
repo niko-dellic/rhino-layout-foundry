@@ -23,7 +23,6 @@ internal sealed partial class FoundryApplicationService
     private INamedViewThumbnailProvider? _namedViewThumbnailProvider;
     private IDraftLayoutThumbnailProvider? _draftLayoutThumbnailProvider;
     private IMutationCapabilityProvider? _capabilityProvider;
-    private ITemplateCaptureContextProvider? _templateCaptureContextProvider;
     private IDocumentObserverSnapshotProvider? _observerSnapshotProvider;
     private IModelObjectSelectionService? _modelObjectSelectionService;
     private Image? _projectIcon;
@@ -48,7 +47,6 @@ internal sealed partial class FoundryApplicationService
         INamedViewThumbnailProvider namedViewThumbnailProvider,
         IDraftLayoutThumbnailProvider draftLayoutThumbnailProvider,
         IMutationCapabilityProvider capabilityProvider,
-        ITemplateCaptureContextProvider templateCaptureContextProvider,
         IDocumentObserverSnapshotProvider observerSnapshotProvider,
         IModelObjectSelectionService modelObjectSelectionService,
         Image? projectIcon = null)
@@ -66,8 +64,6 @@ internal sealed partial class FoundryApplicationService
         _draftLayoutThumbnailProvider = draftLayoutThumbnailProvider ??
             throw new ArgumentNullException(nameof(draftLayoutThumbnailProvider));
         _capabilityProvider = capabilityProvider ?? throw new ArgumentNullException(nameof(capabilityProvider));
-        _templateCaptureContextProvider = templateCaptureContextProvider ??
-            throw new ArgumentNullException(nameof(templateCaptureContextProvider));
         _observerSnapshotProvider = observerSnapshotProvider ??
             throw new ArgumentNullException(nameof(observerSnapshotProvider));
         _modelObjectSelectionService = modelObjectSelectionService ??
@@ -127,18 +123,6 @@ internal sealed partial class FoundryApplicationService
         try
         {
             return _snapshotProvider?.Capture();
-        }
-        catch (InvalidOperationException)
-        {
-            return null;
-        }
-    }
-
-    public TemplateCaptureContext? CaptureTemplateContext(Guid sourcePageViewId)
-    {
-        try
-        {
-            return _templateCaptureContextProvider?.Capture(sourcePageViewId);
         }
         catch (InvalidOperationException)
         {
@@ -274,9 +258,6 @@ internal sealed partial class FoundryApplicationService
                    "Foundry is not connected to a draft-layout thumbnail provider."));
     }
 
-    public void BeginDraftLayoutThumbnailSession(uint documentRuntimeSerialNumber) =>
-        _draftLayoutThumbnailProvider?.BeginSession(documentRuntimeSerialNumber);
-
     public Task<EditSheetThumbnailResult> CaptureEditSheetThumbnailAsync(
         EditSheetThumbnailRequest request,
         CancellationToken cancellationToken = default)
@@ -288,16 +269,10 @@ internal sealed partial class FoundryApplicationService
                    "Foundry is not connected to an edit-sheet thumbnail provider."));
     }
 
-    public Task CompleteDraftLayoutThumbnailSessionAsync(
-        uint documentRuntimeSerialNumber,
-        bool restoreOriginalModifiedState,
-        bool endSession = true,
+    public Task WaitForPendingDraftCapturesAsync(
         CancellationToken cancellationToken = default)
     {
-        return _draftLayoutThumbnailProvider?.CompleteSessionAsync(
-                   documentRuntimeSerialNumber,
-                   restoreOriginalModifiedState,
-                   endSession,
+        return _draftLayoutThumbnailProvider?.WaitForPendingCapturesAsync(
                    cancellationToken) ??
                Task.CompletedTask;
     }
@@ -320,7 +295,6 @@ internal sealed partial class FoundryApplicationService
         _namedViewThumbnailProvider = null;
         _draftLayoutThumbnailProvider = null;
         _capabilityProvider = null;
-        _templateCaptureContextProvider = null;
         _observerSnapshotProvider = null;
         _modelObjectSelectionService = null;
         _projectIcon?.Dispose();

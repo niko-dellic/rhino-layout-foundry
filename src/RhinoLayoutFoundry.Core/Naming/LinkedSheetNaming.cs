@@ -65,7 +65,6 @@ public static class LinkedSheetNaming
             var tokens = new Dictionary<string, string>(snapshot.Metadata, StringComparer.OrdinalIgnoreCase)
             {
                 ["folder"] = folderName,
-                ["tag"] = sheet.Tags.FirstOrDefault() ?? string.Empty,
                 ["view"] = FirstAssignedView(sheet, binding),
             };
             foreach (var pair in sheet.Metadata) tokens[pair.Key] = pair.Value;
@@ -129,13 +128,16 @@ public static class LinkedSheetNaming
             .Where(detail => !string.IsNullOrWhiteSpace(detail.Name))
             .Take(1)
             .ToDictionary(detail => detail.DetailViewportId, detail => detail.Name);
-        return new SheetNamingBinding(pattern.Trim(), index, generatedName, namedViews);
+        return new SheetNamingBinding(Pattern: pattern.Trim(), Index: index, LastGeneratedName: generatedName)
+        {
+            NamedViewAssignments = namedViews
+        };
     }
 
     private static string FirstAssignedView(SheetSnapshot sheet, SheetNamingBinding binding)
     {
         foreach (var detail in sheet.Details)
-            if (binding.NamedViews.TryGetValue(detail.DetailViewportId, out var name) &&
+            if (binding.NamedViewAssignments.TryGetValue(detail.DetailViewportId, out var name) &&
                 !string.IsNullOrWhiteSpace(name))
                 return name;
         return string.Empty;

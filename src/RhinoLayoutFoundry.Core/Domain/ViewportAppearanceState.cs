@@ -1,13 +1,5 @@
 namespace RhinoLayoutFoundry.Core.Domain;
 
-[Flags]
-public enum TemplateCapability
-{
-    None = 0,
-    Layout = 1 << 0,
-    TitleBlock = 1 << 1,
-}
-
 public enum HierarchyScopeKind
 {
     Folder,
@@ -54,8 +46,8 @@ public sealed record ObjectDisplayRule(
 /// </summary>
 public sealed record HierarchyViewportRuleSet(
     HierarchyScope Scope,
-    IReadOnlyList<LayerVisibilityRule> LayerRules,
-    IReadOnlyList<ObjectDisplayRule> ObjectDisplayRules);
+    [property: System.Text.Json.Serialization.JsonRequired] IReadOnlyList<LayerVisibilityRule> LayerRules,
+    [property: System.Text.Json.Serialization.JsonRequired] IReadOnlyList<ObjectDisplayRule> ObjectDisplayRules);
 
 /// <summary>
 /// A reusable, document-owned appearance resource. Folder membership is only
@@ -66,8 +58,8 @@ public sealed record AppearanceStateRecord(
     Guid FolderId,
     int Order,
     string Name,
-    IReadOnlyList<LayerVisibilityRule> LayerRules,
-    IReadOnlyList<ObjectDisplayRule> ObjectDisplayRules,
+    [property: System.Text.Json.Serialization.JsonRequired] IReadOnlyList<LayerVisibilityRule> LayerRules,
+    [property: System.Text.Json.Serialization.JsonRequired] IReadOnlyList<ObjectDisplayRule> ObjectDisplayRules,
     string Notes = "");
 
 /// <summary>
@@ -79,30 +71,9 @@ public sealed record AppearanceStateAssignment(
     HierarchyScope Target,
     Guid StateId);
 
-public sealed record CapabilityTemplateRegistration(
+public sealed record LayoutTemplateRegistration(
     Guid Id,
-    HierarchyScope Source,
-    TemplateCapability Capabilities);
-
-public sealed record TemplateDetailMapping(
-    Guid SourceDetailViewportId,
-    Guid TargetDetailViewportId);
-
-public sealed record TemplateCapabilityPayload(
-    SheetTemplateRecipe? Layout = null,
-    TitleBlockTemplateRecipe? TitleBlock = null);
-
-/// <summary>
-/// One live capability link. LastResolved is deliberately persisted so source
-/// loss can detach without changing the target's visible result.
-/// </summary>
-public sealed record CapabilityTemplateLink(
-    Guid Id,
-    HierarchyScope Target,
-    Guid SourceRegistrationId,
-    TemplateCapability Capability,
-    IReadOnlyList<TemplateDetailMapping> DetailMappings,
-    TemplateCapabilityPayload LastResolved);
+    HierarchyScope Source);
 
 public sealed record LayerSnapshot(
     Guid Id,
@@ -130,25 +101,8 @@ public sealed record ModelObjectSnapshot(
     bool IsInstanceObject);
 
 public sealed record EffectiveViewportAppearance(
-    IReadOnlyDictionary<Guid, LayerVisibilityOverride> Layers,
-    IReadOnlyDictionary<Guid, ObjectDisplayRule> Objects);
-
-public static class TemplateCapabilityPolicy
-{
-    public static TemplateCapability AllowedFor(HierarchyScopeKind kind) => kind switch
-    {
-        HierarchyScopeKind.Folder => TemplateCapability.Layout,
-        HierarchyScopeKind.Sheet =>
-            TemplateCapability.Layout |
-            TemplateCapability.TitleBlock,
-        HierarchyScopeKind.Detail => TemplateCapability.Layout,
-        _ => TemplateCapability.None,
-    };
-
-    public static bool IsSingle(TemplateCapability capability) =>
-        capability != TemplateCapability.None &&
-        ((int)capability & ((int)capability - 1)) == 0;
-}
+    [property: System.Text.Json.Serialization.JsonRequired] IReadOnlyDictionary<Guid, LayerVisibilityOverride> Layers,
+    [property: System.Text.Json.Serialization.JsonRequired] IReadOnlyDictionary<Guid, ObjectDisplayRule> Objects);
 
 public static class ViewportAppearanceResolver
 {
@@ -222,34 +176,6 @@ public static class ViewportAppearanceResolver
             if (objects.ContainsKey(pair.Key)) resolvedObjects[pair.Key] = pair.Value;
 
         return new EffectiveViewportAppearance(resolvedLayers, resolvedObjects);
-    }
-
-    public static bool HasTemplateCycle(
-        IEnumerable<CapabilityTemplateLink> links,
-        IReadOnlyDictionary<Guid, CapabilityTemplateRegistration> registrations)
-    {
-        ArgumentNullException.ThrowIfNull(links);
-        ArgumentNullException.ThrowIfNull(registrations);
-        var sourceByTarget = links
-            .Where(link => registrations.ContainsKey(link.SourceRegistrationId))
-            .GroupBy(link => (link.Target, link.Capability))
-            .ToDictionary(
-                group => group.Key,
-                group => registrations[group.Last().SourceRegistrationId].Source);
-        var states = new Dictionary<(HierarchyScope Scope, TemplateCapability Capability), int>();
-
-        bool Visit((HierarchyScope Scope, TemplateCapability Capability) node)
-        {
-            if (states.GetValueOrDefault(node) == 1) return true;
-            if (states.GetValueOrDefault(node) == 2) return false;
-            states[node] = 1;
-            if (sourceByTarget.TryGetValue(node, out var source) && Visit((source, node.Capability)))
-                return true;
-            states[node] = 2;
-            return false;
-        }
-
-        return sourceByTarget.Keys.Any(Visit);
     }
 
     private static bool MatchesLayer(

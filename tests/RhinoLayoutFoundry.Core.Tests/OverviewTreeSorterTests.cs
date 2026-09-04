@@ -39,7 +39,7 @@ public sealed class OverviewTreeSorterTests
                 overview.Sheets[1] with
                 {
                     Details = overview.Sheets[1].Details.Append(
-                        new DetailOverview(Guid.NewGuid(), "Second detail", 2)).ToArray(),
+                        new DetailOverview(DetailViewportId: Guid.NewGuid(), Name: "Second detail", Order: 2)).ToArray(),
                 },
             ],
         };
@@ -60,9 +60,9 @@ public sealed class OverviewTreeSorterTests
         {
             Sheets =
             [
-                new SheetOverview(Guid.NewGuid(), TestSnapshots.RootFolderId, "Page 10", 0, [], []),
-                new SheetOverview(Guid.NewGuid(), TestSnapshots.RootFolderId, "Page 2", 1, [], []),
-                new SheetOverview(Guid.NewGuid(), TestSnapshots.RootFolderId, "Page 1", 2, [], []),
+                new SheetOverview(PageViewId: Guid.NewGuid(), FolderId: TestSnapshots.RootFolderId, Name: "Page 10", Order: 0, Details: []),
+                new SheetOverview(PageViewId: Guid.NewGuid(), FolderId: TestSnapshots.RootFolderId, Name: "Page 2", Order: 1, Details: []),
+                new SheetOverview(PageViewId: Guid.NewGuid(), FolderId: TestSnapshots.RootFolderId, Name: "Page 1", Order: 2, Details: []),
             ],
         };
 
@@ -101,14 +101,13 @@ public sealed class OverviewTreeSorterTests
             Sheets =
             [
                 new SheetOverview(
-                    sheetId,
-                    TestSnapshots.RootFolderId,
-                    "Page 1",
-                    0,
-                    [],
-                    [
-                        new DetailOverview(Guid.NewGuid(), "Detail 1", 0, Guid.NewGuid(), "Zebra"),
-                        new DetailOverview(Guid.NewGuid(), "Detail 2", 1, Guid.NewGuid(), "Arctic"),
+                    PageViewId:                     sheetId,
+                    FolderId:                     TestSnapshots.RootFolderId,
+                    Name:                     "Page 1",
+                    Order:                     0,
+                    Details:                     [
+                        new DetailOverview(DetailViewportId: Guid.NewGuid(), Name: "Detail 1", Order: 0, DisplayModeId: Guid.NewGuid(), DisplayModeName: "Zebra"),
+                        new DetailOverview(DetailViewportId: Guid.NewGuid(), Name: "Detail 2", Order: 1, DisplayModeId: Guid.NewGuid(), DisplayModeName: "Arctic"),
                     ]),
             ],
         };

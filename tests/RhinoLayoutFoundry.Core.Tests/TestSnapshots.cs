@@ -44,37 +44,36 @@ internal static class TestSnapshots
         };
 
         return new DocumentSnapshot(
-            42,
-            1,
-            RootFolderId,
-            folders,
-            sheets,
-            new HashSet<Guid> { ObjectId },
-            new HashSet<Guid> { DisplayModeOneId, DisplayModeTwoId });
+            DocumentRuntimeSerialNumber: 42,
+            Revision: 1,
+            RootFolderId: RootFolderId,
+            Folders: folders,
+            Sheets: sheets,
+            ExistingObjectIds: new HashSet<Guid> { ObjectId },
+            DisplayModeIds: new HashSet<Guid> { DisplayModeOneId, DisplayModeTwoId });
     }
 
     internal static DocumentOverview Overview(int sheetCount, int detailsPerSheet)
     {
         var sheets = Enumerable.Range(0, sheetCount)
             .Select(sheetIndex => new SheetOverview(
-                Guid.Parse($"20000000-0000-0000-0000-{sheetIndex + 1:000000000000}"),
-                RootFolderId,
-                $"A-{sheetIndex + 1:000}",
-                sheetIndex,
-                [],
-                Enumerable.Range(0, detailsPerSheet)
+                PageViewId: Guid.Parse($"20000000-0000-0000-0000-{sheetIndex + 1:000000000000}"),
+                FolderId: RootFolderId,
+                Name: $"A-{sheetIndex + 1:000}",
+                Order: sheetIndex,
+                Details: Enumerable.Range(0, detailsPerSheet)
                     .Select(detailIndex => new DetailOverview(
-                        Guid.Parse($"30000000-0000-{sheetIndex + 1:0000}-0000-{detailIndex + 1:000000000000}"),
-                        $"Detail {detailIndex + 1}",
-                        detailIndex))
+                        DetailViewportId: Guid.Parse($"30000000-0000-{sheetIndex + 1:0000}-0000-{detailIndex + 1:000000000000}"),
+                        Name: $"Detail {detailIndex + 1}",
+                        Order: detailIndex))
                     .ToArray()))
             .ToArray();
 
         return new DocumentOverview(
-            42,
-            "Test model",
-            RootFolderId,
-            [new FolderOverview(RootFolderId, null, "Unorganized", 0)],
-            sheets);
+            DocumentRuntimeSerialNumber: 42,
+            DocumentName: "Test model",
+            RootFolderId: RootFolderId,
+            Folders: [new FolderOverview(Id: RootFolderId, ParentId: null, Name: "Unorganized", Order: 0)],
+            Sheets: sheets);
     }
 }

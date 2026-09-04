@@ -110,22 +110,22 @@ public sealed class HierarchyPlacementPlannerTests
             Guid.Parse("72000000-0000-0000-0000-000000000004"),
         ];
         return new DocumentSnapshot(
-            17, 4, root,
-            new Dictionary<Guid, FolderRecord>
-            {
-                [root] = new(root, null, "Root", 0),
-                [folders[0]] = new(folders[0], root, "Plans", 0),
-                [folders[1]] = new(folders[1], root, "Details", 1),
-                [folders[2]] = new(folders[2], folders[0], "Nested", 0),
-            },
-            new Dictionary<Guid, SheetSnapshot>
-            {
-                [sheets[0]] = Sheet(sheets[0], root, 0, "Page 1"),
-                [sheets[1]] = Sheet(sheets[1], root, 1, "Page 2"),
-                [sheets[2]] = Sheet(sheets[2], root, 2, "Page 3"),
-                [sheets[3]] = Sheet(sheets[3], folders[0], 0, "Page 4"),
-            },
-            new HashSet<Guid>(), new HashSet<Guid>());
+            DocumentRuntimeSerialNumber: 17, Revision: 4, RootFolderId: root,
+            Folders: new Dictionary<Guid, FolderRecord>
+{
+    [root] = new(root, null, "Root", 0),
+    [folders[0]] = new(folders[0], root, "Plans", 0),
+    [folders[1]] = new(folders[1], root, "Details", 1),
+    [folders[2]] = new(folders[2], folders[0], "Nested", 0),
+},
+            Sheets: new Dictionary<Guid, SheetSnapshot>
+{
+    [sheets[0]] = Sheet(sheets[0], root, 0, "Page 1"),
+    [sheets[1]] = Sheet(sheets[1], root, 1, "Page 2"),
+    [sheets[2]] = Sheet(sheets[2], root, 2, "Page 3"),
+    [sheets[3]] = Sheet(sheets[3], folders[0], 0, "Page 4"),
+},
+            ExistingObjectIds: new HashSet<Guid>(), DisplayModeIds: new HashSet<Guid>());
     }
 
     private static SheetSnapshot Sheet(Guid id, Guid folder, int order, string name) =>

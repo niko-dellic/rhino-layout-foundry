@@ -2,6 +2,16 @@
 
 ## Unreleased — v1 hardening
 
+- Resolve current native detail objects between sheet display-mode and named-view commits; preserve explicit sheet/detail display-mode precedence.
+- Check detail restoration, attempt remaining recovery steps, and report incomplete recovery rather than claiming rollback succeeded unconditionally.
+- Share table density, typography, selection, and populated-row striping across the hierarchy, appearance editor, and layout review.
+- Let AppKit recognize row drags without a competing distance threshold; preserve multi-row drag selection and reserve property cells for editing.
+
+- Breaking pre-release cleanup: document schema 16 and package format 6 only; no migrations or historical compatibility.
+- Templates now use live sheet/detail registration only. Removed stored recipes, capture UI, folder roles, capability links, tags, and unused display-rule machinery.
+- Title blocks are None/Right/Bottom with project information and per-sheet revisions; ordinary block/page geometry remains transportable.
+- Creation uses one specification collection and per-detail named views in UI and experimental automation. Removed obsolete preview session flags and the Observer command alias.
+
 - Protect unsupported or invalid Foundry metadata from editing and preserve readable archive envelopes when saving.
 - Register temporary preview pages before construction continues; attempt all cleanup and always restore Undo recording.
 - Remove deferred modified-flag resets. Canceling a live preview may leave an unsaved-change indicator to protect real edits.

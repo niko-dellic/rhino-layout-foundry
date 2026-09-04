@@ -136,16 +136,16 @@ internal sealed partial class FoundryApplicationService
             return UnavailableResult("The active Rhino document is unavailable.");
         var sheetIds = BatchTargetResolver.ResolveSheetIds(snapshot, targets);
         return await BatchUpdateSheetsAsync(new BatchUpdateSheetsRequest(
-            snapshot.DocumentRuntimeSerialNumber,
-            snapshot.Revision,
-            sheetIds,
-            null,
-            1,
-            1,
-            width,
-            height,
-            unitSystem,
-            null), cancellationToken);
+            DocumentRuntimeSerialNumber: snapshot.DocumentRuntimeSerialNumber,
+            SourceRevision: snapshot.Revision,
+            SheetPageViewIds: sheetIds,
+            NamingPattern: null,
+            Start: 1,
+            Step: 1,
+            PaperWidth: width,
+            PaperHeight: height,
+            PaperUnitSystem: unitSystem,
+            DetailDisplayModeId: null), cancellationToken);
     }
 
     public async Task<OperationResult> SetPrintInclusionAsync(

@@ -208,7 +208,7 @@ internal sealed partial class RhinoMutationExecutor
                 if (changed)
                     sheets[page.MainViewport.Id] = sheet with
                     {
-                        DetailNamedViewAssignments = assigned,
+                        DetailNamedViews = assigned,
                     };
             }
 
@@ -219,7 +219,7 @@ internal sealed partial class RhinoMutationExecutor
                     throw new InvalidOperationException(bindingFailure.Diagnostics.First().Message);
             }
             var afterState = stateBefore with { Sheets = sheets };
-            _stateStore.SetCurrentSchema(document, afterState);
+            _stateStore.Set(document, afterState);
             if (linkedNames is not null)
                 ApplyLinkedPageNames(document, linkedNames.NewNames, afterState);
             if (!document.AddCustomUndoEvent(

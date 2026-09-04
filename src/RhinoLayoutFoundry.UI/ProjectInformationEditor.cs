@@ -21,12 +21,10 @@ internal sealed class ProjectInformationEditor : Panel
     private readonly FoundryCheckBox _reserveRevisionArea = new("Reserve blank revision area");
     private readonly Label _logoLabel = FoundryTheme.MutedLabel();
     private readonly ImageView _logoPreview = new() { Size = new Size(112, 54) };
-    private readonly SheetRevisionRecord? _legacyRevision;
     private BrandAsset? _logo;
 
     internal ProjectInformationEditor(ProjectInformation value)
     {
-        _legacyRevision = value.DefaultRevision;
         MinimumSize = new Size(620, 0);
         Content = new StackLayout
         {
@@ -125,11 +123,14 @@ internal sealed class ProjectInformationEditor : Panel
                     row.Label.Text.Trim(), row.Include.Checked == true)).ToArray(),
                 _reserveRevisionArea.Checked == true).Normalize(custom);
             return new ProjectInformation(
-                Text("projectName"), Text("projectNumber"), Text("clientName"), _siteAddress.Text.Trim(),
-                Text("projectPhase"), Text("projectStatus"), Text("firmName"), _firmAddress.Text.Trim(),
-                Text("firmPhone"), Text("firmEmail"), Text("firmWebsite"), Text("firmRegistration"),
-                Text("issueDate"), Text("issuePurpose"), Text("drawnBy"), Text("checkedBy"), Text("approvedBy"),
-                custom, _logo, _legacyRevision, options);
+                ProjectName: Text("projectName"), ProjectNumber: Text("projectNumber"), ClientName: Text("clientName"), SiteAddress: _siteAddress.Text.Trim(),
+                ProjectPhase: Text("projectPhase"), ProjectStatus: Text("projectStatus"), FirmName: Text("firmName"), FirmAddress: _firmAddress.Text.Trim(),
+                FirmPhone: Text("firmPhone"), FirmEmail: Text("firmEmail"), FirmWebsite: Text("firmWebsite"), FirmRegistration: Text("firmRegistration"),
+                IssueDate: Text("issueDate"), IssuePurpose: Text("issuePurpose"), DrawnBy: Text("drawnBy"), CheckedBy: Text("checkedBy"), ApprovedBy: Text("approvedBy"),
+                CustomFields: custom, Logo: _logo)
+            {
+                ContentOptions = options
+            };
         }
     }
 

@@ -10,71 +10,9 @@ namespace RhinoLayoutFoundry.UI;
 
 internal sealed partial class FoundryApplicationService
 {
-    public async Task<OperationResult> CaptureSheetTemplateAsync(
-        Guid sourcePageViewId,
-        string name,
-        string defaultNamingPattern,
-        Guid? titleBlockInstanceObjectId,
-        CancellationToken cancellationToken = default)
-    {
-        return await RunOperationAsync(async snapshot =>
-        {
-            var plan = new CaptureSheetTemplatePlanner().Plan(new CaptureSheetTemplateRequest(
-                snapshot.DocumentRuntimeSerialNumber,
-                snapshot.Revision,
-                Guid.NewGuid(),
-                sourcePageViewId,
-                name,
-                defaultNamingPattern,
-                titleBlockInstanceObjectId), snapshot);
-            var result = plan.CanApply
-                ? await Mutations.ApplyAsync(plan, cancellationToken)
-                : new OperationResult(false, plan.Diagnostics);
-            if (result.Succeeded)
-                NotifyOverviewChanged(new OverviewInvalidation(snapshot.DocumentRuntimeSerialNumber,
-                    OverviewInvalidationKind.Metadata | OverviewInvalidationKind.Diagnostics));
-            return result;
-        }, cancellationToken);
-    }
-
-    public async Task<OperationResult> SetSheetTemplateRegistrationAsync(
+    public async Task<OperationResult> SetLayoutTemplateRegistrationAsync(
         IReadOnlyList<OverviewNodeKey> targets,
         bool registered,
-        CancellationToken cancellationToken = default)
-    {
-        if (_snapshotProvider is null)
-            return UnavailableResult("Foundry is not connected to an active Rhino plug-in.");
-
-        try
-        {
-            var snapshot = _snapshotProvider.Capture();
-            var sheetIds = BatchTargetResolver.ResolveSheetIds(snapshot, targets);
-            if (sheetIds.Count == 0)
-                return UnavailableResult("The selected rows do not contain any layouts.");
-
-            var diagnostics = new List<Diagnostic>();
-            foreach (var sheetId in sheetIds)
-            {
-                var result = await SetSheetTemplateRegistrationAsync(
-                    sheetId,
-                    registered,
-                    cancellationToken);
-                diagnostics.AddRange(result.Diagnostics);
-                if (!result.Succeeded)
-                    return new OperationResult(false, diagnostics);
-            }
-
-            return new OperationResult(true, diagnostics);
-        }
-        catch (InvalidOperationException exception)
-        {
-            return UnavailableResult(exception.Message);
-        }
-    }
-
-    public async Task<OperationResult> SetTemplateCapabilitiesAsync(
-        IReadOnlyList<OverviewNodeKey> targets,
-        TemplateCapability capabilities,
         CancellationToken cancellationToken = default)
     {
         if (_snapshotProvider is null || _mutationService is null)
@@ -86,12 +24,12 @@ internal sealed partial class FoundryApplicationService
             {
                 var snapshot = _snapshotProvider.Capture();
                 var scope = ToHierarchyScope(target);
-                var plan = new SetTemplateCapabilitiesPlanner().Plan(
-                    new SetTemplateCapabilitiesRequest(
+                var plan = new SetLayoutTemplateRegistrationPlanner().Plan(
+                    new SetLayoutTemplateRegistrationRequest(
                         snapshot.DocumentRuntimeSerialNumber,
                         snapshot.Revision,
                         scope,
-                        capabilities),
+registered),
                     snapshot);
                 var result = plan.CanApply
                     ? await Mutations.ApplyAsync(plan, cancellationToken)
@@ -348,72 +286,6 @@ internal sealed partial class FoundryApplicationService
         }
     }
 
-    public async Task<OperationResult> LinkTemplateCapabilityAsync(
-        IReadOnlyList<OverviewNodeKey> targets,
-        Guid sourceRegistrationId,
-        TemplateCapability capability,
-        CancellationToken cancellationToken = default)
-    {
-        if (_snapshotProvider is null || _mutationService is null)
-            return UnavailableResult("Foundry is not connected to an active Rhino plug-in.");
-        var diagnostics = new List<Diagnostic>();
-        foreach (var target in targets.Distinct())
-        {
-            var snapshot = _snapshotProvider.Capture();
-            var registration = snapshot.TemplateRegistrations
-                .LastOrDefault(item => item.Id == sourceRegistrationId);
-            if (registration is null)
-                return UnavailableResult("The selected template source is no longer available.");
-            var plan = new LinkTemplateCapabilityPlanner().Plan(
-                new LinkTemplateCapabilityRequest(
-                    snapshot.DocumentRuntimeSerialNumber,
-                    snapshot.Revision,
-                    ToHierarchyScope(target),
-                    sourceRegistrationId,
-                    capability),
-                snapshot);
-            var result = plan.CanApply
-                ? await Mutations.ApplyAsync(plan, cancellationToken)
-                : new OperationResult(false, plan.Diagnostics);
-            diagnostics.AddRange(result.Diagnostics);
-            if (!result.Succeeded) return new OperationResult(false, diagnostics);
-        }
-        NotifyOverviewChanged(OverviewInvalidation.All);
-        return new OperationResult(true, diagnostics);
-    }
-
-    public async Task<OperationResult> DetachTemplateCapabilityAsync(
-        IReadOnlyList<OverviewNodeKey> targets,
-        TemplateCapability capability,
-        CancellationToken cancellationToken = default)
-    {
-        if (_snapshotProvider is null || _mutationService is null)
-            return UnavailableResult("Foundry is not connected to an active Rhino plug-in.");
-        var diagnostics = new List<Diagnostic>();
-        foreach (var target in targets.Distinct())
-        {
-            var snapshot = _snapshotProvider.Capture();
-            var scope = ToHierarchyScope(target);
-            if (!snapshot.TemplateLinks.Any(link =>
-                    link.Target == scope && link.Capability == capability))
-                continue;
-            var plan = new DetachTemplateCapabilityPlanner().Plan(
-                new DetachTemplateCapabilityRequest(
-                    snapshot.DocumentRuntimeSerialNumber,
-                    snapshot.Revision,
-                    scope,
-                    capability),
-                snapshot);
-            var result = plan.CanApply
-                ? await Mutations.ApplyAsync(plan, cancellationToken)
-                : new OperationResult(false, plan.Diagnostics);
-            diagnostics.AddRange(result.Diagnostics);
-            if (!result.Succeeded) return new OperationResult(false, diagnostics);
-        }
-        NotifyOverviewChanged(OverviewInvalidation.All);
-        return new OperationResult(true, diagnostics);
-    }
-
     internal HierarchyScope ToHierarchyScope(OverviewNodeKey key) => new(
         key.Kind switch
         {
@@ -423,59 +295,6 @@ internal sealed partial class FoundryApplicationService
             _ => throw new ArgumentOutOfRangeException(nameof(key)),
         },
         key.Id);
-
-    public async Task<OperationResult> SetSheetTemplateRegistrationAsync(
-        Guid sourcePageViewId,
-        bool registered,
-        CancellationToken cancellationToken = default)
-    {
-        return await RunOperationAsync(async snapshot =>
-        {
-            var existing = snapshot.Templates
-                .Where(template => template.SourcePageViewId == sourcePageViewId)
-                .ToArray();
-            if (registered == (existing.Length > 0))
-                return new OperationResult(true, []);
-
-            OperationPlan plan;
-            if (registered)
-            {
-                if (!snapshot.Sheets.TryGetValue(sourcePageViewId, out var sheet))
-                    return UnavailableResult("The layout is no longer available.");
-
-                var usedNames = snapshot.Templates.Select(template => template.Name)
-                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
-                var name = UniqueTemplateName(sheet.Name, usedNames);
-                plan = new CaptureSheetTemplatePlanner().Plan(new CaptureSheetTemplateRequest(
-                    snapshot.DocumentRuntimeSerialNumber,
-                    snapshot.Revision,
-                    Guid.NewGuid(),
-                    sourcePageViewId,
-                    name,
-                    "{folder}-{index:00}",
-                    sheet.TitleBlockInstanceObjectId), snapshot);
-            }
-            else
-            {
-                plan = new OperationPlan(
-                    snapshot.DocumentRuntimeSerialNumber,
-                    snapshot.Revision,
-                    "Unregister layout template",
-                    existing.Select(template => (OperationChange)new DeleteSheetTemplateChange(
-                        template.Id,
-                        template.Name)).ToArray(),
-                    []);
-            }
-
-            var result = plan.CanApply
-                ? await Mutations.ApplyAsync(plan, cancellationToken)
-                : new OperationResult(false, plan.Diagnostics);
-            if (result.Succeeded)
-                NotifyOverviewChanged(new OverviewInvalidation(snapshot.DocumentRuntimeSerialNumber,
-                    OverviewInvalidationKind.Metadata | OverviewInvalidationKind.Diagnostics));
-            return result;
-        }, cancellationToken);
-    }
 
     private string UniqueTemplateName(string sheetName, IReadOnlySet<string> usedNames)
     {

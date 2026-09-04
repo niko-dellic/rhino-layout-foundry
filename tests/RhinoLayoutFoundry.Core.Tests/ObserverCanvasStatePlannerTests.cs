@@ -50,7 +50,7 @@ public sealed class ObserverCanvasStatePlannerTests
         var snapshot = Snapshot();
         var state = snapshot.Canvas with
         {
-            AppearanceStatePlacements = new Dictionary<Guid, ObserverPointRecord>
+            StatePlacements = new Dictionary<Guid, ObserverPointRecord>
             {
                 [Guid.NewGuid()] = new(0, double.PositiveInfinity),
             },
@@ -68,16 +68,18 @@ public sealed class ObserverCanvasStatePlannerTests
         var root = Guid.NewGuid();
         var sheetId = Guid.NewGuid();
         return new DocumentSnapshot(
-            10,
-            5,
-            root,
-            new Dictionary<Guid, FolderRecord> { [root] = new(root, null, "Root", 0) },
-            new Dictionary<Guid, SheetSnapshot>
-            {
-                [sheetId] = new(sheetId, root, 0, "Page", [], new Dictionary<string, string>()),
-            },
-            new HashSet<Guid>(),
-            new HashSet<Guid>(),
-            ObserverCanvas: ObserverCanvasState.Empty);
+            DocumentRuntimeSerialNumber: 10,
+            Revision: 5,
+            RootFolderId: root,
+            Folders: new Dictionary<Guid, FolderRecord> { [root] = new(root, null, "Root", 0) },
+            Sheets: new Dictionary<Guid, SheetSnapshot>
+{
+    [sheetId] = new(sheetId, root, 0, "Page", [], new Dictionary<string, string>()),
+},
+            ExistingObjectIds: new HashSet<Guid>(),
+            DisplayModeIds: new HashSet<Guid>())
+        {
+            Canvas = ObserverCanvasState.Empty
+        };
     }
 }

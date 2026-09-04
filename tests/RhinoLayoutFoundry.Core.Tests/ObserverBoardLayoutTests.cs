@@ -36,8 +36,8 @@ public sealed class ObserverBoardLayoutTests
         Assert.Equal(first.Sheets.Keys.Order(), second.Sheets.Keys.Order());
         var cards = first.Sheets.Values.ToArray();
         for (var left = 0; left < cards.Length; left++)
-        for (var right = left + 1; right < cards.Length; right++)
-            Assert.False(cards[left].Bounds.Intersects(cards[right].Bounds));
+            for (var right = left + 1; right < cards.Length; right++)
+                Assert.False(cards[left].Bounds.Intersects(cards[right].Bounds));
         Assert.True(cards[1].Bounds.Width > cards[0].Bounds.Width);
     }
 
@@ -96,7 +96,7 @@ public sealed class ObserverBoardLayoutTests
         var folderId = snapshot.Folders.Single(folder => folder.Name == "Plans").Id;
         var state = new AppearanceStateRecord(
             Guid.NewGuid(), folderId, 0, "Presentation", [], []);
-        snapshot = snapshot with { AppearanceStateResources = [state] };
+        snapshot = snapshot with { AppearanceStates = [state] };
 
         var layout = new ObserverPlacementPlanner().Arrange(snapshot);
         var card = Assert.Single(layout.AppearanceStates).Value;
@@ -116,7 +116,7 @@ public sealed class ObserverBoardLayoutTests
         var folderId = snapshot.Folders.Single(folder => folder.Name == "Plans").Id;
         var firstState = new AppearanceStateRecord(Guid.NewGuid(), folderId, 0, "Presentation", [], []);
         var secondState = new AppearanceStateRecord(Guid.NewGuid(), folderId, 1, "Diagram", [], []);
-        snapshot = snapshot with { AppearanceStateResources = [firstState, secondState] };
+        snapshot = snapshot with { AppearanceStates = [firstState, secondState] };
         var planner = new ObserverPlacementPlanner();
         var before = planner.Arrange(snapshot);
 
@@ -145,7 +145,7 @@ public sealed class ObserverBoardLayoutTests
         var folderId = snapshot.Folders.Single(folder => folder.Name == "Details").Id;
         var appearanceState = new AppearanceStateRecord(
             Guid.NewGuid(), folderId, 0, "Presentation", [], []);
-        snapshot = snapshot with { AppearanceStateResources = [appearanceState] };
+        snapshot = snapshot with { AppearanceStates = [appearanceState] };
         var planner = new ObserverPlacementPlanner();
         var before = planner.Arrange(snapshot);
 
@@ -165,7 +165,7 @@ public sealed class ObserverBoardLayoutTests
         var folderId = snapshot.Folders.Single(folder => folder.Name == "Plans").Id;
         var appearanceState = new AppearanceStateRecord(
             Guid.NewGuid(), folderId, 0, "Presentation", [], []);
-        snapshot = snapshot with { AppearanceStateResources = [appearanceState] };
+        snapshot = snapshot with { AppearanceStates = [appearanceState] };
         var planner = new ObserverPlacementPlanner();
 
         var cards = planner.Arrange(
@@ -279,8 +279,8 @@ public sealed class ObserverBoardLayoutTests
         Assert.True(layout.Bounds.Right < 9000);
         var cards = layout.Sheets.Values.ToArray();
         for (var left = 0; left < cards.Length; left++)
-        for (var right = left + 1; right < cards.Length; right++)
-            Assert.False(cards[left].Bounds.Intersects(cards[right].Bounds));
+            for (var right = left + 1; right < cards.Length; right++)
+                Assert.False(cards[left].Bounds.Intersects(cards[right].Bounds));
     }
 
     [Fact]
@@ -291,7 +291,7 @@ public sealed class ObserverBoardLayoutTests
         var nestedSheet = snapshot.Sheets.Single(sheet => sheet.FolderId == nestedFolder.Id);
         var appearanceState = new AppearanceStateRecord(
             Guid.NewGuid(), nestedFolder.Id, 0, "Presentation", [], []);
-        snapshot = snapshot with { AppearanceStateResources = [appearanceState] };
+        snapshot = snapshot with { AppearanceStates = [appearanceState] };
         var state = snapshot.CanvasState with
         {
             FolderOrigins = new Dictionary<Guid, ObserverPointRecord>
@@ -302,7 +302,7 @@ public sealed class ObserverBoardLayoutTests
             {
                 [nestedSheet.PageViewId] = new(30, 40),
             },
-            AppearanceStatePlacements = new Dictionary<Guid, ObserverPointRecord>
+            StatePlacements = new Dictionary<Guid, ObserverPointRecord>
             {
                 [appearanceState.Id] = new(50, 60),
             },
@@ -328,7 +328,7 @@ public sealed class ObserverBoardLayoutTests
             CanvasState = new ObserverCanvasState(
                 1,
                 new Dictionary<Guid, ObserverPointRecord> { [missingFolder] = new(500, 500) },
-                new Dictionary<Guid, ObserverPointRecord> { [missingSheet] = new(600, 600) }),
+                new Dictionary<Guid, ObserverPointRecord> { [missingSheet] = new(600, 600) }, new Dictionary<Guid, ObserverPointRecord>()),
         };
 
         var layout = new ObserverPlacementPlanner().Arrange(snapshot);
@@ -343,20 +343,20 @@ public sealed class ObserverBoardLayoutTests
         var root = Guid.NewGuid();
         var folder = Guid.NewGuid();
         return new ObserverSnapshot(
-            42,
-            8,
-            "Museum",
-            root,
-            [
+            DocumentRuntimeSerialNumber: 42,
+            Revision: 8,
+            DocumentName: "Museum",
+            RootFolderId: root,
+            Folders: [
                 new ObserverFolderSnapshot(root, null, "Museum", 0),
                 new ObserverFolderSnapshot(folder, root, "Plans", 0),
             ],
-            [
+                    Sheets: [
                 Sheet(folder, "A3", 0, 420, 297),
                 Sheet(folder, "A2", 1, 594, 420),
                 Sheet(root, "Cover", 0, 210, 297),
             ],
-            ObserverCanvasState.Empty);
+                    CanvasState: ObserverCanvasState.Empty);
     }
 
     private static ObserverSnapshot NestedSnapshot()
@@ -365,21 +365,21 @@ public sealed class ObserverBoardLayoutTests
         var parent = Guid.NewGuid();
         var nested = Guid.NewGuid();
         return new ObserverSnapshot(
-            43,
-            9,
-            "Nested",
-            root,
-            [
+            DocumentRuntimeSerialNumber: 43,
+            Revision: 9,
+            DocumentName: "Nested",
+            RootFolderId: root,
+            Folders: [
                 new ObserverFolderSnapshot(root, null, "Nested", 0),
                 new ObserverFolderSnapshot(parent, root, "Plans", 0),
                 new ObserverFolderSnapshot(nested, parent, "Details", 0),
             ],
-            [
+                    Sheets: [
                 Sheet(root, "Cover", 0, 210, 297),
                 Sheet(parent, "Plans", 0, 420, 297),
                 Sheet(nested, "Detail", 0, 297, 210),
             ],
-            ObserverCanvasState.Empty);
+                    CanvasState: ObserverCanvasState.Empty);
     }
 
     private static ObserverSheetSnapshot Sheet(

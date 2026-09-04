@@ -295,12 +295,11 @@ internal sealed partial class RhinoMutationExecutor
 
         sheets[moveSheet.PageViewId] = current is null
             ? new SheetRecord(
-                moveSheet.PageViewId,
-                moveSheet.DestinationFolderId,
-                moveSheet.Order,
-                [],
-                new Dictionary<string, string>(StringComparer.Ordinal),
-                null)
+                PageViewId: moveSheet.PageViewId,
+                FolderId: moveSheet.DestinationFolderId,
+                Order: moveSheet.Order,
+                Metadata: new Dictionary<string, string>(StringComparer.Ordinal),
+                TitleBlock: null)
             : current with
             {
                 FolderId = moveSheet.DestinationFolderId,
@@ -384,12 +383,11 @@ internal sealed partial class RhinoMutationExecutor
 
             var sheets = beforeState.Sheets.ToDictionary(pair => pair.Key, pair => pair.Value);
             sheets[page.MainViewport.Id] = new SheetRecord(
-                page.MainViewport.Id,
-                create.DestinationFolderId,
-                create.Order,
-                [],
-                new Dictionary<string, string>(StringComparer.Ordinal),
-                null);
+                PageViewId: page.MainViewport.Id,
+                FolderId: create.DestinationFolderId,
+                Order: create.Order,
+                Metadata: new Dictionary<string, string>(StringComparer.Ordinal),
+                TitleBlock: null);
             var afterState = beforeState with { Sheets = sheets };
             _stateStore.Set(document, afterState);
             document.Modified = true;
@@ -471,7 +469,6 @@ internal sealed partial class RhinoMutationExecutor
 
         var rules = before.AppearanceRules.Where(item => !Deleted(item.Scope)).ToArray();
         var registrations = before.TemplateRegistrations.Where(item => !Deleted(item.Source)).ToArray();
-        var registrationIds = registrations.Select(item => item.Id).ToHashSet();
         var appearanceStates = before.AppearanceStates
             .Where(item => !deletedFolderIds.Contains(item.FolderId)).ToArray();
         var appearanceStateIds = appearanceStates.Select(item => item.Id).ToHashSet();
@@ -480,18 +477,14 @@ internal sealed partial class RhinoMutationExecutor
             .ToDictionary(pair => pair.Key, pair => pair.Value);
         return after with
         {
-            SheetTemplates = before.Templates.Where(template =>
-                template.SourcePageViewId is not { } source || !deletedSheetIds.Contains(source)).ToArray(),
-            ViewportRuleSets = rules,
-            CapabilityTemplates = registrations,
-            CapabilityLinks = before.TemplateLinks.Where(link =>
-                !Deleted(link.Target) && registrationIds.Contains(link.SourceRegistrationId)).ToArray(),
-            AppearanceStateResources = appearanceStates,
-            AppearanceStateAssignments = before.StateAssignments.Where(assignment =>
+            AppearanceRules = rules,
+            TemplateRegistrations = registrations,
+            AppearanceStates = appearanceStates,
+            StateAssignments = before.StateAssignments.Where(assignment =>
                 !Deleted(assignment.Target) && appearanceStateIds.Contains(assignment.StateId)).ToArray(),
-            ObserverCanvas = after.Canvas with
+            Canvas = after.Canvas with
             {
-                AppearanceStatePlacements = statePlacements,
+                StatePlacements = statePlacements,
             },
         };
     }
@@ -572,9 +565,9 @@ internal sealed partial class RhinoMutationExecutor
         {
             afterState = afterState with
             {
-                AppearanceStateResources = afterState.AppearanceStates
+                AppearanceStates = afterState.AppearanceStates
                     .Where(state => !standaloneStateIds.Contains(state.Id)).ToArray(),
-                AppearanceStateAssignments = afterState.StateAssignments
+                StateAssignments = afterState.StateAssignments
                     .Where(assignment => !standaloneStateIds.Contains(assignment.StateId)).ToArray(),
             };
         }
@@ -586,7 +579,6 @@ internal sealed partial class RhinoMutationExecutor
                 document,
                 plan,
                 new SetHierarchyViewportRulesChange(rootScope, rootRules, rootRules),
-                afterState.TemplateLinks,
                 afterState.TemplateRegistrations,
                 afterState.AppearanceStates,
                 afterState.StateAssignments,
@@ -606,7 +598,6 @@ internal sealed partial class RhinoMutationExecutor
             document,
             plan,
             new SetHierarchyViewportRulesChange(remainingRootScope, remainingRootRules, remainingRootRules),
-            afterState.TemplateLinks,
             afterState.TemplateRegistrations,
             afterState.AppearanceStates,
             afterState.StateAssignments,
@@ -797,7 +788,7 @@ internal sealed partial class RhinoMutationExecutor
             {
                 afterState = afterState with
                 {
-                    ObserverCanvas = PlacePastedHierarchy(
+                    Canvas = PlacePastedHierarchy(
                         document,
                         afterState,
                         folderChanges,
@@ -841,7 +832,7 @@ internal sealed partial class RhinoMutationExecutor
                 placements[pair.Value] = sheetPlacement;
 
         var canvas = state.Canvas with { FolderOrigins = origins, SheetPlacements = placements };
-        var tentative = state with { ObserverCanvas = canvas };
+        var tentative = state with { Canvas = canvas };
         var snapshot = RhinoDocumentObserverSnapshotProvider.Capture(
             document,
             tentative,
@@ -873,12 +864,11 @@ internal sealed partial class RhinoMutationExecutor
         {
             if (!sheets.ContainsKey(entry.page.MainViewport.Id))
                 sheets[entry.page.MainViewport.Id] = new SheetRecord(
-                    entry.page.MainViewport.Id,
-                    state.RootFolderId,
-                    entry.index,
-                    [],
-                    new Dictionary<string, string>(StringComparer.Ordinal),
-                    null);
+                    PageViewId: entry.page.MainViewport.Id,
+                    FolderId: state.RootFolderId,
+                    Order: entry.index,
+                    Metadata: new Dictionary<string, string>(StringComparer.Ordinal),
+                    TitleBlock: null);
         }
         return state with { Sheets = sheets };
     }
@@ -919,7 +909,7 @@ internal sealed partial class RhinoMutationExecutor
                 ? null
                 : sourceSheet.TitleBlock with { InstanceObjectId = duplicateTitleBlock.Id },
             NamingBinding = null,
-            DetailNamedViewAssignments = null,
+            DetailNamedViews = new Dictionary<Guid, string>(),
         };
     }
 

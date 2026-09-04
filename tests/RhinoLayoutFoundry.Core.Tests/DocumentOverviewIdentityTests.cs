@@ -9,11 +9,11 @@ public sealed class DocumentOverviewIdentityTests
     {
         var rootId = Guid.NewGuid();
         var overview = new DocumentOverview(
-            42,
-            "Untitled Rhino document",
-            rootId,
-            [new FolderOverview(rootId, null, "Root", 0)],
-            []);
+            DocumentRuntimeSerialNumber: 42,
+            DocumentName: "Untitled Rhino document",
+            RootFolderId: rootId,
+            Folders: [new FolderOverview(Id: rootId, ParentId: null, Name: "Root", Order: 0)],
+            Sheets: []);
 
         var renamed = new DocumentOverviewIdentity(42, 0, "smoke-test");
 
@@ -25,11 +25,11 @@ public sealed class DocumentOverviewIdentityTests
     {
         var rootId = Guid.NewGuid();
         var overview = new DocumentOverview(
-            42,
-            "smoke-test",
-            rootId,
-            [new FolderOverview(rootId, null, "Root", 0)],
-            []);
+            DocumentRuntimeSerialNumber: 42,
+            DocumentName: "smoke-test",
+            RootFolderId: rootId,
+            Folders: [new FolderOverview(Id: rootId, ParentId: null, Name: "Root", Order: 0)],
+            Sheets: []);
 
         var identity = new DocumentOverviewIdentity(42, 0, "smoke-test");
 

@@ -373,7 +373,7 @@ public sealed class ObserverPlacementPlanner
                 card.Bounds.Y + worldDelta.Y - folderDelta.Y);
         }
 
-        return snapshot.CanvasState with { AppearanceStatePlacements = placements };
+        return snapshot.CanvasState with { StatePlacements = placements };
     }
 
     public ObserverCanvasState MoveFolder(
@@ -438,7 +438,7 @@ public sealed class ObserverPlacementPlanner
             LayoutAlgorithmVersion = ObserverCanvasState.CurrentLayoutAlgorithmVersion,
             FolderOrigins = origins,
             SheetPlacements = placements,
-            AppearanceStatePlacements = statePlacements,
+            StatePlacements = statePlacements,
         };
     }
 

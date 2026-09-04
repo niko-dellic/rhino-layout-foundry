@@ -5,49 +5,8 @@ using System.Globalization;
 
 namespace RhinoLayoutFoundry.Core.Operations;
 
-public sealed record CaptureSheetTemplateRequest(
-    uint DocumentRuntimeSerialNumber,
-    long SourceRevision,
-    Guid TemplateId,
-    Guid SourcePageViewId,
-    string Name,
-    string DefaultNamingPattern,
-    Guid? TitleBlockInstanceObjectId);
-
-public sealed class CaptureSheetTemplatePlanner : IOperationPlanner<CaptureSheetTemplateRequest>
+internal static class SheetPlanValidation
 {
-    public OperationPlan Plan(CaptureSheetTemplateRequest request, DocumentSnapshot snapshot)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-        ArgumentNullException.ThrowIfNull(snapshot);
-        var diagnostics = ValidateContext(request.DocumentRuntimeSerialNumber, request.SourceRevision, snapshot);
-        var name = request.Name?.Trim() ?? string.Empty;
-        var pattern = request.DefaultNamingPattern?.Trim() ?? string.Empty;
-
-        if (!snapshot.Sheets.ContainsKey(request.SourcePageViewId))
-            diagnostics.Add(Error("template.source_missing", "The source layout no longer exists."));
-        if (request.TemplateId == Guid.Empty)
-            diagnostics.Add(Error("template.id_required", "The template identifier is invalid."));
-        if (name.Length == 0)
-            diagnostics.Add(Error("template.name_required", "Enter a template name."));
-        if (snapshot.Templates.Any(item => string.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase)))
-            diagnostics.Add(Error("template.duplicate_name", $"A template named '{name}' already exists."));
-        if (snapshot.Templates.Any(item => item.SourcePageViewId == request.SourcePageViewId))
-            diagnostics.Add(Error("template.source_registered", "The source layout is already registered as a template."));
-        if (pattern.Length == 0)
-            diagnostics.Add(Error("template.pattern_required", "Enter a default naming pattern."));
-
-        IReadOnlyList<OperationChange> changes = diagnostics.Any(item => item.Severity == DiagnosticSeverity.Error)
-            ? []
-            : [new CaptureSheetTemplateChange(
-                request.TemplateId,
-                request.SourcePageViewId,
-                name,
-                pattern,
-                request.TitleBlockInstanceObjectId)];
-        return new OperationPlan(snapshot.DocumentRuntimeSerialNumber, snapshot.Revision,
-            "Capture layout template", changes, diagnostics);
-    }
 
     internal static List<Diagnostic> ValidateContext(uint serial, long revision, DocumentSnapshot snapshot)
     {
@@ -62,8 +21,6 @@ public sealed class CaptureSheetTemplatePlanner : IOperationPlanner<CaptureSheet
     internal static Diagnostic Error(string code, string message) =>
         new(code, DiagnosticSeverity.Error, message);
 }
-
-public sealed record TemplateQuantity(Guid TemplateId, int Quantity);
 
 public enum BuiltInLayoutKind
 {
@@ -80,10 +37,7 @@ public sealed record LayoutCreationSpec(
     BuiltInLayoutKind BuiltInLayout = BuiltInLayoutKind.SingleDetail,
     Guid? TemplateId = null,
     Guid? DetailDisplayModeId = null,
-    bool UseTemplateTitleBlock = true,
-    Guid? TitleBlockSourceInstanceObjectId = null,
     BuiltInTitleBlockKind? BuiltInTitleBlock = null,
-    string? NamedView = null,
     bool UseDedicatedDetailLayer = true,
     IReadOnlyList<string?>? NamedViewsByDetail = null,
     IReadOnlyList<Guid?>? DetailDisplayModesByDetail = null,
@@ -95,13 +49,11 @@ public sealed record BatchCreateSheetsRequest(
     uint DocumentRuntimeSerialNumber,
     long SourceRevision,
     Guid DestinationFolderId,
-    IReadOnlyList<TemplateQuantity> TemplateQuantities,
+    IReadOnlyList<LayoutCreationSpec> CreationSpecs,
     string NamingPattern,
     int Start,
     int Step,
-    IReadOnlyDictionary<Guid, string>? NamedViewAssignments = null,
-    IReadOnlyList<LayoutCreationSpec>? CreationSpecs = null,
-    ProjectInformation? ProjectData = null,
+    ProjectInformation? ProjectInfo = null,
     IReadOnlyList<SheetRevisionRecord>? InitialRevisions = null,
     NamingIndexMode IndexMode = NamingIndexMode.FolderPosition);
 
@@ -111,35 +63,36 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(snapshot);
-        var diagnostics = CaptureSheetTemplatePlanner.ValidateContext(
+        var diagnostics = SheetPlanValidation.ValidateContext(
             request.DocumentRuntimeSerialNumber, request.SourceRevision, snapshot);
         if (!snapshot.Folders.TryGetValue(request.DestinationFolderId, out var destination))
-            diagnostics.Add(CaptureSheetTemplatePlanner.Error("batch.destination_missing", "The destination folder no longer exists."));
-        var hasCreationSpecs = request.CreationSpecs is { Count: > 0 };
-        if (!hasCreationSpecs &&
-            (request.TemplateQuantities.Count == 0 || request.TemplateQuantities.All(item => item.Quantity <= 0)))
-            diagnostics.Add(CaptureSheetTemplatePlanner.Error("batch.empty", "Choose at least one template and quantity."));
-        UpdateProjectInformationPlanner.Validate(request.ProjectData ?? snapshot.ProjectInfo, diagnostics);
+            diagnostics.Add(SheetPlanValidation.Error("batch.destination_missing", "The destination folder no longer exists."));
+        if (request.CreationSpecs is null || request.CreationSpecs.Count == 0)
+            diagnostics.Add(SheetPlanValidation.Error("batch.empty", "Provide at least one layout creation specification."));
+        UpdateProjectInformationPlanner.Validate(request.ProjectInfo ?? snapshot.ProjectInfo, diagnostics);
 
         var templates = snapshot.Templates.ToDictionary(item => item.Id);
         var expanded = new List<(Guid DraftId, SheetTemplateRecipe Template,
             IReadOnlyDictionary<Guid, string> NamedViewAssignments, bool UseDedicatedDetailLayer,
             Guid? DetailLayerId, Guid? AppearanceStateId,
             IReadOnlyDictionary<Guid, Guid> DetailAppearanceStateAssignments)>();
-        if (hasCreationSpecs)
         {
-            foreach (var spec in request.CreationSpecs!)
+            foreach (var spec in request.CreationSpecs ?? [])
             {
+                if (spec is null)
+                {
+                    diagnostics.Add(SheetPlanValidation.Error("batch.specification_missing", "A creation specification is missing."));
+                    continue;
+                }
                 if (spec.Quantity <= 0)
                 {
-                    diagnostics.Add(CaptureSheetTemplatePlanner.Error(
+                    diagnostics.Add(SheetPlanValidation.Error(
                         "batch.quantity_invalid", "Layout quantities must be greater than zero."));
                     continue;
                 }
 
                 var resolved = ResolveTemplate(
-                    spec, templates, snapshot, request.ProjectData ?? snapshot.ProjectInfo,
-                    request.NamedViewAssignments, diagnostics);
+                    spec, templates, snapshot, request.ProjectInfo ?? snapshot.ProjectInfo, diagnostics);
                 if (resolved is null)
                 {
                     continue;
@@ -148,7 +101,7 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
                 ValidateTemplate(resolved.Template, snapshot, resolved.NamedViewAssignments, diagnostics);
                 if (!spec.UseDedicatedDetailLayer && spec.DetailLayerId is { } detailLayerId &&
                     !snapshot.Layers.ContainsKey(detailLayerId))
-                    diagnostics.Add(CaptureSheetTemplatePlanner.Error(
+                    diagnostics.Add(SheetPlanValidation.Error(
                         "batch.detail_layer_missing", "The selected detail layer is no longer available."));
                 for (var index = 0; index < spec.Quantity; index++)
                     expanded.Add((Guid.NewGuid(), resolved.Template, resolved.NamedViewAssignments,
@@ -158,29 +111,11 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
                         resolved.DetailAppearanceStateAssignments));
             }
         }
-        else foreach (var item in request.TemplateQuantities)
-        {
-            if (item.Quantity < 0)
-            {
-                diagnostics.Add(CaptureSheetTemplatePlanner.Error("batch.quantity_invalid", "Template quantities cannot be negative."));
-                continue;
-            }
-            if (!templates.TryGetValue(item.TemplateId, out var template))
-            {
-                diagnostics.Add(CaptureSheetTemplatePlanner.Error("batch.template_missing", "A selected template no longer exists."));
-                continue;
-            }
-            ValidateTemplate(template, snapshot, request.NamedViewAssignments, diagnostics);
-            for (var index = 0; index < item.Quantity; index++)
-                expanded.Add((Guid.NewGuid(), template,
-                    request.NamedViewAssignments ?? new Dictionary<Guid, string>(), true, null, null,
-                    new Dictionary<Guid, Guid>()));
-        }
 
         var pattern = request.NamingPattern?.Trim() ?? string.Empty;
         if (pattern.Length == 0 && expanded.Select(item => item.Template.DefaultNamingPattern)
                 .Distinct(StringComparer.Ordinal).Take(2).Count() > 1)
-            diagnostics.Add(CaptureSheetTemplatePlanner.Error(
+            diagnostics.Add(SheetPlanValidation.Error(
                 "batch.pattern_required", "Mixed templates need one batch naming pattern."));
 
         var namingItems = expanded.Select(item => new NamingItem(
@@ -232,7 +167,7 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
                     expanded[index].NamedViewAssignments,
                     expanded[index].UseDedicatedDetailLayer,
                     namingIndex.ToString(CultureInfo.InvariantCulture),
-                    request.ProjectData ?? snapshot.ProjectInfo,
+                    request.ProjectInfo ?? snapshot.ProjectInfo,
                     request.InitialRevisions,
                     expanded[index].DetailLayerId,
                     expanded[index].AppearanceStateId,
@@ -252,13 +187,18 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
         IReadOnlyDictionary<Guid, SheetTemplateRecipe> templates,
         DocumentSnapshot snapshot,
         ProjectInformation projectInformation,
-        IReadOnlyDictionary<Guid, string>? legacyNamedViewAssignments,
         ICollection<Diagnostic> diagnostics)
     {
-        if (spec.Paper.Width <= 0 || spec.Paper.Height <= 0 || string.IsNullOrWhiteSpace(spec.Paper.UnitSystem))
+        if (spec.Paper is null || !double.IsFinite(spec.Paper.Width) || !double.IsFinite(spec.Paper.Height) || spec.Paper.Width <= 0 || spec.Paper.Height <= 0 || string.IsNullOrWhiteSpace(spec.Paper.UnitSystem))
         {
-            diagnostics.Add(CaptureSheetTemplatePlanner.Error(
+            diagnostics.Add(SheetPlanValidation.Error(
                 "template.paper_invalid", "Choose a valid paper width, height, and unit."));
+            return null;
+        }
+
+        if (!Enum.IsDefined(spec.BuiltInLayout) || spec.BuiltInTitleBlock is { } kind && !Enum.IsDefined(kind))
+        {
+            diagnostics.Add(SheetPlanValidation.Error("batch.kind_invalid", "Choose a valid layout and title-block kind."));
             return null;
         }
 
@@ -267,7 +207,7 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
         {
             if (!templates.TryGetValue(templateId, out source!))
             {
-                diagnostics.Add(CaptureSheetTemplatePlanner.Error(
+                diagnostics.Add(SheetPlanValidation.Error(
                     "batch.template_missing", "The selected layout template no longer exists."));
                 return null;
             }
@@ -279,7 +219,7 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
 
         if (spec.DetailDisplayModeId is { } modeId && !snapshot.DisplayModeIds.Contains(modeId))
         {
-            diagnostics.Add(CaptureSheetTemplatePlanner.Error(
+            diagnostics.Add(SheetPlanValidation.Error(
                 "template.display_mode_unresolved", "The selected detail display mode is unavailable."));
         }
 
@@ -287,7 +227,7 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
                                       spec.DetailDisplayModesByDetail.Count == source.DetailSlots.Count;
         if (spec.DetailDisplayModesByDetail is not null && !hasDisplayModeOverrides)
         {
-            diagnostics.Add(CaptureSheetTemplatePlanner.Error(
+            diagnostics.Add(SheetPlanValidation.Error(
                 "template.display_mode_assignment_count",
                 $"Layout '{source.Name}' has {source.DetailSlots.Count} details but received " +
                 $"{spec.DetailDisplayModesByDetail.Count} detail display-mode assignments."));
@@ -297,35 +237,13 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
             foreach (var overrideId in spec.DetailDisplayModesByDetail.OfType<Guid>())
             {
                 if (snapshot.DisplayModeIds.Contains(overrideId)) continue;
-                diagnostics.Add(CaptureSheetTemplatePlanner.Error(
+                diagnostics.Add(SheetPlanValidation.Error(
                     "template.display_mode_unresolved",
                     "A selected detail display-mode override is unavailable."));
             }
         }
 
-        TitleBlockTemplateRecipe? titleBlock = source.TitleBlock;
-        if (!spec.UseTemplateTitleBlock)
-        {
-            titleBlock = null;
-            if (spec.TitleBlockSourceInstanceObjectId is { } instanceId)
-            {
-                if (!snapshot.TitleBlockInstances.TryGetValue(instanceId, out var instance) ||
-                    instance.Transform is not { Count: 16 })
-                {
-                    diagnostics.Add(CaptureSheetTemplatePlanner.Error(
-                        "template.title_block_unresolved", "The selected title-block instance is unavailable."));
-                }
-                else
-                {
-                    titleBlock = new TitleBlockTemplateRecipe(
-                        instance.InstanceDefinitionId,
-                        instance.InstanceDefinitionName,
-                        instance.Transform,
-                        instance.AnchorName,
-                        new Dictionary<string, string>(StringComparer.Ordinal));
-                }
-            }
-        }
+        TitleBlockTemplateRecipe? titleBlock = null;
 
         AdaptiveTitleBlockLayout? adaptiveTitleBlock = null;
         if (spec.BuiltInTitleBlock is { } builtInKind)
@@ -335,16 +253,11 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
                 adaptiveTitleBlock = AdaptiveTitleBlockLayoutSolver.Solve(
                     builtInKind, spec.Paper, projectInformation, source.DetailSlots.Count);
                 titleBlock = new TitleBlockTemplateRecipe(
-                    Guid.Empty,
-                    $"Foundry — {AdaptiveTitleBlockLayoutSolver.Label(builtInKind)}",
-                    IdentityTransform,
-                    AdaptiveTitleBlockLayoutSolver.Label(builtInKind),
-                    StandardTitleBlockMappings,
                     builtInKind);
             }
             catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
             {
-                diagnostics.Add(CaptureSheetTemplatePlanner.Error(
+                diagnostics.Add(SheetPlanValidation.Error(
                     "title_block.paper_too_small", exception.Message));
             }
         }
@@ -368,7 +281,7 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
         {
             if (spec.AppearanceStatesByDetail.Count != details.Length)
             {
-                diagnostics.Add(CaptureSheetTemplatePlanner.Error(
+                diagnostics.Add(SheetPlanValidation.Error(
                     "template.appearance_state_assignment_count",
                     $"Layout '{source.Name}' has {details.Length} details but received " +
                     $"{spec.AppearanceStatesByDetail.Count} detail appearance-state assignments."));
@@ -389,7 +302,7 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
         {
             if (spec.NamedViewsByDetail.Count != details.Length)
             {
-                diagnostics.Add(CaptureSheetTemplatePlanner.Error(
+                diagnostics.Add(SheetPlanValidation.Error(
                     "template.named_view_assignment_count",
                     $"Layout '{source.Name}' has {details.Length} details but received " +
                     $"{spec.NamedViewsByDetail.Count} named-view assignments."));
@@ -402,21 +315,6 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
                     if (!string.IsNullOrWhiteSpace(namedView))
                         namedViewAssignments[details[index].Id] = namedView;
                 }
-            }
-        }
-        else if (!string.IsNullOrWhiteSpace(spec.NamedView))
-        {
-            var namedView = spec.NamedView.Trim();
-            foreach (var detail in details)
-                namedViewAssignments[detail.Id] = namedView;
-        }
-        else if (legacyNamedViewAssignments is not null)
-        {
-            foreach (var detail in details)
-            {
-                var namedView = legacyNamedViewAssignments.GetValueOrDefault(detail.Id)?.Trim();
-                if (!string.IsNullOrWhiteSpace(namedView))
-                    namedViewAssignments[detail.Id] = namedView;
             }
         }
 
@@ -466,7 +364,7 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
         var state = snapshot.AppearanceStates.LastOrDefault(item => item.Id == id);
         if (state is null)
         {
-            diagnostics.Add(CaptureSheetTemplatePlanner.Error(
+            diagnostics.Add(SheetPlanValidation.Error(
                 "appearance_state.source_missing",
                 "The selected appearance state is unavailable."));
         }
@@ -523,15 +421,13 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
             _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
         };
         return new SheetTemplateRecipe(
-            Guid.NewGuid(),
-            SheetTemplateRecipe.CurrentRecipeVersion,
-            BuiltInLabel(kind),
-            paper,
-            details,
-            null,
-            [],
-            new Dictionary<string, string>(StringComparer.Ordinal),
-            "Page {index}");
+            Id: Guid.NewGuid(),
+            Name: BuiltInLabel(kind),
+            Paper: paper,
+            DetailSlots: details,
+            TitleBlock: null,
+            DefaultMetadata: new Dictionary<string, string>(StringComparer.Ordinal),
+            DefaultNamingPattern: "Page {index}");
     }
 
     private static string BuiltInLabel(BuiltInLayoutKind kind) => kind switch
@@ -550,56 +446,23 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
         IReadOnlyDictionary<Guid, string>? assignments,
         ICollection<Diagnostic> diagnostics)
     {
-        if (template.RecipeVersion != SheetTemplateRecipe.CurrentRecipeVersion)
-            diagnostics.Add(CaptureSheetTemplatePlanner.Error("template.version_unsupported", $"Template '{template.Name}' uses an unsupported recipe version."));
         if (template.Paper.Width <= 0 || template.Paper.Height <= 0 || string.IsNullOrWhiteSpace(template.Paper.UnitSystem))
-            diagnostics.Add(CaptureSheetTemplatePlanner.Error("template.paper_invalid", $"Template '{template.Name}' has invalid paper settings."));
+            diagnostics.Add(SheetPlanValidation.Error("template.paper_invalid", $"Template '{template.Name}' has invalid paper settings."));
         if (template.DetailSlots.Any(slot => slot.Right <= slot.Left || slot.Top <= slot.Bottom))
-            diagnostics.Add(CaptureSheetTemplatePlanner.Error("template.detail_bounds_invalid", $"Template '{template.Name}' contains an invalid detail rectangle."));
+            diagnostics.Add(SheetPlanValidation.Error("template.detail_bounds_invalid", $"Template '{template.Name}' contains an invalid detail rectangle."));
         if (template.DetailSlots.Any(slot => slot.PageToModelRatio is <= 0))
-            diagnostics.Add(CaptureSheetTemplatePlanner.Error("template.detail_scale_invalid", $"Template '{template.Name}' contains an invalid detail scale."));
-        if (template.TitleBlock is { BuiltInKind: null } block &&
-            !snapshot.InstanceDefinitions.Contains(block.InstanceDefinitionId))
-            diagnostics.Add(new Diagnostic("template.block_unresolved", DiagnosticSeverity.Warning,
-                $"Title block '{block.InstanceDefinitionName}' is not in this document and will be skipped."));
-        if (template.TitleBlock is { Transform.Count: not 16 })
-            diagnostics.Add(CaptureSheetTemplatePlanner.Error("template.block_transform_invalid", $"Template '{template.Name}' contains an invalid title-block transform."));
+            diagnostics.Add(SheetPlanValidation.Error("template.detail_scale_invalid", $"Template '{template.Name}' contains an invalid detail scale."));
         foreach (var slot in template.DetailSlots)
         {
             var namedView = assignments?.GetValueOrDefault(slot.Id) ?? slot.DefaultNamedView;
             if (!string.IsNullOrWhiteSpace(namedView) && !snapshot.NamedViews.Contains(namedView))
-                diagnostics.Add(CaptureSheetTemplatePlanner.Error("template.named_view_unresolved",
+                diagnostics.Add(SheetPlanValidation.Error("template.named_view_unresolved",
                     $"Named view '{namedView}' assigned to '{slot.Name}' is not available."));
             if (slot.DisplayModeId is { } modeId && !snapshot.DisplayModeIds.Contains(modeId))
                 diagnostics.Add(new Diagnostic("template.display_mode_unresolved", DiagnosticSeverity.Warning,
                     $"The display mode for detail '{slot.Name}' is unavailable; Rhino's default will be used."));
         }
     }
-
-    private static readonly IReadOnlyList<double> IdentityTransform =
-    [
-        1, 0, 0, 0,
-        0, 1, 0, 0,
-        0, 0, 1, 0,
-        0, 0, 0, 1,
-    ];
-
-    private static readonly IReadOnlyDictionary<string, string> StandardTitleBlockMappings =
-        new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            ["project.name"] = "document.project_name",
-            ["project.number"] = "document.project_number",
-            ["project.client"] = "document.client_name",
-            ["project.site"] = "document.site_address",
-            ["project.phase"] = "document.project_phase",
-            ["project.status"] = "document.project_status",
-            ["firm.name"] = "document.firm_name",
-            ["issue.date"] = "document.issue_date",
-            ["issue.purpose"] = "document.issue_purpose",
-            ["sheet.number"] = "sheet.number",
-            ["sheet.title"] = "sheet.title",
-            ["sheet.scale"] = "sheet.scale",
-        };
 
     private static IReadOnlyDictionary<string, string> Tokens(
         DocumentSnapshot snapshot,
@@ -610,7 +473,6 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
         var result = new Dictionary<string, string>(snapshot.Metadata, StringComparer.OrdinalIgnoreCase)
         {
             ["folder"] = folder ?? string.Empty,
-            ["tag"] = template.DefaultTags.FirstOrDefault() ?? string.Empty,
         };
         foreach (var pair in template.DefaultMetadata)
             result[pair.Key] = pair.Value;
@@ -631,7 +493,6 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
             ["folder"] = folderId == snapshot.RootFolderId
                 ? string.Empty
                 : snapshot.Folders.GetValueOrDefault(folderId)?.Name ?? string.Empty,
-            ["tag"] = sheet.Tags.FirstOrDefault() ?? string.Empty,
             ["view"] = sheet.Details.FirstOrDefault()?.Name ?? string.Empty,
         };
         foreach (var pair in sheet.Metadata) result[pair.Key] = pair.Value;

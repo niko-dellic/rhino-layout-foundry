@@ -15,20 +15,19 @@ public sealed class OverviewHierarchyHeaderTests
     {
         var rootId = Guid.NewGuid();
         var overview = new DocumentOverview(
-            12,
-            "Ignored.3dm",
-            rootId,
-            [new FolderOverview(rootId, null, "Root", 0)],
-            [
+            DocumentRuntimeSerialNumber: 12,
+            DocumentName: "Ignored.3dm",
+            RootFolderId: rootId,
+            Folders: [new FolderOverview(Id: rootId, ParentId: null, Name: "Root", Order: 0)],
+            Sheets: [
                 new SheetOverview(
-                    Guid.NewGuid(),
-                    rootId,
-                    "A101",
-                    0,
-                    [],
-                    [
-                        new DetailOverview(Guid.NewGuid(), "Plan", 0),
-                        new DetailOverview(Guid.NewGuid(), "Section", 1),
+                    PageViewId:                     Guid.NewGuid(),
+                    FolderId:                     rootId,
+                    Name:                     "A101",
+                    Order:                     0,
+                    Details:                     [
+                        new DetailOverview(DetailViewportId: Guid.NewGuid(), Name: "Plan", Order: 0),
+                        new DetailOverview(DetailViewportId: Guid.NewGuid(), Name: "Section", Order: 1),
                     ]),
             ]);
 

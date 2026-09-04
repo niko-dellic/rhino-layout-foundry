@@ -15,11 +15,8 @@ internal sealed record LayoutChoice(
     Guid? TemplateId,
     SheetTemplateRecipe? Template);
 internal sealed record TitleBlockChoice(
-    bool UseTemplate,
-    Guid? SourceInstanceObjectId,
     BuiltInTitleBlockKind? BuiltInKind,
-    string Label,
-    TitleBlockInstanceSnapshot? Instance);
+    string Label);
 internal sealed record NamedViewChoice(string? Name, string Label);
 internal sealed record LayerChoice(Guid Id, string Label);
 internal sealed record PaperPreset(string Label, double Width, double Height, string UnitSystem);
@@ -53,8 +50,6 @@ internal sealed record CreationDraft(
         BuiltInLayout: Layout.BuiltInLayout,
         TemplateId: Layout.TemplateId,
         DetailDisplayModeId: PageDisplayModeId,
-        UseTemplateTitleBlock: TitleBlock.UseTemplate,
-        TitleBlockSourceInstanceObjectId: TitleBlock.SourceInstanceObjectId,
         BuiltInTitleBlock: TitleBlock.BuiltInKind,
         UseDedicatedDetailLayer: UseDedicatedDetailLayer,
         NamedViewsByDetail: NamedViewsByDetail,
@@ -123,4 +118,3 @@ internal sealed class DetailActivatedEventArgs(int index) : EventArgs
 {
     internal int Index { get; } = index;
 }
-

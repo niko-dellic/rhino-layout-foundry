@@ -18,7 +18,6 @@ internal sealed class SelectionInspectorPanel : Panel
     internal const int OverlayWidth = 344;
     private const string Mixed = "Mixed";
     private const string CustomPaperPreset = "Custom";
-    private const string RemoveTitleBlock = "Remove title block";
     private const int NamedViewThumbnailMinimum = 64;
     private const int NamedViewThumbnailMaximum = 240;
     private const int NamedViewThumbnailDefault = 128;
@@ -39,7 +38,7 @@ internal sealed class SelectionInspectorPanel : Panel
     private readonly Label _paperMixed = FoundryTheme.MutedLabel("Mixed — enter a complete size to apply to all affected layouts.");
     private readonly FilteredPicker _titleBlock = new([], "Search title blocks");
     private readonly FoundryTextSegmentedControl _titleBlockMode = new(["None", "Right", "Bottom"], 0, 72);
-    private readonly TemplateCapabilityPicker _templateCapabilities = new();
+    private readonly FoundryCheckBox _templateRegistration = new("Use as layout template");
     private readonly Label _templateError = ErrorLabel();
     private readonly Panel _templateSection;
     private readonly TextArea _revisions = new() { Height = 82, Wrap = false };
@@ -133,13 +132,13 @@ internal sealed class SelectionInspectorPanel : Panel
             },
         });
 
-        _templateSection = Section("Template roles", new StackLayout
+        _templateSection = Section("Template registration", new StackLayout
         {
             Spacing = FoundryTheme.Space2,
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Items =
             {
-                _templateCapabilities,
+_templateRegistration,
                 FoundryTheme.MutedLabel("Register this hierarchy item as a live capability source."),
                 _templateError,
             },
@@ -307,7 +306,8 @@ internal sealed class SelectionInspectorPanel : Panel
         });
 
         _namedViewListMode = new FoundryToolbarIconButton(
-            FoundryViewIcons.ListView(), "Show named views as a list", isToggle: true) { Checked = true };
+            FoundryViewIcons.ListView(), "Show named views as a list", isToggle: true)
+        { Checked = true };
         _namedViewThumbnailMode = new FoundryToolbarIconButton(
             FoundryViewIcons.ThumbnailStack(), "Show named-view previews", isToggle: true);
         _namedViewModeGroup = new FoundryToolbarButtonGroup(
@@ -452,9 +452,9 @@ internal sealed class SelectionInspectorPanel : Panel
         {
             if (!_updating) _ = CommitTitleBlockAsync();
         };
-        _templateCapabilities.ValueChanged += (_, _) =>
+        _templateRegistration.CheckedChanged += (_, _) =>
         {
-            if (!_updating) _ = CommitTemplateCapabilitiesAsync();
+            if (!_updating) _ = CommitTemplateRegistrationAsync();
         };
         _displayMode.ValueChanged += (_, _) =>
         {
@@ -581,24 +581,19 @@ internal sealed class SelectionInspectorPanel : Panel
             ? titleBlockModes[0]
             : 0;
         _titleBlockMode.ToolTip = titleBlockModes.Contains(-1)
-            ? "A legacy custom title block is present. Choosing a mode replaces it."
-            : titleBlockModes.Length > 1 ? "The selected layouts use mixed title-block modes." : null;
+            ? "The selected title-block mode is unavailable." : titleBlockModes.Length > 1 ? "The selected layouts use mixed title-block modes." : null;
         var selectedScopes = SelectedScopes().ToArray();
-        var allowedCapabilities = selectedScopes.Length == 0
-            ? TemplateCapability.None
-            : selectedScopes.Select(scope => TemplateCapabilityPolicy.AllowedFor(scope.Kind))
-                .Aggregate((left, right) => left & right);
-        var capabilityValues = selectedScopes.Select(scope => snapshot?.TemplateRegistrations
-                .LastOrDefault(item => item.Source == scope)?.Capabilities ?? TemplateCapability.None)
+        var templateScopes = selectedScopes.Where(scope => scope.Kind is HierarchyScopeKind.Sheet or HierarchyScopeKind.Detail)
+                .ToArray();
+        var registrationValues = templateScopes.Select(scope => snapshot?.TemplateRegistrations
+                .Any(item => item.Source == scope) == true)
             .Distinct().ToArray();
-        _templateSection.Enabled = selectedScopes.Length > 0;
-        _templateCapabilities.Allowed = allowedCapabilities;
-        _templateCapabilities.Value = capabilityValues.Length == 1
-            ? capabilityValues[0]
-            : capabilityValues.Aggregate(allowedCapabilities, (current, value) => current & value);
-        _templateCapabilities.ToolTip = capabilityValues.Length > 1
-            ? "Mixed template roles. Checked roles are common to the full selection."
+        _templateSection.Enabled = templateScopes.Length > 0 && templateScopes.Length == selectedScopes.Length;
+        _templateRegistration.Checked = registrationValues.Length == 1
+            ? registrationValues[0]
             : null;
+        _templateRegistration.ToolTip = registrationValues.Length > 1
+            ? "Mixed template registration." : null;
         var layouts = model?.AffectedLayoutIds.Select(id => snapshot?.Sheets.GetValueOrDefault(id))
             .Where(sheet => sheet is not null).Cast<SheetSnapshot>().ToArray() ?? [];
         _revisions.Text = layouts.Length == 1
@@ -723,23 +718,21 @@ internal sealed class SelectionInspectorPanel : Panel
         };
         await RunAsync(_layoutSection, _layoutError,
             () => LayoutFoundryUiHost.BatchUpdateSheetsAsync(new BatchUpdateSheetsRequest(
-                _snapshot.DocumentRuntimeSerialNumber, _snapshot.Revision, ids,
-                null, 1, 1, null, null, null, null,
+                DocumentRuntimeSerialNumber: _snapshot.DocumentRuntimeSerialNumber, SourceRevision: _snapshot.Revision, SheetPageViewIds: ids,
+                NamingPattern: null, Start: 1, Step: 1, PaperWidth: null, PaperHeight: null, PaperUnitSystem: null, DetailDisplayModeId: null,
                 ChangeTitleBlock: true,
                 BuiltInTitleBlock: builtIn)),
             builtIn is null ? "Title blocks removed." : "Title-block mode updated.");
     }
 
-    private async Task CommitTemplateCapabilitiesAsync()
+    private async Task CommitTemplateRegistrationAsync()
     {
         var targets = _selection.Where(key => key.Kind is
-            OverviewNodeKind.Folder or OverviewNodeKind.Sheet or OverviewNodeKind.Detail).ToArray();
+OverviewNodeKind.Sheet or OverviewNodeKind.Detail).ToArray();
         if (_updating || targets.Length == 0) return;
         await RunAsync(_templateSection, _templateError,
-            () => LayoutFoundryUiHost.SetTemplateCapabilitiesAsync(targets, _templateCapabilities.Value),
-            _templateCapabilities.Value == TemplateCapability.None
-                ? "Template roles cleared."
-                : "Template roles updated.");
+            () => LayoutFoundryUiHost.SetLayoutTemplateRegistrationAsync(targets, _templateRegistration.Checked == true),
+_templateRegistration.Checked != true ? "Template registration cleared." : "Template registration updated.");
     }
 
     private IEnumerable<HierarchyScope> SelectedScopes()
@@ -853,13 +846,6 @@ internal sealed class SelectionInspectorPanel : Panel
         };
         return $"{kind}: {name ?? "Missing source"}";
     }
-
-    private static string CapabilityLabel(TemplateCapability capability) => capability switch
-    {
-        TemplateCapability.Layout => "Layout",
-        TemplateCapability.TitleBlock => "Title-block",
-        _ => "Capability",
-    };
 
     private void ReloadLayers()
     {
@@ -1054,8 +1040,8 @@ internal sealed class SelectionInspectorPanel : Panel
         }
         await RunAsync(_layoutSection, _layoutError,
             () => LayoutFoundryUiHost.BatchUpdateSheetsAsync(new BatchUpdateSheetsRequest(
-                _snapshot.DocumentRuntimeSerialNumber, _snapshot.Revision, ids,
-                null, 1, 1, null, null, null, null,
+                DocumentRuntimeSerialNumber: _snapshot.DocumentRuntimeSerialNumber, SourceRevision: _snapshot.Revision, SheetPageViewIds: ids,
+                NamingPattern: null, Start: 1, Step: 1, PaperWidth: null, PaperHeight: null, PaperUnitSystem: null, DetailDisplayModeId: null,
                 ReplaceRevisionSchedule: single ? revisions : null,
                 AppendRevision: single ? null : revisions[0])),
             single ? "Revision schedule saved." : "Revision appended.");
@@ -1281,32 +1267,6 @@ internal sealed class SelectionInspectorPanel : Panel
             not null => 1,
             _ => -1,
         };
-    }
-
-    private static Dictionary<string, Guid?> BuildTitleBlockChoices(DocumentSnapshot? snapshot)
-    {
-        var result = new Dictionary<string, Guid?>(StringComparer.OrdinalIgnoreCase)
-        {
-            [RemoveTitleBlock] = null,
-        };
-        if (snapshot is null) return result;
-        foreach (var block in snapshot.TitleBlockInstances.Values
-                     .OrderBy(block => block.InstanceDefinitionName, StringComparer.OrdinalIgnoreCase)
-                     .ThenBy(block => block.SourcePageName, StringComparer.OrdinalIgnoreCase))
-        {
-            var label = $"{block.InstanceDefinitionName} · {block.SourcePageName}";
-            if (result.ContainsKey(label)) label += $" · {block.InstanceObjectId.ToString()[..8]}";
-            result[label] = block.InstanceObjectId;
-        }
-        return result;
-    }
-
-    private static string TitleBlockText(SelectionInspectorModel? model, DocumentSnapshot? snapshot)
-    {
-        if (model?.TitleBlockIsMixed == true) return Mixed;
-        if (model?.TitleBlockSourceInstanceId is not { } id) return RemoveTitleBlock;
-        var block = snapshot?.TitleBlockInstances.GetValueOrDefault(id);
-        return block is null ? string.Empty : $"{block.InstanceDefinitionName} · {block.SourcePageName}";
     }
 
     private static IReadOnlyList<SheetRevisionRecord> ParseRevisions(string text, out string? error)

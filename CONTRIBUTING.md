@@ -51,4 +51,4 @@ Fully quit Rhino, run `./scripts/install-dev-macos.sh Debug`, compare SHA-256 ha
 - Persisted identity is explicit: document runtime serial for the live document, page main viewport ID for sheets, detail viewport ID for details. Every numeric page size carries its unit system.
 - Prefer cohesive internal components and shared controls. Do not create a public abstraction merely to reduce a file's line count.
 
-Explain native workarounds, ownership, cancellation, and failure behavior near the code. Update the canonical document when changing a contract, and add changelog entries for observable behavior. Preserve supported migrations unless an explicit compatibility decision requires otherwise.
+Explain native workarounds, ownership, cancellation, and failure behavior near the code. Update the canonical document when changing a contract, and add changelog entries for observable behavior. Maintain only document schema 16 and package format 6. Do not add historical converters or compatibility aliases. Preserve generic invalid/unsupported-state guards and original-envelope pass-through.

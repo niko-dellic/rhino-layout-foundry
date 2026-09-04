@@ -26,7 +26,7 @@ public sealed record DocumentStateLoadResult(
                 version.ValueKind != JsonValueKind.Number ||
                 !version.TryGetInt32(out var payloadVersion) || payloadVersion != envelopeVersion)
                 return Invalid("The metadata envelope and payload schema versions do not match.");
-            if (payloadVersion < 1 || payloadVersion > DocumentState.CurrentSchemaVersion || payloadVersion == 11)
+            if (payloadVersion != DocumentState.CurrentSchemaVersion)
                 return new(DocumentStateLoadStatus.Unsupported, DocumentState.Empty(),
                     $"Foundry metadata schema {payloadVersion} is unsupported. Foundry changes are disabled; original metadata is preserved on save.");
             return new(DocumentStateLoadStatus.Loaded, DocumentStateSerializer.Deserialize(payload));

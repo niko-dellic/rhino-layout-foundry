@@ -9,11 +9,13 @@ public static class DocumentStateSerializer
     {
         PropertyNameCaseInsensitive = false,
         WriteIndented = false,
+        UnmappedMemberHandling = System.Text.Json.Serialization.JsonUnmappedMemberHandling.Disallow,
     };
 
     public static string Serialize(DocumentState state)
     {
         ArgumentNullException.ThrowIfNull(state);
+        Validate(state);
         return JsonSerializer.Serialize(state, Options);
     }
 
@@ -25,116 +27,27 @@ public static class DocumentStateSerializer
             ?? throw new JsonException("The document state payload was empty.");
 
         Validate(state);
-
-        if (state.SchemaVersion is >= 1 and <= 8)
-        {
-            var projectInformation = state.SchemaVersion < 7
-                ? NormalizeProjectInformation(ProjectInformation.Empty)
-                : NormalizeProjectInformation(state.ProjectInfo);
-            return NormalizeCurrent(state with
-            {
-                SchemaVersion = DocumentState.CurrentSchemaVersion,
-                SheetTemplates = state.SchemaVersion == 1 ? [] : state.Templates,
-                Sheets = state.Sheets.ToDictionary(
-                    pair => pair.Key,
-                    pair => pair.Value with
-                    {
-                        IncludeInPrintAll = state.SchemaVersion <= 2 || pair.Value.IncludeInPrintAll,
-                        NamingBinding = null,
-                    }),
-                ObserverCanvas = state.SchemaVersion < 4 ? ObserverCanvasState.Empty : state.Canvas,
-                ImportRecovery = state.SchemaVersion < 5 ? [] : state.Recovery,
-                DedicatedDetailLayerId = state.SchemaVersion < 6 ? null : state.DedicatedDetailLayerId,
-                ProjectData = projectInformation,
-                ViewportRuleSets = [],
-                CapabilityTemplates = MigrateTemplateRegistrations(state),
-                CapabilityLinks = [],
-                AppearanceStateResources = [],
-                AppearanceStateAssignments = [],
-            });
-        }
-
-        if (state.SchemaVersion == 9)
-        {
-            return NormalizeCurrent(state with
-            {
-                SchemaVersion = DocumentState.CurrentSchemaVersion,
-                Sheets = state.Sheets.ToDictionary(
-                    pair => pair.Key,
-                    pair => pair.Value with { NamingBinding = null }),
-                CapabilityTemplates = state.TemplateRegistrations
-                    .Select(item => item with
-                    {
-                        Capabilities = item.Capabilities &
-                                       (TemplateCapability.Layout | TemplateCapability.TitleBlock),
-                    })
-                    .Where(item => item.Capabilities != TemplateCapability.None)
-                    .ToArray(),
-                CapabilityLinks = state.TemplateLinks
-                    .Where(item => item.Capability is TemplateCapability.Layout or TemplateCapability.TitleBlock)
-                    .ToArray(),
-                AppearanceStateResources = [],
-                AppearanceStateAssignments = [],
-            });
-        }
-
-        if (state.SchemaVersion == 10)
-        {
-            return NormalizeCurrent(state with
-            {
-                SchemaVersion = DocumentState.CurrentSchemaVersion,
-                Sheets = state.Sheets.ToDictionary(
-                    pair => pair.Key,
-                    pair => pair.Value with { NamingBinding = null }),
-                AppearanceStateResources = [],
-                AppearanceStateAssignments = [],
-            });
-        }
-
-        if (state.SchemaVersion == 12)
-        {
-            return NormalizeCurrent(state with
-            {
-                SchemaVersion = DocumentState.CurrentSchemaVersion,
-                AppearanceStateResources = state.AppearanceStates
-                    .Select(item => item with { Notes = item.Notes ?? string.Empty })
-                    .ToArray(),
-            });
-        }
-
-        if (state.SchemaVersion is 13 or 14)
-        {
-            return NormalizeCurrent(state with
-            {
-                SchemaVersion = DocumentState.CurrentSchemaVersion,
-                ObserverCanvas = state.Canvas with
-                {
-                    AppearanceStatePlacements = new Dictionary<Guid, ObserverPointRecord>(),
-                },
-            });
-        }
-
-        if (state.SchemaVersion != DocumentState.CurrentSchemaVersion)
-        {
-            throw new NotSupportedException(
-                $"Document state schema {state.SchemaVersion} is not supported; expected {DocumentState.CurrentSchemaVersion}.");
-        }
-
-        return NormalizeCurrent(state);
+        return state;
     }
 
-    private static void Validate(DocumentState state)
+    /// <summary>Rejects incompatible or structurally invalid state before persistence or native mutation.</summary>
+    public static void Validate(DocumentState state)
     {
-        if (state.Folders is null || state.Sheets is null || state.DisplayRules is null || state.Metadata is null ||
-            state.Folders.Any(item => item is null) || state.Sheets.Values.Any(item => item is null) ||
-            state.DisplayRules.Any(item => item is null))
+
+        if (state.SchemaVersion != DocumentState.CurrentSchemaVersion)
+            throw new NotSupportedException(
+                $"Document state schema {state.SchemaVersion} is not supported; expected {DocumentState.CurrentSchemaVersion}.");
+        if (state.Folders is null || state.Sheets is null || state.Metadata is null || state.Canvas is null || state.ProjectInfo is null || state.Recovery is null || state.AppearanceRules is null || state.TemplateRegistrations is null || state.AppearanceStates is null || state.StateAssignments is null ||
+            state.Folders.Any(item => item is null) || state.Sheets.Values.Any(item => item is null))
             throw new JsonException("Required document collections are missing or contain null entries.");
-        if (state.Folders.Select(item => item.Id).Distinct().Count() != state.Folders.Count ||
-            !state.Folders.Any(item => item.Id == state.RootFolderId))
-            throw new JsonException("The folder hierarchy has duplicate identities or no root.");
+        if (state.RootFolderId == Guid.Empty || state.Folders.Any(item => item.Id == Guid.Empty || item.Name is null) || state.Folders.Select(item => item.Id).Distinct().Count() != state.Folders.Count ||
+            !state.Folders.Any(item => item.Id == state.RootFolderId && item.ParentId is null))
+            throw new JsonException("The folder hierarchy has invalid identities or no root.");
         var parents = state.Folders.ToDictionary(item => item.Id, item => item.ParentId);
         foreach (var folder in state.Folders)
         {
+            if (folder.Id != state.RootFolderId && (folder.ParentId is not { } parentId || !parents.ContainsKey(parentId)))
+                throw new JsonException("A folder has no valid parent.");
             var visited = new HashSet<Guid>();
             Guid? current = folder.Id;
             while (current is { } id && parents.TryGetValue(id, out var parent))
@@ -143,71 +56,31 @@ public static class DocumentStateSerializer
                 current = parent;
             }
         }
-        if (state.Sheets.Values.Any(item => item.Tags is null || item.Metadata is null) ||
-            state.Templates.Any(item => item is null || item.Paper is null || item.DetailSlots is null) ||
-            state.TemplateRegistrations.Any(item => item is null) ||
-            state.TemplateLinks.Any(item => item is null || item.DetailMappings is null || item.LastResolved is null) ||
-            state.AppearanceRules.Any(item => item is null || item.LayerRules is null || item.ObjectDisplayRules is null) ||
-            state.AppearanceStates.Any(item => item is null || item.LayerRules is null || item.ObjectDisplayRules is null) ||
-            state.StateAssignments.Any(item => item is null) || state.Recovery.Any(item => item is null) ||
+        if (state.Sheets.Any(pair => pair.Key == Guid.Empty || pair.Key != pair.Value.PageViewId || !parents.ContainsKey(pair.Value.FolderId) || pair.Value.Metadata is null || pair.Value.DetailNamedViews is null || pair.Value.NamingBinding is { NamedViewAssignments: null } || pair.Value.TitleBlockData is { Revisions: null }))
+            throw new JsonException("A sheet has invalid identity, parent, or required collections.");
+        foreach (var sheet in state.Sheets.Values)
+            if (sheet.TitleBlock is { } block && (block.InstanceObjectId == Guid.Empty || block.InstanceDefinitionId == Guid.Empty || !Enum.IsDefined(block.BuiltInKind)))
+                throw new JsonException("A managed title block has an invalid identity or built-in kind.");
+        if (state.TemplateRegistrations.Any(item => item is null || item.Id == Guid.Empty || item.Source.Id == Guid.Empty || item.Source.Kind is not (HierarchyScopeKind.Sheet or HierarchyScopeKind.Detail)) ||
+            state.AppearanceRules.Any(item => item is null || item.LayerRules is null || item.ObjectDisplayRules is null || !ValidScope(item.Scope)) ||
+            state.AppearanceStates.Any(item => item is null || item.Id == Guid.Empty || item.Name is null || !parents.ContainsKey(item.FolderId) || item.LayerRules is null || item.ObjectDisplayRules is null) ||
+            state.StateAssignments.Any(item => item is null || item.Id == Guid.Empty || !ValidScope(item.Target)) || state.Recovery.Any(item => item is null) ||
             state.Canvas.FolderOrigins is null || state.Canvas.SheetPlacements is null ||
-            state.ProjectInfo.CustomFields is null)
-            throw new JsonException("Required metadata values or nested collections are missing.");
-        foreach (var template in state.Templates)
-        {
-            if (template.DefaultTags is null || template.DefaultMetadata is null || template.DetailSlots.Any(slot => slot is null) ||
-                template.TitleBlock is { } block && (block.Transform is null || block.FieldMappings is null))
-                throw new JsonException("A template contains missing required values.");
-            foreach (var slot in template.DetailSlots) ValidateRules(slot.Layers, slot.Objects);
-        }
-        foreach (var rule in state.DisplayRules)
-            if (rule.ObjectIds is null || rule.Targets is null || rule.Targets.Any(target => target is null))
-                throw new JsonException("A display rule contains missing required values.");
+            state.Canvas.StatePlacements is null || state.ProjectInfo.CustomFields is null || state.ProjectInfo.ContentOptions is null || state.ProjectInfo.ContentOptions.IncludedFields is null || state.ProjectInfo.ContentOptions.CustomFields is null || state.ProjectInfo.ContentOptions.CustomFields.Any(item => item is null))
+            throw new JsonException("Required metadata values or nested collections are missing or invalid.");
         foreach (var rules in state.AppearanceRules) ValidateRules(rules.LayerRules, rules.ObjectDisplayRules);
         foreach (var rules in state.AppearanceStates) ValidateRules(rules.LayerRules, rules.ObjectDisplayRules);
-        if (state.AppearanceStates.Select(item => item.Id).Distinct().Count() != state.AppearanceStates.Count)
-            throw new JsonException("Appearance states have duplicate identities.");
+        if (state.AppearanceStates.Select(item => item.Id).Distinct().Count() != state.AppearanceStates.Count || state.TemplateRegistrations.Select(item => item.Id).Distinct().Count() != state.TemplateRegistrations.Count || state.TemplateRegistrations.Select(item => item.Source).Distinct().Count() != state.TemplateRegistrations.Count || state.AppearanceRules.Select(item => item.Scope).Distinct().Count() != state.AppearanceRules.Count || state.StateAssignments.Select(item => item.Target).Distinct().Count() != state.StateAssignments.Count || state.StateAssignments.Select(item => item.Id).Distinct().Count() != state.StateAssignments.Count || state.StateAssignments.Any(item => state.AppearanceStates.All(resource => resource.Id != item.StateId)))
+            throw new JsonException("Appearance states, assignments, or template registrations have conflicting identities.");
+        if (state.Canvas.FolderOrigins.Values.Concat(state.Canvas.SheetPlacements.Values).Concat(state.Canvas.StatePlacements.Values).Any(point => !double.IsFinite(point.X) || !double.IsFinite(point.Y)))
+            throw new JsonException("Canvas coordinates must be finite.");
     }
+
+    private static bool ValidScope(HierarchyScope scope) => scope.Id != Guid.Empty && Enum.IsDefined(scope.Kind);
 
     private static void ValidateRules(IReadOnlyList<LayerVisibilityRule> layers, IReadOnlyList<ObjectDisplayRule> objects)
     {
         if (layers.Any(rule => rule is null || rule.Layer is null) || objects.Any(rule => rule is null || rule.Selector is null))
             throw new JsonException("An appearance rule contains missing required values.");
     }
-
-    private static DocumentState NormalizeCurrent(DocumentState state) => state with
-        {
-            Folders = state.Folders
-                .Select(item => item with { Notes = item.Notes ?? string.Empty })
-                .ToArray(),
-            Sheets = state.Sheets.ToDictionary(
-                pair => pair.Key,
-                pair => pair.Value with { Notes = pair.Value.Notes ?? string.Empty }),
-            ObserverCanvas = state.Canvas with
-            {
-                AppearanceStatePlacements = state.Canvas.StatePlacements,
-            },
-            ImportRecovery = state.Recovery,
-            ProjectData = NormalizeProjectInformation(state.ProjectInfo),
-            ViewportRuleSets = state.AppearanceRules,
-            CapabilityTemplates = state.TemplateRegistrations,
-            CapabilityLinks = state.TemplateLinks,
-            AppearanceStateResources = state.AppearanceStates
-                .Select(item => item with { Notes = item.Notes ?? string.Empty })
-                .ToArray(),
-            AppearanceStateAssignments = state.StateAssignments,
-        };
-
-    private static IReadOnlyList<CapabilityTemplateRegistration> MigrateTemplateRegistrations(
-        DocumentState state) => state.Templates
-        .Where(template => template.SourcePageViewId is not null)
-        .Select(template => new CapabilityTemplateRegistration(
-            template.Id,
-            new HierarchyScope(HierarchyScopeKind.Sheet, template.SourcePageViewId!.Value),
-            TemplateCapability.Layout |
-            (template.TitleBlock is null ? TemplateCapability.None : TemplateCapability.TitleBlock)))
-        .ToArray();
-
-    private static ProjectInformation NormalizeProjectInformation(ProjectInformation information) =>
-        information with { TitleBlockOptions = information.ContentOptions };
 }

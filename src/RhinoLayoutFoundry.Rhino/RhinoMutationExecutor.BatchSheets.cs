@@ -23,7 +23,7 @@ internal sealed partial class RhinoMutationExecutor
         if (pages.Length != update.SheetPageViewIds.Distinct().Count())
             return Failure("batch.sheet_missing", "An included layout no longer exists.");
         var detailsById = pages.SelectMany(page => page.GetDetailViews())
-            .ToDictionary(detail => detail.Viewport.Id);
+            .ToDictionary(detail => detail.Viewport.Id, detail => detail.Id);
         if ((update.DetailUpdates ?? []).Any(item => !detailsById.ContainsKey(item.DetailViewportId)))
             return Failure("batch.detail_missing", "A detail selected for editing no longer exists.");
         var before = pages.Select(page => new PagePropertiesBefore(
@@ -33,7 +33,7 @@ internal sealed partial class RhinoMutationExecutor
             page.PageHeight,
             page.GetDetailViews().Select(detail =>
                 new DetailModeBefore(
-                    detail,
+                    detail.Id,
                     detail.Viewport.DisplayMode.Id,
                     detail.Attributes.LayerIndex,
                     new ViewportInfo(detail.Viewport))).ToArray())).ToArray();
@@ -76,7 +76,12 @@ internal sealed partial class RhinoMutationExecutor
             }
             foreach (var detailUpdate in update.DetailUpdates ?? [])
             {
-                var detail = detailsById[detailUpdate.DetailViewportId];
+                // Committing a viewport replaces Rhino's native detail object. Never reuse
+                // a wrapper captured before the sheet-level display-mode commit.
+                var detail = FindCurrentDetail(document, detailsById[detailUpdate.DetailViewportId]);
+                var assignedDisplayMode = detailUpdate.ChangeDisplayMode
+                    ? detailUpdate.DisplayModeId
+                    : detail.Viewport.DisplayMode.Id;
                 var viewportChanged = false;
                 if (detailUpdate.ChangeNamedView && !string.IsNullOrWhiteSpace(detailUpdate.NamedViewName))
                 {
@@ -89,7 +94,7 @@ internal sealed partial class RhinoMutationExecutor
                     viewportChanged = true;
                 }
                 if ((detailUpdate.ChangeDisplayMode || detailUpdate.ChangeNamedView) &&
-                    detailUpdate.DisplayModeId is { } detailDisplayModeId)
+                    assignedDisplayMode is { } detailDisplayModeId)
                 {
                     using var detailDisplayMode = DisplayModeDescription.GetDisplayMode(detailDisplayModeId)
                         ?? throw new InvalidOperationException(
@@ -126,12 +131,11 @@ internal sealed partial class RhinoMutationExecutor
                     document,
                     pages,
                     stateBefore,
-                    update.TitleBlockSourceInstanceObjectId,
                     update.BuiltInTitleBlock,
                     createdTitleBlockIds);
             else if (changesPaper)
                 RebuildManagedTitleBlocks(document, pages, stateBefore, createdTitleBlockIds);
-            var currentState = _stateStore.Get(document);
+            var currentState = WithCurrentPageRecords(document, _stateStore.Get(document));
             if (update.NamingBindings is { Count: > 0 })
             {
                 var sheets = currentState.Sheets.ToDictionary(pair => pair.Key, pair => pair.Value);
@@ -173,8 +177,7 @@ internal sealed partial class RhinoMutationExecutor
                     SheetNamingBinding? namingBinding = sheet.NamingBinding;
                     if (namingBinding is not null)
                     {
-                        var linkedAssignments = namingBinding.NamedViews
-                            .ToDictionary(pair => pair.Key, pair => pair.Value);
+                        var linkedAssignments = namingBinding.NamedViewAssignments.ToDictionary(pair => pair.Key, pair => pair.Value);
                         if (string.IsNullOrWhiteSpace(detailUpdate.NamedViewName))
                             linkedAssignments.Remove(detailUpdate.DetailViewportId);
                         else
@@ -184,7 +187,7 @@ internal sealed partial class RhinoMutationExecutor
                     sheets[pageViewId] = sheet with
                     {
                         NamingBinding = namingBinding,
-                        DetailNamedViewAssignments = assignments,
+                        DetailNamedViews = assignments,
                     };
                 }
                 currentState = currentState with { Sheets = sheets };
@@ -236,7 +239,7 @@ internal sealed partial class RhinoMutationExecutor
                 if (update.AppearanceStateId is { } stateId)
                     assignments.AddRange(targets.Select(target =>
                         new AppearanceStateAssignment(Guid.NewGuid(), target, stateId)));
-                currentState = currentState with { AppearanceStateAssignments = assignments };
+                currentState = currentState with { StateAssignments = assignments };
             }
             if (update.DetailUpdates is { Count: > 0 } &&
                 update.DetailUpdates.Any(item => item.ChangeAppearanceState))
@@ -260,7 +263,7 @@ internal sealed partial class RhinoMutationExecutor
                         new HierarchyScope(HierarchyScopeKind.Detail, detailUpdate.DetailViewportId),
                         stateId));
                 }
-                currentState = currentState with { AppearanceStateAssignments = assignments };
+                currentState = currentState with { StateAssignments = assignments };
             }
             if (dedicatedDetailLayer is not null)
                 currentState = currentState with
@@ -289,7 +292,7 @@ internal sealed partial class RhinoMutationExecutor
                         "The resulting appearance state could not be applied.");
                 return appearanceResult;
             }
-            _stateStore.SetCurrentSchema(document, currentState);
+            _stateStore.Set(document, currentState);
             document.Modified = true;
             _revisionTracker.Bump(document);
             document.Views.Redraw();
@@ -297,39 +300,79 @@ internal sealed partial class RhinoMutationExecutor
         }
         catch (Exception exception)
         {
-            foreach (var id in createdTitleBlockIds.AsEnumerable().Reverse())
-                document.Objects.Delete(id, true);
+            var recovery = new CompensationJournal();
+            if (dedicatedDetailLayer is { Created: true })
+                recovery.Register("detail layer", () =>
+                {
+                    if (!document.Layers.Delete(dedicatedDetailLayer.LayerId, quiet: true))
+                        throw new InvalidOperationException("Rhino did not remove the new detail layer.");
+                });
+            foreach (var page in pages)
+                recovery.Register($"title-block fields on '{page.PageName}'", () =>
+                    RefreshManagedTitleBlockAttributes(document, page, _stateStore.Get(document)));
+            recovery.Register("metadata and title blocks", () =>
+            {
+                if (update.ChangeTitleBlock || changesPaper)
+                    RestoreTitleBlocks(document, stateBefore, titleBlocksBefore);
+                else
+                    _stateStore.Set(document, stateBefore);
+            });
             foreach (var item in before)
             {
-                item.Page.PageName = item.Name;
-                item.Page.PageWidth = item.Width;
-                item.Page.PageHeight = item.Height;
-                foreach (var detailBefore in item.DetailModes)
+                recovery.Register($"layout '{item.Name}'", () =>
                 {
-                    detailBefore.Detail.Attributes.LayerIndex = detailBefore.LayerIndex;
-                    detailBefore.Detail.CommitChanges();
-                    detailBefore.Detail.Viewport.SetViewProjection(detailBefore.Viewport, true);
-                    using var mode = DisplayModeDescription.GetDisplayMode(detailBefore.DisplayModeId);
-                    if (mode is null) continue;
-                    detailBefore.Detail.Viewport.DisplayMode = mode;
-                    detailBefore.Detail.CommitViewportChanges();
-                }
+                    item.Page.PageName = item.Name;
+                    item.Page.PageWidth = item.Width;
+                    item.Page.PageHeight = item.Height;
+                });
+                foreach (var detailBefore in item.DetailModes)
+                    recovery.Register($"detail {detailBefore.ObjectId}", () =>
+                        RestoreDetailBefore(document, detailBefore));
             }
-            if (update.ChangeTitleBlock || changesPaper)
-                RestoreTitleBlocks(document, stateBefore, titleBlocksBefore);
-            else if (update.ReplaceRevisionSchedule is not null || update.AppendRevision is not null ||
-                     update.NamingBindings is { Count: > 0 } || update.NamingBindingRemovals is { Count: > 0 } ||
-                     update.DestinationFolderId is not null ||
-                     update.ChangeAppearanceState || update.ChangeDetailLayer ||
-                     update.DetailUpdates is { Count: > 0 })
-                _stateStore.Set(document, stateBefore);
-            if (dedicatedDetailLayer is { Created: true })
-                document.Layers.Delete(dedicatedDetailLayer.LayerId, quiet: true);
+            foreach (var id in createdTitleBlockIds)
+                recovery.Register($"new title block {id}", () =>
+                {
+                    if (document.Objects.FindId(id) is not null && !document.Objects.Delete(id, true))
+                        throw new InvalidOperationException("Rhino did not remove the new title block.");
+                });
+            var failures = recovery.Rollback();
             document.Views.Redraw();
-            return Failure("batch.apply_failed",
-                $"Batch Apply failed and every available before-value was restored: {exception.Message}");
+            return Failure("batch.apply_failed", RecoveryMessage("Batch Apply", exception, failures));
+        }
+        finally
+        {
+            foreach (var item in before.SelectMany(page => page.DetailModes))
+                item.Viewport.Dispose();
         }
     }
+
+    private static DetailViewObject FindCurrentDetail(RhinoDoc document, Guid objectId) =>
+        document.Objects.FindId(objectId) as DetailViewObject
+        ?? throw new InvalidOperationException($"Detail {objectId} is no longer available.");
+
+    private static void RestoreDetailBefore(RhinoDoc document, DetailModeBefore before)
+    {
+        var detail = FindCurrentDetail(document, before.ObjectId);
+        if (detail.Attributes.LayerIndex != before.LayerIndex)
+        {
+            detail.Attributes.LayerIndex = before.LayerIndex;
+            if (!detail.CommitChanges())
+                throw new InvalidOperationException("Rhino did not restore the detail layer.");
+            detail = FindCurrentDetail(document, before.ObjectId);
+        }
+        if (!detail.Viewport.SetViewProjection(before.Viewport, true))
+            throw new InvalidOperationException("Rhino did not restore the detail camera.");
+        using var mode = DisplayModeDescription.GetDisplayMode(before.DisplayModeId)
+            ?? throw new InvalidOperationException("The original display mode is unavailable.");
+        detail.Viewport.DisplayMode = mode;
+        if (!detail.CommitViewportChanges())
+            throw new InvalidOperationException("Rhino did not commit the restored detail viewport.");
+    }
+
+    private static string RecoveryMessage(string operation, Exception exception, IReadOnlyList<string> failures) =>
+        failures.Count == 0
+            ? $"{operation} failed; the previous values were restored: {exception.Message}"
+            : $"{operation} failed: {exception.Message} Recovery is incomplete. " + string.Join(" ", failures);
 
     private static void RefreshManagedTitleBlockAttributes(
         RhinoDoc document,
@@ -362,7 +405,7 @@ internal sealed partial class RhinoMutationExecutor
             return Failure("inline.detail_missing", "A targeted detail viewport no longer exists.");
 
         var before = details.Select(detail => new DetailModeBefore(
-            detail,
+            detail.Id,
             detail.Viewport.DisplayMode.Id,
             detail.Attributes.LayerIndex,
             new ViewportInfo(detail.Viewport))).ToArray();
@@ -384,17 +427,16 @@ internal sealed partial class RhinoMutationExecutor
         }
         catch (Exception exception)
         {
+            var recovery = new CompensationJournal();
             foreach (var item in before)
-            {
-                using var mode = DisplayModeDescription.GetDisplayMode(item.DisplayModeId);
-                if (mode is null) continue;
-                item.Detail.Viewport.DisplayMode = mode;
-                item.Detail.CommitViewportChanges();
-            }
-
+                recovery.Register($"detail {item.ObjectId}", () => RestoreDetailBefore(document, item));
+            var failures = recovery.Rollback();
             document.Views.Redraw();
-            return Failure("inline.apply_failed",
-                $"The display-mode edit failed and every available before-value was restored: {exception.Message}");
+            return Failure("inline.apply_failed", RecoveryMessage("The display-mode edit", exception, failures));
+        }
+        finally
+        {
+            foreach (var item in before) item.Viewport.Dispose();
         }
     }
 
@@ -402,24 +444,9 @@ internal sealed partial class RhinoMutationExecutor
         RhinoDoc document,
         IReadOnlyList<RhinoPageView> pages,
         DocumentState stateBefore,
-        Guid? sourceInstanceObjectId,
         BuiltInTitleBlockKind? requestedBuiltInKind,
         ICollection<Guid> createdTitleBlockIds)
     {
-        InstanceObject? source = null;
-        string anchorName = "Template";
-        BuiltInTitleBlockKind? sourceBuiltInKind = null;
-        if (sourceInstanceObjectId is { } sourceId)
-        {
-            source = document.Objects.FindId(sourceId) as InstanceObject;
-            if (source is null || source.Attributes.Space != ActiveSpace.PageSpace)
-                throw new InvalidOperationException("The selected title-block instance is no longer available.");
-            var sourceRole = stateBefore.Sheets.Values
-                .Select(sheet => sheet.TitleBlock)
-                .FirstOrDefault(role => role?.InstanceObjectId == sourceId);
-            anchorName = sourceRole?.AnchorName ?? "Template";
-            sourceBuiltInKind = sourceRole?.BuiltInKind;
-        }
 
         var sheets = stateBefore.Sheets.ToDictionary(pair => pair.Key, pair => pair.Value);
         var newRoles = new Dictionary<Guid, TitleBlockRole?>();
@@ -437,30 +464,8 @@ internal sealed partial class RhinoMutationExecutor
                 createdTitleBlockIds.Add(instanceId);
                 var instance = document.Objects.FindId(instanceId) as InstanceObject
                     ?? throw new InvalidOperationException("Rhino could not resolve the generated title block.");
-                role = new TitleBlockRole(instanceId, instance.InstanceDefinition.Id,
-                    AdaptiveTitleBlockLayoutSolver.Label(managedKind), managedKind);
-            }
-            else if (source is not null)
-            {
-                Guid instanceId;
-                if (source.Attributes.ViewportId == page.MainViewport.Id)
-                {
-                    instanceId = source.Id;
-                }
-                else
-                {
-                    var attributes = source.Attributes.Duplicate();
-                    attributes.Space = ActiveSpace.PageSpace;
-                    attributes.ViewportId = page.MainViewport.Id;
-                    instanceId = document.Objects.AddInstanceObject(
-                        source.InstanceDefinition.Index,
-                        source.InstanceXform,
-                        attributes);
-                    if (instanceId == Guid.Empty)
-                        throw new InvalidOperationException($"Rhino could not place the title block on '{page.PageName}'.");
-                    createdTitleBlockIds.Add(instanceId);
-                }
-                role = new TitleBlockRole(instanceId, source.InstanceDefinition.Id, anchorName, sourceBuiltInKind);
+                role = new TitleBlockRole(InstanceObjectId: instanceId, InstanceDefinitionId: instance.InstanceDefinition.Id,
+                    BuiltInKind: managedKind);
             }
             newRoles[page.MainViewport.Id] = role;
         }
@@ -477,7 +482,7 @@ internal sealed partial class RhinoMutationExecutor
         }
 
         var afterState = stateBefore with { Sheets = sheets };
-        _stateStore.SetCurrentSchema(document, afterState);
+        _stateStore.Set(document, afterState);
         foreach (var page in pages) RefreshManagedTitleBlockAttributes(document, page, afterState);
         DeleteUnusedGeneratedTitleBlockDefinitions(document);
     }
@@ -516,7 +521,7 @@ internal sealed partial class RhinoMutationExecutor
                 },
             };
         }
-        _stateStore.SetCurrentSchema(document, stateBefore with { Sheets = sheets });
+        _stateStore.Set(document, stateBefore with { Sheets = sheets });
         DeleteUnusedGeneratedTitleBlockDefinitions(document);
     }
 
@@ -540,18 +545,32 @@ internal sealed partial class RhinoMutationExecutor
         IReadOnlyList<TitleBlockBefore> before)
     {
         var sheets = stateBefore.Sheets.ToDictionary(pair => pair.Key, pair => pair.Value);
+        var recovery = new CompensationJournal();
+        recovery.Register("title-block metadata", () =>
+            _stateStore.Set(document, stateBefore with { Sheets = sheets }));
         foreach (var item in before)
-        {
-            var role = item.Role;
-            if (role is not null && document.Objects.FindId(role.InstanceObjectId) is null &&
-                item.DefinitionIndex is { } definitionIndex && item.Attributes is not null)
+            recovery.Register($"title block on layout {item.PageViewId}", () =>
             {
-                var restoredId = document.Objects.AddInstanceObject(definitionIndex, item.Transform, item.Attributes);
-                role = restoredId == Guid.Empty ? null : role with { InstanceObjectId = restoredId };
-            }
-            sheets[item.PageViewId] = sheets[item.PageViewId] with { TitleBlock = role };
-        }
-        _stateStore.Set(document, stateBefore with { Sheets = sheets });
+                var role = item.Role;
+                if (role is not null)
+                {
+                    if (item.Attributes is null || item.DefinitionIndex is not { } definitionIndex)
+                        throw new InvalidOperationException("The original title block could not be captured.");
+                    if (document.Objects.FindId(role.InstanceObjectId) is null)
+                    {
+                        var restoredId = document.Objects.AddInstanceObject(definitionIndex, item.Transform, item.Attributes);
+                        if (restoredId == Guid.Empty)
+                            throw new InvalidOperationException("Rhino did not restore the title block.");
+                        role = role with { InstanceObjectId = restoredId };
+                    }
+                    else if (!document.Objects.ModifyAttributes(role.InstanceObjectId, item.Attributes, quiet: true))
+                        throw new InvalidOperationException("Rhino did not restore the title-block fields.");
+                }
+                sheets[item.PageViewId] = sheets[item.PageViewId] with { TitleBlock = role };
+            });
+        var failures = recovery.Rollback();
+        if (failures.Count > 0)
+            throw new InvalidOperationException(string.Join(" ", failures));
     }
 
     private static HashSet<Guid> FolderDescendants(Guid rootId, IReadOnlyList<FolderRecord> folders)

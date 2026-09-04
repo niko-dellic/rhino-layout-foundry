@@ -111,7 +111,7 @@ internal sealed class TitleBlockPreviewTray : Drawable
             page.X + 2, page.Y + 3, page.Width, page.Height);
         graphics.FillRectangle(FoundryTheme.CanvasSubtleSurface, page);
         graphics.DrawRectangle(new Pen(FoundryTheme.CanvasBorder, 1), page);
-        if (!choice.UseTemplate && choice.SourceInstanceObjectId is null && choice.BuiltInKind is null)
+        if (choice.BuiltInKind is null)
         {
             if (showEmptyMarker)
                 graphics.DrawLine(new Pen(FoundryTheme.WithAlpha(FoundryTheme.MutedText, 145), 2),
@@ -149,23 +149,6 @@ internal sealed class TitleBlockPreviewTray : Drawable
                 return;
             }
         }
-
-        var margin = Math.Max(2, page.Width * 0.035f);
-        graphics.DrawRectangle(new Pen(FoundryTheme.WithAlpha(FoundryTheme.MutedText, 150), 1),
-            page.X + margin, page.Y + margin, page.Width - margin * 2, page.Height - margin * 2);
-        var blockWidth = page.Width * (choice.UseTemplate ? 0.42f : 0.48f);
-        var blockHeight = page.Height * 0.24f;
-        var block = new RectangleF(
-            page.Right - margin - blockWidth,
-            page.Bottom - margin - blockHeight,
-            blockWidth,
-            blockHeight);
-        graphics.FillRectangle(FoundryTheme.ToolbarButtonBackground, block);
-        graphics.DrawRectangle(new Pen(FoundryTheme.WithAlpha(FoundryTheme.PrimaryText, 155), 1), block);
-        graphics.DrawLine(new Pen(FoundryTheme.WithAlpha(FoundryTheme.MutedText, 145), 1),
-            block.X + block.Width * 0.62f, block.Y, block.X + block.Width * 0.62f, block.Bottom);
-        graphics.DrawLine(new Pen(FoundryTheme.WithAlpha(FoundryTheme.MutedText, 145), 1),
-            block.X, block.Y + block.Height * 0.5f, block.Right, block.Y + block.Height * 0.5f);
     }
 
     private static void DrawCentered(
@@ -224,4 +207,3 @@ internal sealed class TitleBlockPreviewTray : Drawable
         eventArgs.Handled = true;
     }
 }
-

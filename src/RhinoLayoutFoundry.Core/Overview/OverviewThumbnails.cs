@@ -143,7 +143,6 @@ public sealed record EditSheetThumbnailResult(
 
 public interface IDraftLayoutThumbnailProvider
 {
-    void BeginSession(uint documentRuntimeSerialNumber);
 
     Task<DraftLayoutThumbnailResult> CaptureAsync(
         DraftLayoutThumbnailRequest request,
@@ -153,10 +152,7 @@ public interface IDraftLayoutThumbnailProvider
         EditSheetThumbnailRequest request,
         CancellationToken cancellationToken);
 
-    Task CompleteSessionAsync(
-        uint documentRuntimeSerialNumber,
-        bool restoreOriginalModifiedState,
-        bool endSession = true,
+    Task WaitForPendingCapturesAsync(
         CancellationToken cancellationToken = default);
 }
 

@@ -40,17 +40,19 @@ public sealed class AssignNamedViewPlannerTests
         var root = Guid.NewGuid();
         var sheetId = Guid.NewGuid();
         return new DocumentSnapshot(
-            12,
-            7,
-            root,
-            new Dictionary<Guid, FolderRecord> { [root] = new(root, null, "Root", 0) },
-            new Dictionary<Guid, SheetSnapshot>
-            {
-                [sheetId] = new(sheetId, root, 0, "Plan", [Guid.NewGuid(), Guid.NewGuid()],
+            DocumentRuntimeSerialNumber: 12,
+            Revision: 7,
+            RootFolderId: root,
+            Folders: new Dictionary<Guid, FolderRecord> { [root] = new(root, null, "Root", 0) },
+            Sheets: new Dictionary<Guid, SheetSnapshot>
+{
+    [sheetId] = new(sheetId, root, 0, "Plan", [Guid.NewGuid(), Guid.NewGuid()],
                     new Dictionary<string, string>()),
-            },
-            new HashSet<Guid>(),
-            new HashSet<Guid>(),
-            NamedViewNames: new HashSet<string>(["Level 02"], StringComparer.OrdinalIgnoreCase));
+},
+            ExistingObjectIds: new HashSet<Guid>(),
+            DisplayModeIds: new HashSet<Guid>())
+        {
+            NamedViews = new HashSet<string>(["Level 02"], StringComparer.OrdinalIgnoreCase)
+        };
     }
 }

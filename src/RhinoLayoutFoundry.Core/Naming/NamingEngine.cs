@@ -35,7 +35,6 @@ public static partial class NamingEngine
         "project",
         "discipline",
         "folder",
-        "tag",
         "view",
         "index",
     };

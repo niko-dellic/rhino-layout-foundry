@@ -32,15 +32,16 @@ internal sealed class DocumentStateStore
 
     // Explicitly called at a mutation boundary, not during snapshots or archive writes.
     public DocumentState Reconcile(RhinoDoc document, DocumentState state) =>
-        state.RemoveTemplatesForMissingSources(document.Views.GetPageViews()
-            .Select(page => page.MainViewport.Id).ToHashSet());
+        state.RemoveMissingReferences(document.Views.GetPageViews()
+            .Select(page => page.MainViewport.Id).ToHashSet(), document.Views.GetPageViews().SelectMany(page => page.GetDetailViews()).Select(detail => detail.Viewport.Id).ToHashSet());
 
     public void Set(RhinoDoc document, DocumentState state)
     {
         ArgumentNullException.ThrowIfNull(state);
         EnsureWritable(document);
+        DocumentStateSerializer.Validate(state);
         _entries[document.RuntimeSerialNumber] = new(
-            new(DocumentStateLoadStatus.Loaded, state with { SchemaVersion = DocumentState.CurrentSchemaVersion }), null);
+            new(DocumentStateLoadStatus.Loaded, state), null);
     }
 
     internal Action CaptureRestoreAction(RhinoDoc document)
@@ -48,8 +49,6 @@ internal sealed class DocumentStateStore
         var original = Find(document);
         return () => _entries[document.RuntimeSerialNumber] = original;
     }
-
-    public void SetCurrentSchema(RhinoDoc document, DocumentState state) => Set(document, state);
     public void Remove(RhinoDoc document) => _entries.Remove(document.RuntimeSerialNumber);
 
     public void Write(RhinoDoc document, BinaryArchiveWriter archive)

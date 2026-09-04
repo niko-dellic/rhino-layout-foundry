@@ -101,20 +101,6 @@ public sealed class OverviewTreeBuilderTests
     }
 
     [Fact]
-    public void TagFiltersSeparateTaggedAndUntaggedSheets()
-    {
-        var tagged = OverviewTreeBuilder.Build(
-            CreateOverview(),
-            new OverviewTreeFilter(null, OverviewFilterKind.Tagged));
-        var untagged = OverviewTreeBuilder.Build(
-            CreateOverview(),
-            new OverviewTreeFilter(null, OverviewFilterKind.Untagged));
-
-        Assert.Equal("A-001", Flatten(tagged).Single(node => node.Key.Kind == OverviewNodeKind.Sheet).Label);
-        Assert.Equal("A-100", Flatten(untagged).Single(node => node.Key.Kind == OverviewNodeKind.Sheet).Label);
-    }
-
-    [Fact]
     public void SheetAndDetailRowsCarryStableNavigationTargets()
     {
         var nodes = Flatten(OverviewTreeBuilder.Build(CreateOverview())).ToArray();
@@ -154,32 +140,30 @@ public sealed class OverviewTreeBuilderTests
         var rootId = Guid.Parse("60000000-0000-0000-0000-000000000001");
         var plansId = Guid.Parse("60000000-0000-0000-0000-000000000002");
         var firstSheet = new SheetOverview(
-            TestSnapshots.SheetOneId,
-            plansId,
-            "A-001",
-            0,
-            ["Issue-A", "Plans"],
-            [
-                new DetailOverview(TestSnapshots.DetailOneId, "Main Plan", 0),
-                new DetailOverview(Guid.Parse("30000000-0000-0000-0000-000000000003"), "Ceiling Plan", 1),
+            PageViewId: TestSnapshots.SheetOneId,
+            FolderId: plansId,
+            Name: "A-001",
+            Order: 0,
+            Details: [
+                new DetailOverview(DetailViewportId: TestSnapshots.DetailOneId, Name: "Main Plan", Order: 0),
+                new DetailOverview(DetailViewportId: Guid.Parse("30000000-0000-0000-0000-000000000003"), Name: "Ceiling Plan", Order: 1),
             ]);
         var secondSheet = new SheetOverview(
-            TestSnapshots.SheetTwoId,
-            rootId,
-            "A-100",
-            1,
-            [],
-            []);
+            PageViewId: TestSnapshots.SheetTwoId,
+            FolderId: rootId,
+            Name: "A-100",
+            Order: 1,
+            Details: []);
 
         return new DocumentOverview(
-            42,
-            "Test",
-            rootId,
-            [
-                new FolderOverview(rootId, null, "Unorganized", 0),
-                new FolderOverview(plansId, rootId, "Plans", 0),
+            DocumentRuntimeSerialNumber: 42,
+            DocumentName: "Test",
+            RootFolderId: rootId,
+            Folders: [
+                new FolderOverview(Id: rootId, ParentId: null, Name: "Unorganized", Order: 0),
+                new FolderOverview(Id: plansId, ParentId: rootId, Name: "Plans", Order: 0),
             ],
-            [firstSheet, secondSheet]);
+                    Sheets: [firstSheet, secondSheet]);
     }
 
     private static IEnumerable<OverviewTreeNode> Flatten(IEnumerable<OverviewTreeNode> nodes)

@@ -104,18 +104,20 @@ internal sealed class RhinoDocumentObserverSnapshotProvider : IDocumentObserverS
             .ToArray();
 
         return new ObserverSnapshot(
-            document.RuntimeSerialNumber,
-            revision,
-            documentName,
-            state.RootFolderId,
-            folders,
-            sheets,
-            state.Canvas,
-            document.NamedViews
+            DocumentRuntimeSerialNumber: document.RuntimeSerialNumber,
+            Revision: revision,
+            DocumentName: documentName,
+            RootFolderId: state.RootFolderId,
+            Folders: folders,
+            Sheets: sheets,
+            CanvasState: state.Canvas,
+            NamedViewChoices: document.NamedViews
                 .Select(view => view.Name)
                 .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
-                .ToArray(),
-            state.AppearanceStates,
-            state.StateAssignments);
+                .ToArray())
+        {
+            AppearanceStates = state.AppearanceStates,
+            StateAssignments = state.StateAssignments
+        };
     }
 }

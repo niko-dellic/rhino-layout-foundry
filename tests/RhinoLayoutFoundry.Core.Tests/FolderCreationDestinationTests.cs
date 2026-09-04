@@ -8,8 +8,8 @@ public sealed class FolderCreationDestinationTests
     {
         Folders =
         [
-            new FolderOverview(TestSnapshots.RootFolderId, null, "Root", 0),
-            new FolderOverview(TestSnapshots.ChildFolderId, TestSnapshots.RootFolderId, "Plans", 0),
+            new FolderOverview(Id: TestSnapshots.RootFolderId, ParentId: null, Name: "Root", Order: 0),
+            new FolderOverview(Id: TestSnapshots.ChildFolderId, ParentId: TestSnapshots.RootFolderId, Name: "Plans", Order: 0),
         ],
         Sheets = TestSnapshots.Overview(2, 1).Sheets
             .Select((sheet, index) => index == 0

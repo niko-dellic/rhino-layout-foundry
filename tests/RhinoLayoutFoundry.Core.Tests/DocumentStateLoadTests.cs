@@ -32,9 +32,9 @@ public sealed class DocumentStateLoadTests
         foreach (var result in new[] {
             DocumentStateLoadResult.Read(null, payload),
             DocumentStateLoadResult.Read(1, payload),
-            DocumentStateLoadResult.Read(15, "{"),
-            DocumentStateLoadResult.Read(15, null),
-            DocumentStateLoadResult.Read(15, "null") })
+            DocumentStateLoadResult.Read(DocumentState.CurrentSchemaVersion, "{"),
+            DocumentStateLoadResult.Read(DocumentState.CurrentSchemaVersion, null),
+            DocumentStateLoadResult.Read(DocumentState.CurrentSchemaVersion, "null") })
         {
             Assert.Equal(DocumentStateLoadStatus.Invalid, result.Status);
             Assert.False(result.CanWrite);
@@ -43,17 +43,17 @@ public sealed class DocumentStateLoadTests
     }
 
     [Fact]
-    public void NullCollectionsAndEntriesAreRejectedBeforeNormalization()
+    public void NullCollectionsAndEntriesAreProtected()
     {
-        foreach (var name in new[] { "Folders", "Sheets", "DisplayRules", "Metadata" })
+        foreach (var name in new[] { "Folders", "Sheets", "AppearanceRules", "Metadata" })
         {
             var json = JsonNode.Parse(DocumentStateSerializer.Serialize(DocumentState.Empty()))!;
             json[name] = null;
-            Assert.False(DocumentStateLoadResult.Read(15, json.ToJsonString()).CanWrite);
+            Assert.False(DocumentStateLoadResult.Read(DocumentState.CurrentSchemaVersion, json.ToJsonString()).CanWrite);
         }
         var entries = JsonNode.Parse(DocumentStateSerializer.Serialize(DocumentState.Empty()))!;
         entries["Folders"] = new JsonArray((JsonNode?)null);
-        Assert.False(DocumentStateLoadResult.Read(15, entries.ToJsonString()).CanWrite);
+        Assert.False(DocumentStateLoadResult.Read(DocumentState.CurrentSchemaVersion, entries.ToJsonString()).CanWrite);
     }
 
     [Fact]
@@ -61,6 +61,6 @@ public sealed class DocumentStateLoadTests
     {
         var state = DocumentState.Empty();
         state = state with { Folders = [state.Folders[0] with { ParentId = state.RootFolderId }] };
-        Assert.False(DocumentStateLoadResult.Read(15, DocumentStateSerializer.Serialize(state)).CanWrite);
+        Assert.False(DocumentStateLoadResult.Read(DocumentState.CurrentSchemaVersion, System.Text.Json.JsonSerializer.Serialize(state)).CanWrite);
     }
 }

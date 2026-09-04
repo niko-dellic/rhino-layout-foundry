@@ -53,8 +53,7 @@ public sealed class AssignNamedViewPlanner : IOperationPlanner<AssignNamedViewRe
                              sheet.NamingBinding.LastGeneratedName,
                              StringComparison.Ordinal)))
             {
-                var assigned = sheet.NamingBinding!.NamedViews
-                    .ToDictionary(pair => pair.Key, pair => pair.Value);
+                var assigned = sheet.NamingBinding!.NamedViewAssignments.ToDictionary(pair => pair.Key, pair => pair.Value);
                 foreach (var detailId in sheet.DetailIds.Where(targetSet.Contains)) assigned[detailId] = name;
                 bindingOverrides[sheet.PageViewId] = sheet.NamingBinding with
                 {

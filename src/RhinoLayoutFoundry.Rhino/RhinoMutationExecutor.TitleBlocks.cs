@@ -22,22 +22,7 @@ internal sealed partial class RhinoMutationExecutor
         SheetTitleBlockData sheetData,
         IReadOnlyList<DetailSlotRecipe> details)
     {
-        if (titleBlock.BuiltInKind is { } builtInKind)
-            return CreateManagedTitleBlock(document, page, paper, builtInKind, projectInfo, sheetData, details);
-
-        var definition = document.InstanceDefinitions.Find(titleBlock.InstanceDefinitionId, true)
-            ?? document.InstanceDefinitions.Find(titleBlock.InstanceDefinitionName);
-        if (definition is null)
-            return null;
-        var attributes = new ObjectAttributes
-        {
-            Space = ActiveSpace.PageSpace,
-            ViewportId = page.MainViewport.Id,
-        };
-        var id = document.Objects.AddInstanceObject(definition.Index, RestoreTransform(titleBlock.Transform), attributes);
-        if (id == Guid.Empty)
-            throw new InvalidOperationException($"Rhino did not place title block '{titleBlock.InstanceDefinitionName}'.");
-        return id;
+        return CreateManagedTitleBlock(document, page, paper, titleBlock.BuiltInKind, projectInfo, sheetData, details);
     }
 
     private OperationResult ApplyProjectInformation(
@@ -95,9 +80,9 @@ internal sealed partial class RhinoMutationExecutor
                 };
             }
 
-            _stateStore.SetCurrentSchema(document, beforeState with
+            _stateStore.Set(document, beforeState with
             {
-                ProjectData = change.NewInformation,
+                ProjectInfo = change.NewInformation,
                 Sheets = sheets,
             });
             document.Modified = true;
@@ -393,7 +378,6 @@ internal sealed partial class RhinoMutationExecutor
         for (var index = 1; index <= 6; index++)
             result[$"revision.{index}.summary"] = string.Empty;
         foreach (var pair in project.CustomFields) result[$"custom.{pair.Key}"] = pair.Value;
-        foreach (var pair in sheet.Custom) result[$"sheet.custom.{pair.Key}"] = pair.Value;
         for (var index = 0; index < sheet.Revisions.Count; index++)
         {
             var revision = sheet.Revisions[index];

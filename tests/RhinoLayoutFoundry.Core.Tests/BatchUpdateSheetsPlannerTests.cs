@@ -7,7 +7,6 @@ namespace RhinoLayoutFoundry.Core.Tests;
 public sealed class BatchUpdateSheetsPlannerTests
 {
     private static readonly Guid TitleBlockInstanceId = Guid.Parse("60000000-0000-0000-0000-000000000001");
-    private static readonly Guid TitleBlockDefinitionId = Guid.Parse("60000000-0000-0000-0000-000000000002");
 
     [Fact]
     public void FolderSelectionResolvesAllDescendantSheetsWithProperties()
@@ -26,9 +25,9 @@ public sealed class BatchUpdateSheetsPlannerTests
     public void BatchStagesNamesPaperAndDisplayModeTogether()
     {
         var snapshot = EnrichedSnapshot();
-        var request = new BatchUpdateSheetsRequest(42, 1,
-            [TestSnapshots.SheetOneId, TestSnapshots.SheetTwoId],
-            "L-{index:00}", 3, 1, 11, 17, "Inches", TestSnapshots.DisplayModeTwoId,
+        var request = new BatchUpdateSheetsRequest(DocumentRuntimeSerialNumber: 42, SourceRevision: 1,
+            SheetPageViewIds: [TestSnapshots.SheetOneId, TestSnapshots.SheetTwoId],
+            NamingPattern: "L-{index:00}", Start: 3, Step: 1, PaperWidth: 11, PaperHeight: 17, PaperUnitSystem: "Inches", DetailDisplayModeId: TestSnapshots.DisplayModeTwoId,
             IndexMode: RhinoLayoutFoundry.Core.Naming.NamingIndexMode.GlobalPosition);
         var plan = new BatchUpdateSheetsPlanner().Plan(request, snapshot);
 
@@ -44,8 +43,8 @@ public sealed class BatchUpdateSheetsPlannerTests
     {
         var snapshot = EnrichedSnapshot();
         var plan = new BatchUpdateSheetsPlanner().Plan(new BatchUpdateSheetsRequest(
-            42, 1, [TestSnapshots.SheetOneId], null, 1, 1,
-            0, 297, "Millimeters", Guid.NewGuid()), snapshot);
+            DocumentRuntimeSerialNumber: 42, SourceRevision: 1, SheetPageViewIds: [TestSnapshots.SheetOneId], NamingPattern: null, Start: 1, Step: 1,
+            PaperWidth: 0, PaperHeight: 297, PaperUnitSystem: "Millimeters", DetailDisplayModeId: Guid.NewGuid()), snapshot);
 
         Assert.False(plan.CanApply);
         Assert.Contains(plan.Diagnostics, item => item.Code == "batch.paper_invalid");
@@ -53,48 +52,17 @@ public sealed class BatchUpdateSheetsPlannerTests
     }
 
     [Fact]
-    public void TitleBlockInstanceCanBeAssignedOrRemovedAcrossBatch()
-    {
-        var snapshot = EnrichedSnapshot();
-        var assign = new BatchUpdateSheetsPlanner().Plan(new BatchUpdateSheetsRequest(
-            42, 1, [TestSnapshots.SheetOneId, TestSnapshots.SheetTwoId], null, 1, 1,
-            null, null, null, null, true, TitleBlockInstanceId), snapshot);
-        var remove = new BatchUpdateSheetsPlanner().Plan(new BatchUpdateSheetsRequest(
-            42, 1, [TestSnapshots.SheetOneId], null, 1, 1,
-            null, null, null, null, true, null), snapshot);
-
-        Assert.True(assign.CanApply);
-        Assert.Equal(TitleBlockInstanceId,
-            ((BatchUpdateSheetsChange)assign.Changes.Single()).TitleBlockSourceInstanceObjectId);
-        Assert.True(remove.CanApply);
-        Assert.True(((BatchUpdateSheetsChange)remove.Changes.Single()).ChangeTitleBlock);
-    }
-
-    [Fact]
-    public void MissingTitleBlockInstanceBlocksApply()
-    {
-        var snapshot = EnrichedSnapshot();
-        var plan = new BatchUpdateSheetsPlanner().Plan(new BatchUpdateSheetsRequest(
-            42, 1, [TestSnapshots.SheetOneId], null, 1, 1,
-            null, null, null, null, true, Guid.NewGuid()), snapshot);
-
-        Assert.False(plan.CanApply);
-        Assert.Contains(plan.Diagnostics, item => item.Code == "batch.title_block_missing");
-    }
-
-    [Fact]
     public void BuiltInModeCanBeAssignedDirectly()
     {
         var snapshot = EnrichedSnapshot();
         var plan = new BatchUpdateSheetsPlanner().Plan(new BatchUpdateSheetsRequest(
-            42, 1, [TestSnapshots.SheetOneId], null, 1, 1,
-            null, null, null, null, ChangeTitleBlock: true,
+            DocumentRuntimeSerialNumber: 42, SourceRevision: 1, SheetPageViewIds: [TestSnapshots.SheetOneId], NamingPattern: null, Start: 1, Step: 1,
+            PaperWidth: null, PaperHeight: null, PaperUnitSystem: null, DetailDisplayModeId: null, ChangeTitleBlock: true,
             BuiltInTitleBlock: BuiltInTitleBlockKind.RightSidebar), snapshot);
 
         Assert.True(plan.CanApply);
         var change = Assert.IsType<BatchUpdateSheetsChange>(Assert.Single(plan.Changes));
         Assert.Equal(BuiltInTitleBlockKind.RightSidebar, change.BuiltInTitleBlock);
-        Assert.Null(change.TitleBlockSourceInstanceObjectId);
     }
 
     [Fact]
@@ -103,16 +71,16 @@ public sealed class BatchUpdateSheetsPlannerTests
         var snapshot = EnrichedSnapshot();
         var revision = new SheetRevisionRecord("P02", "2026-08-28", "Planning issue", "ND", "QA");
         var plan = new BatchUpdateSheetsPlanner().Plan(new BatchUpdateSheetsRequest(
-            42,
-            1,
-            [TestSnapshots.SheetOneId, TestSnapshots.SheetTwoId],
-            null,
-            1,
-            1,
-            null,
-            null,
-            null,
-            null,
+            DocumentRuntimeSerialNumber: 42,
+            SourceRevision: 1,
+            SheetPageViewIds: [TestSnapshots.SheetOneId, TestSnapshots.SheetTwoId],
+            NamingPattern: null,
+            Start: 1,
+            Step: 1,
+            PaperWidth: null,
+            PaperHeight: null,
+            PaperUnitSystem: null,
+            DetailDisplayModeId: null,
             AppendRevision: revision), snapshot);
 
         Assert.True(plan.CanApply);
@@ -126,14 +94,14 @@ public sealed class BatchUpdateSheetsPlannerTests
         var stateId = Guid.Parse("60000000-0000-0000-0000-000000000010");
         var snapshot = EnrichedSnapshot() with
         {
-            AppearanceStateResources =
+            AppearanceStates =
             [
                 new AppearanceStateRecord(stateId, TestSnapshots.RootFolderId, 0, "Print", [], []),
             ],
         };
         var plan = new BatchUpdateSheetsPlanner().Plan(new BatchUpdateSheetsRequest(
-            42, 1, [TestSnapshots.SheetOneId], null, 1, 1,
-            null, null, null, null,
+            DocumentRuntimeSerialNumber: 42, SourceRevision: 1, SheetPageViewIds: [TestSnapshots.SheetOneId], NamingPattern: null, Start: 1, Step: 1,
+            PaperWidth: null, PaperHeight: null, PaperUnitSystem: null, DetailDisplayModeId: null,
             DestinationFolderId: TestSnapshots.OtherFolderId,
             ChangeAppearanceState: true,
             AppearanceStateId: stateId), snapshot);
@@ -149,8 +117,8 @@ public sealed class BatchUpdateSheetsPlannerTests
     public void MissingDestinationAndAppearanceStateBlockApply()
     {
         var plan = new BatchUpdateSheetsPlanner().Plan(new BatchUpdateSheetsRequest(
-            42, 1, [TestSnapshots.SheetOneId], null, 1, 1,
-            null, null, null, null,
+            DocumentRuntimeSerialNumber: 42, SourceRevision: 1, SheetPageViewIds: [TestSnapshots.SheetOneId], NamingPattern: null, Start: 1, Step: 1,
+            PaperWidth: null, PaperHeight: null, PaperUnitSystem: null, DetailDisplayModeId: null,
             DestinationFolderId: Guid.NewGuid(),
             ChangeAppearanceState: true,
             AppearanceStateId: Guid.NewGuid()), EnrichedSnapshot());
@@ -166,11 +134,11 @@ public sealed class BatchUpdateSheetsPlannerTests
         var layerId = Guid.Parse("60000000-0000-0000-0000-000000000020");
         var snapshot = EnrichedSnapshot() with
         {
-            LayerNames = new Dictionary<Guid, string> { [layerId] = "Documentation::Details" },
+            Layers = new Dictionary<Guid, string> { [layerId] = "Documentation::Details" },
         };
         var plan = new BatchUpdateSheetsPlanner().Plan(new BatchUpdateSheetsRequest(
-            42, 1, [TestSnapshots.SheetOneId], null, 1, 1,
-            null, null, null, null,
+            DocumentRuntimeSerialNumber: 42, SourceRevision: 1, SheetPageViewIds: [TestSnapshots.SheetOneId], NamingPattern: null, Start: 1, Step: 1,
+            PaperWidth: null, PaperHeight: null, PaperUnitSystem: null, DetailDisplayModeId: null,
             ChangeDetailLayer: true,
             UseDedicatedDetailLayer: false,
             DetailLayerId: layerId), snapshot);
@@ -186,8 +154,8 @@ public sealed class BatchUpdateSheetsPlannerTests
     public void MissingDetailLayerBlocksApply()
     {
         var plan = new BatchUpdateSheetsPlanner().Plan(new BatchUpdateSheetsRequest(
-            42, 1, [TestSnapshots.SheetOneId], null, 1, 1,
-            null, null, null, null,
+            DocumentRuntimeSerialNumber: 42, SourceRevision: 1, SheetPageViewIds: [TestSnapshots.SheetOneId], NamingPattern: null, Start: 1, Step: 1,
+            PaperWidth: null, PaperHeight: null, PaperUnitSystem: null, DetailDisplayModeId: null,
             ChangeDetailLayer: true,
             UseDedicatedDetailLayer: false,
             DetailLayerId: Guid.NewGuid()), EnrichedSnapshot());
@@ -201,7 +169,7 @@ public sealed class BatchUpdateSheetsPlannerTests
     {
         var snapshot = EnrichedSnapshot() with
         {
-            NamedViewNames = new HashSet<string>(["Level 02"], StringComparer.OrdinalIgnoreCase),
+            NamedViews = new HashSet<string>(["Level 02"], StringComparer.OrdinalIgnoreCase),
         };
         var detailUpdate = new BatchDetailUpdate(
             TestSnapshots.DetailOneId,
@@ -210,8 +178,8 @@ public sealed class BatchUpdateSheetsPlannerTests
             ChangeDisplayMode: true,
             DisplayModeId: TestSnapshots.DisplayModeTwoId);
         var plan = new BatchUpdateSheetsPlanner().Plan(new BatchUpdateSheetsRequest(
-            42, 1, [TestSnapshots.SheetOneId], null, 1, 1,
-            null, null, null, null,
+            DocumentRuntimeSerialNumber: 42, SourceRevision: 1, SheetPageViewIds: [TestSnapshots.SheetOneId], NamingPattern: null, Start: 1, Step: 1,
+            PaperWidth: null, PaperHeight: null, PaperUnitSystem: null, DetailDisplayModeId: null,
             DetailUpdates: [detailUpdate]), snapshot);
 
         Assert.True(plan.CanApply);
@@ -225,7 +193,7 @@ public sealed class BatchUpdateSheetsPlannerTests
         var stateId = Guid.Parse("60000000-0000-0000-0000-000000000011");
         var snapshot = EnrichedSnapshot() with
         {
-            AppearanceStateResources =
+            AppearanceStates =
             [
                 new AppearanceStateRecord(stateId, TestSnapshots.RootFolderId, 0, "Detail state", [], []),
             ],
@@ -240,8 +208,8 @@ public sealed class BatchUpdateSheetsPlannerTests
             AppearanceStateId: stateId);
 
         var plan = new BatchUpdateSheetsPlanner().Plan(new BatchUpdateSheetsRequest(
-            42, 1, [TestSnapshots.SheetOneId], null, 1, 1,
-            null, null, null, null,
+            DocumentRuntimeSerialNumber: 42, SourceRevision: 1, SheetPageViewIds: [TestSnapshots.SheetOneId], NamingPattern: null, Start: 1, Step: 1,
+            PaperWidth: null, PaperHeight: null, PaperUnitSystem: null, DetailDisplayModeId: null,
             DetailUpdates: [detailUpdate]), snapshot);
 
         Assert.True(plan.CanApply);
@@ -249,8 +217,8 @@ public sealed class BatchUpdateSheetsPlannerTests
             Assert.Single(Assert.IsType<BatchUpdateSheetsChange>(Assert.Single(plan.Changes)).DetailUpdates!));
 
         var missing = new BatchUpdateSheetsPlanner().Plan(new BatchUpdateSheetsRequest(
-            42, 1, [TestSnapshots.SheetOneId], null, 1, 1,
-            null, null, null, null,
+            DocumentRuntimeSerialNumber: 42, SourceRevision: 1, SheetPageViewIds: [TestSnapshots.SheetOneId], NamingPattern: null, Start: 1, Step: 1,
+            PaperWidth: null, PaperHeight: null, PaperUnitSystem: null, DetailDisplayModeId: null,
             DetailUpdates: [detailUpdate with { AppearanceStateId = Guid.NewGuid() }]), snapshot);
         Assert.False(missing.CanApply);
         Assert.Contains(missing.Diagnostics,
@@ -261,8 +229,8 @@ public sealed class BatchUpdateSheetsPlannerTests
     public void InvalidPerDetailAssignmentsBlockApply()
     {
         var plan = new BatchUpdateSheetsPlanner().Plan(new BatchUpdateSheetsRequest(
-            42, 1, [TestSnapshots.SheetOneId], null, 1, 1,
-            null, null, null, null,
+            DocumentRuntimeSerialNumber: 42, SourceRevision: 1, SheetPageViewIds: [TestSnapshots.SheetOneId], NamingPattern: null, Start: 1, Step: 1,
+            PaperWidth: null, PaperHeight: null, PaperUnitSystem: null, DetailDisplayModeId: null,
             DetailUpdates:
             [
                 new BatchDetailUpdate(
@@ -292,30 +260,25 @@ public sealed class BatchUpdateSheetsPlannerTests
             {
                 [TestSnapshots.SheetOneId] = source.Sheets[TestSnapshots.SheetOneId] with
                 {
-                    PageWidth = 420, PageHeight = 297, PageUnitSystem = "Millimeters",
+                    PageWidth = 420,
+                    PageHeight = 297,
+                    PageUnitSystem = "Millimeters",
                     DetailSettings = [wireframe],
                     TitleBlockInstanceObjectId = TitleBlockInstanceId,
                     TitleBlockDefinitionName = "A3 Title Block",
                 },
                 [TestSnapshots.SheetTwoId] = source.Sheets[TestSnapshots.SheetTwoId] with
                 {
-                    PageWidth = 11, PageHeight = 17, PageUnitSystem = "Inches",
+                    PageWidth = 11,
+                    PageHeight = 17,
+                    PageUnitSystem = "Inches",
                     DetailSettings = [rendered],
                 },
             },
-            DisplayModeNames = new Dictionary<Guid, string>
+            DisplayModes = new Dictionary<Guid, string>
             {
                 [TestSnapshots.DisplayModeOneId] = "Wireframe",
                 [TestSnapshots.DisplayModeTwoId] = "Rendered",
-            },
-            TitleBlockInstanceChoices = new Dictionary<Guid, TitleBlockInstanceSnapshot>
-            {
-                [TitleBlockInstanceId] = new(
-                    TitleBlockInstanceId,
-                    TitleBlockDefinitionId,
-                    "A3 Title Block",
-                    TestSnapshots.SheetOneId,
-                    "A-001"),
             },
         };
     }

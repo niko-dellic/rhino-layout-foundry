@@ -108,6 +108,8 @@ public sealed class ViewAuthoringPlannerTests
             new Dictionary<Guid, FolderRecord>(),
             new Dictionary<Guid, SheetSnapshot>(),
             new HashSet<Guid>(),
-            new HashSet<Guid>(),
-            NamedViewNames: namedViews ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+            new HashSet<Guid>())
+        {
+            NamedViews = namedViews ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        };
 }

@@ -75,3 +75,25 @@ its own modal without adding another Rhino pane or replacing a Foundry view.
 The registration is disposable, and this presentation hook does not grant
 document access; automation still crosses the host contract and its approval
 gates.
+
+## Layout creation contract
+
+`stage_create_layouts` requires `layouts`, `destination_folder_id`, and `naming_pattern`. Each specification supplies quantity and paper size/units. Optional fields are `layout_kind`, `template_id` (a live registration ID), `named_views_by_detail`, and `title_block` (`none`, `right`, or `bottom`). Layout kinds are `blank`, `single_detail`, `two_details_horizontal`, `two_details_vertical`, and `four_details_grid`. Unknown fields and values fail before staging.
+
+```json
+{
+  "destination_folder_id": "<folder-guid>",
+  "naming_pattern": "A-{index:000}",
+  "layouts": [{
+    "quantity": 2,
+    "page_width": 594,
+    "page_height": 420,
+    "page_units": "Millimeters",
+    "layout_kind": "two_details_horizontal",
+    "named_views_by_detail": ["Plan", null],
+    "title_block": "right"
+  }]
+}
+```
+
+Assignments follow resolved detail order. Null preserves that detail's camera. The planner validates view existence and assignment count before mutation. The C# equivalent is `BatchCreateSheetsRequest.CreationSpecs` with `LayoutCreationSpec.NamedViewsByDetail`; quantity-only template requests, singular assignments, and request-wide defaults are removed. Core records remain experimental and have no compatibility aliases.

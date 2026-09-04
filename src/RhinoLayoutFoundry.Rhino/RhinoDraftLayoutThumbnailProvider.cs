@@ -20,11 +20,6 @@ internal sealed class RhinoDraftLayoutThumbnailProvider : IDraftLayoutThumbnailP
         _stateStore = stateStore ?? throw new ArgumentNullException(nameof(stateStore));
     }
 
-    public void BeginSession(uint documentRuntimeSerialNumber)
-    {
-        // Each capture owns its resources. No document flags outlive that scope.
-    }
-
     public async Task<DraftLayoutThumbnailResult> CaptureAsync(
         DraftLayoutThumbnailRequest request,
         CancellationToken cancellationToken)
@@ -107,10 +102,7 @@ internal sealed class RhinoDraftLayoutThumbnailProvider : IDraftLayoutThumbnailP
         }
     }
 
-    public async Task CompleteSessionAsync(
-        uint documentRuntimeSerialNumber,
-        bool restoreOriginalModifiedState,
-        bool endSession = true,
+    public async Task WaitForPendingCapturesAsync(
         CancellationToken cancellationToken = default)
     {
         await RhinoThumbnailCaptureGate.Gate.WaitAsync(cancellationToken);
@@ -209,24 +201,24 @@ internal sealed class RhinoDraftLayoutThumbnailProvider : IDraftLayoutThumbnailP
             var sourceViewport = sourceDetail.Viewport;
             var bounds = sourceDetail.DetailGeometry.GetBoundingBox(true);
             var slot = new DetailSlotRecipe(
-                Guid.NewGuid(),
-                string.IsNullOrWhiteSpace(sourceDetail.Attributes.Name)
+                Id: Guid.NewGuid(),
+                Name: string.IsNullOrWhiteSpace(sourceDetail.Attributes.Name)
                     ? sourceViewport.Name
                     : sourceDetail.Attributes.Name,
-                bounds.Min.X,
-                bounds.Min.Y,
-                bounds.Max.X,
-                bounds.Max.Y,
-                sourceViewport.IsPerspectiveProjection ? "Perspective" : "Top",
-                !cameraChanged && sourceDetail.DetailGeometry.IsParallelProjection
+                Left: bounds.Min.X,
+                Bottom: bounds.Min.Y,
+                Right: bounds.Max.X,
+                Top: bounds.Max.Y,
+                Projection: sourceViewport.IsPerspectiveProjection ? "Perspective" : "Top",
+                PageToModelRatio: !cameraChanged && sourceDetail.DetailGeometry.IsParallelProjection
                     ? sourceDetail.DetailGeometry.PageToModelRatio
                     : null,
-                !cameraChanged && sourceDetail.DetailGeometry.IsProjectionLocked,
-                requested.DisplayModeId,
-                null,
-                [sourceViewport.CameraLocation.X, sourceViewport.CameraLocation.Y, sourceViewport.CameraLocation.Z],
-                [sourceViewport.CameraTarget.X, sourceViewport.CameraTarget.Y, sourceViewport.CameraTarget.Z],
-                [sourceViewport.CameraUp.X, sourceViewport.CameraUp.Y, sourceViewport.CameraUp.Z]);
+                ProjectionLocked: !cameraChanged && sourceDetail.DetailGeometry.IsProjectionLocked,
+                DisplayModeId: requested.DisplayModeId,
+                DefaultNamedView: null,
+                CameraLocation: [sourceViewport.CameraLocation.X, sourceViewport.CameraLocation.Y, sourceViewport.CameraLocation.Z],
+                CameraTarget: [sourceViewport.CameraTarget.X, sourceViewport.CameraTarget.Y, sourceViewport.CameraTarget.Z],
+                CameraUp: [sourceViewport.CameraUp.X, sourceViewport.CameraUp.Y, sourceViewport.CameraUp.Z]);
             if (!document.Objects.Delete(previewDetail.Id, quiet: true))
                 throw new InvalidOperationException("Rhino could not remove the stale preview detail.");
             var rebuiltViewportId = RhinoMutationExecutor.CreateDetail(
@@ -419,7 +411,7 @@ internal sealed class RhinoDraftLayoutThumbnailProvider : IDraftLayoutThumbnailP
                 page,
                 titleBlock,
                 create.Template.Paper,
-                create.ProjectData ?? state.ProjectInfo,
+                create.ProjectInfo ?? state.ProjectInfo,
                 titleBlockData,
                 create.Template.DetailSlots);
         }

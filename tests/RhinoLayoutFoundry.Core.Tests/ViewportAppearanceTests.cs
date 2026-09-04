@@ -56,17 +56,6 @@ public sealed class ViewportAppearanceTests
     }
 
     [Fact]
-    public void CapabilityPolicyIsContextAware()
-    {
-        Assert.False(TemplateCapabilityPolicy.AllowedFor(HierarchyScopeKind.Folder)
-            .HasFlag(TemplateCapability.TitleBlock));
-        Assert.True(TemplateCapabilityPolicy.AllowedFor(HierarchyScopeKind.Sheet)
-            .HasFlag(TemplateCapability.TitleBlock));
-        Assert.False(TemplateCapabilityPolicy.AllowedFor(HierarchyScopeKind.Detail)
-            .HasFlag(TemplateCapability.TitleBlock));
-    }
-
-    [Fact]
     public void RulePlannerValidatesAndStagesOneScope()
     {
         var layer = new LayerSnapshot(ChildLayerId, null, "Walls", true);
@@ -74,8 +63,8 @@ public sealed class ViewportAppearanceTests
             TestSnapshots.ObjectId, "Wall", ChildLayerId, "Walls", false);
         var snapshot = TestSnapshots.Create() with
         {
-            LayerSettings = new Dictionary<Guid, LayerSnapshot> { [layer.Id] = layer },
-            ModelObjectSettings = new Dictionary<Guid, ModelObjectSnapshot>
+            LayerSnapshots = new Dictionary<Guid, LayerSnapshot> { [layer.Id] = layer },
+            ModelObjects = new Dictionary<Guid, ModelObjectSnapshot>
             {
                 [objectSnapshot.Id] = objectSnapshot,
             },
@@ -114,8 +103,8 @@ public sealed class ViewportAppearanceTests
             "Wireframe");
         var snapshot = TestSnapshots.Create() with
         {
-            LayerSettings = new Dictionary<Guid, LayerSnapshot> { [layer.Id] = layer },
-            ModelObjectSettings = new Dictionary<Guid, ModelObjectSnapshot>
+            LayerSnapshots = new Dictionary<Guid, LayerSnapshot> { [layer.Id] = layer },
+            ModelObjects = new Dictionary<Guid, ModelObjectSnapshot>
             {
                 [objectSnapshot.Id] = objectSnapshot,
             },
@@ -190,9 +179,9 @@ public sealed class ViewportAppearanceTests
             [new LayerVisibilityRule(new LayerReference(ChildLayerId, "Walls"), LayerVisibilityOverride.Visible)], []);
         var snapshot = TestSnapshots.Create() with
         {
-            AppearanceStateResources = [state],
-            AppearanceStateAssignments = [assignment],
-            ViewportRuleSets = [local],
+            AppearanceStates = [state],
+            StateAssignments = [assignment],
+            AppearanceRules = [local],
         };
 
         var plan = new AssignAppearanceStatePlanner().Plan(new AssignAppearanceStateRequest(

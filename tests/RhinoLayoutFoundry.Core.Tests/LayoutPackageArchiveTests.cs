@@ -110,7 +110,7 @@ public sealed class LayoutPackageArchiveTests
     }
 
     [Fact]
-    public void VersionOnePackageIsReadAndNormalizedToVersionTwo()
+    public void HistoricalPackageIsRejectedWithoutConversion()
     {
         var path = TemporaryPath();
         try
@@ -135,15 +135,50 @@ public sealed class LayoutPackageArchiveTests
                 output.Write(layout);
             }
 
-            var restored = LayoutPackageArchive.Read(path);
-
-            Assert.Equal(LayoutPackageManifest.CurrentPackageVersion, restored.Manifest.PackageVersion);
-            Assert.Equal(DocumentState.CurrentSchemaVersion, restored.Manifest.FoundryState.SchemaVersion);
+            Assert.Throws<NotSupportedException>(() => LayoutPackageArchive.Read(path));
         }
         finally
         {
             if (File.Exists(path)) File.Delete(path);
         }
+    }
+
+    [Fact]
+    public void OrdinaryBlocksAndPageObjectsRoundTripWithoutManagedClassification()
+    {
+        var path = TemporaryPath();
+        try
+        {
+            var pageId = Guid.NewGuid();
+            var objectId = Guid.NewGuid();
+            var definitionId = Guid.NewGuid();
+            var manifest = Manifest() with
+            {
+                Sheets = [new(pageId, DocumentState.Empty().RootFolderId, 0, "Geometry", new(420, 297, "Millimeters"),
+                    [], [objectId], new Dictionary<string, string>(), null, true)],
+                BlockDefinitions = [new(definitionId, "Ordinary block", "fingerprint")],
+            };
+            LayoutPackageArchive.Write(path, manifest, new Dictionary<string, byte[]>
+            { [LayoutPackageManifest.LayoutAssetEntryName] = [1, 2, 3] });
+            var restored = LayoutPackageArchive.Read(path).Manifest;
+            Assert.Null(Assert.Single(restored.Sheets).TitleBlock);
+            Assert.Equal(objectId, Assert.Single(restored.Sheets[0].PageSpaceObjectIds));
+            Assert.Equal(definitionId, Assert.Single(restored.BlockDefinitions).SourceId);
+        }
+        finally { if (File.Exists(path)) File.Delete(path); }
+    }
+
+    [Fact]
+    public void WriterCannotRelabelAnIncompatibleManifest()
+    {
+        var path = TemporaryPath();
+        try
+        {
+            Assert.Throws<NotSupportedException>(() => LayoutPackageArchive.Write(path,
+                Manifest() with { PackageVersion = 5 }, new Dictionary<string, byte[]>()));
+            Assert.False(File.Exists(path));
+        }
+        finally { if (File.Exists(path)) File.Delete(path); }
     }
 
     private static LayoutPackageManifest Manifest() => new(

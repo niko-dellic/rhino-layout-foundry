@@ -30,8 +30,8 @@ public sealed record CustomTitleBlockFieldOption(
     bool IsIncluded = true);
 
 public sealed record TitleBlockContentOptions(
-    IReadOnlyList<TitleBlockContentField> IncludedFields,
-    IReadOnlyList<CustomTitleBlockFieldOption> CustomFields,
+    [property: System.Text.Json.Serialization.JsonRequired] IReadOnlyList<TitleBlockContentField> IncludedFields,
+    [property: System.Text.Json.Serialization.JsonRequired] IReadOnlyList<CustomTitleBlockFieldOption> CustomFields,
     bool ReserveRevisionArea = false)
 {
     public static IReadOnlyList<TitleBlockContentField> ConventionalFields { get; } =
@@ -83,10 +83,8 @@ public sealed record TitleBlockContentOptions(
 
 public enum BuiltInTitleBlockKind
 {
-    CompactLowerRight,
     FullWidthBottom,
     RightSidebar,
-    MinimalLowerRight,
 }
 
 public sealed record ProjectInformation(
@@ -107,10 +105,8 @@ public sealed record ProjectInformation(
     string DrawnBy,
     string CheckedBy,
     string ApprovedBy,
-    IReadOnlyDictionary<string, string> CustomFields,
-    BrandAsset? Logo = null,
-    SheetRevisionRecord? DefaultRevision = null,
-    TitleBlockContentOptions? TitleBlockOptions = null)
+    [property: System.Text.Json.Serialization.JsonRequired] IReadOnlyDictionary<string, string> CustomFields,
+    BrandAsset? Logo = null)
 {
     public static ProjectInformation Empty { get; } = new(
         string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty,
@@ -118,8 +114,9 @@ public sealed record ProjectInformation(
         string.Empty, string.Empty, string.Empty, string.Empty, string.Empty,
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase));
 
-    public TitleBlockContentOptions ContentOptions =>
-        (TitleBlockOptions ?? TitleBlockContentOptions.Default(CustomFields)).Normalize(CustomFields);
+    [System.Text.Json.Serialization.JsonRequired]
+
+    public TitleBlockContentOptions ContentOptions { get; init; } = TitleBlockContentOptions.Default(new Dictionary<string, string>());
 }
 
 public sealed record BrandAsset(
@@ -137,12 +134,7 @@ public sealed record SheetRevisionRecord(
 
 public sealed record SheetTitleBlockData(
     string SheetNumber,
-    IReadOnlyList<SheetRevisionRecord> Revisions,
-    IReadOnlyDictionary<string, string>? CustomFields = null)
-{
-    public IReadOnlyDictionary<string, string> Custom =>
-        CustomFields ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-}
+    [property: System.Text.Json.Serialization.JsonRequired] IReadOnlyList<SheetRevisionRecord> Revisions);
 
 public readonly record struct TitleBlockRectangle(double Left, double Bottom, double Width, double Height)
 {
@@ -175,7 +167,7 @@ public sealed record AdaptiveTitleBlockLayout(
     bool IsCompact,
     int VisibleRevisionRows,
     string Signature,
-    IReadOnlyList<TitleBlockFieldPlacement> Fields,
+    [property: System.Text.Json.Serialization.JsonRequired] IReadOnlyList<TitleBlockFieldPlacement> Fields,
     TitleBlockRectangle? LogoRegion,
     TitleBlockRectangle? RevisionRegion);
 
@@ -249,8 +241,6 @@ public static class AdaptiveTitleBlockLayoutSolver
     {
         BuiltInTitleBlockKind.FullWidthBottom => "Bottom",
         BuiltInTitleBlockKind.RightSidebar => "Right",
-        BuiltInTitleBlockKind.CompactLowerRight => "Right (legacy compact)",
-        BuiltInTitleBlockKind.MinimalLowerRight => "Right (legacy minimal)",
         _ => kind.ToString(),
     };
 

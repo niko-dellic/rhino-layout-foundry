@@ -64,18 +64,18 @@ public sealed class ReorderSheetsPlannerTests
         second = Guid.NewGuid();
         third = Guid.NewGuid();
         return new DocumentSnapshot(
-            9,
-            3,
-            root,
-            new Dictionary<Guid, FolderRecord> { [root] = new(root, null, "Root", 0) },
-            new Dictionary<Guid, SheetSnapshot>
-            {
-                [first] = Sheet(first, root, 0, "Page 1"),
-                [second] = Sheet(second, root, 1, "Page 2"),
-                [third] = Sheet(third, root, 2, "Page 3"),
-            },
-            new HashSet<Guid>(),
-            new HashSet<Guid>());
+            DocumentRuntimeSerialNumber: 9,
+            Revision: 3,
+            RootFolderId: root,
+            Folders: new Dictionary<Guid, FolderRecord> { [root] = new(root, null, "Root", 0) },
+            Sheets: new Dictionary<Guid, SheetSnapshot>
+{
+    [first] = Sheet(first, root, 0, "Page 1"),
+    [second] = Sheet(second, root, 1, "Page 2"),
+    [third] = Sheet(third, root, 2, "Page 3"),
+},
+            ExistingObjectIds: new HashSet<Guid>(),
+            DisplayModeIds: new HashSet<Guid>());
     }
 
     private static SheetSnapshot Sheet(Guid id, Guid folderId, int order, string name) =>

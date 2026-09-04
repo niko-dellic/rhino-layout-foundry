@@ -4,11 +4,11 @@ Work on a copy of an affected 3DM. Keep the original file and any `LayoutFoundry
 
 ## Unsupported or invalid metadata
 
-Foundry shows a persistent diagnostic and blocks its mutation entry points. Rhino layouts remain available through Rhino. When the archive dictionary is readable, Foundry passes the original dictionary through on save, including unknown versions and fields. Merely inspecting a document does not migrate or prune its metadata.
+Foundry shows a persistent diagnostic and blocks its mutation entry points. Rhino layouts remain available through Rhino. When the archive dictionary is readable, Foundry passes the original dictionary through on save, including unknown versions and fields. Merely inspecting a document does not prune its metadata.
 
 Use a compatible Foundry version to edit newer metadata. Schema 11 was an intentionally unsupported pre-release format. Do not delete metadata to silence a warning. If the underlying archive cannot be read at all, Foundry refuses to write replacement empty metadata; preserve the original 3DM and recover into a separate copy using Rhino's native tools.
 
-A successful intentional Foundry edit writes the current schema (15). Existing supported migrations remain available. Saving edited metadata can prevent older builds from interpreting it.
+Foundry accepts document schema 16 and package format 6 only. Historical formats are unsupported. There are no converters, compatibility aliases, or migration paths. The generic protected-state behavior preserves recoverable unknown metadata without interpreting it. Use fresh documents and packages for this candidate.
 
 ## Failed or canceled package import
 

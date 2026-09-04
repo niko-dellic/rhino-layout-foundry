@@ -190,8 +190,8 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
                     var created = CreateDetail(document, page, recipe, unit, scale);
                     detailsBySource[detail.SourceDetailViewportId] = created.Viewport.Id;
                     ApplyLayerOverrides(document, created.Viewport.Id, detail.LayerOverrides, warnings, transaction);
-                    ApplyLayerRules(document, created.Viewport.Id, recipe.Layers, warnings, transaction);
-                    ApplyObjectDisplayRules(document, created.Viewport.Id, recipe.Objects, warnings, transaction);
+                    ApplyLayerRules(document, created.Viewport.Id, recipe.LayerRules, warnings, transaction);
+                    ApplyObjectDisplayRules(document, created.Viewport.Id, recipe.ObjectDisplayRules, warnings, transaction);
                 }
             }
 
@@ -235,7 +235,7 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
                 namedViewMap,
                 resolutions,
                 warnings);
-            _stateStore.SetCurrentSchema(document, importedState);
+            _stateStore.Set(document, importedState);
             cancellationToken.ThrowIfCancellationRequested();
             if (createRecovery) _checkpoint?.Invoke("metadata");
             document.Modified = true;
@@ -306,8 +306,7 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
                 cancellationToken.ThrowIfCancellationRequested();
                 var pageId = page.MainViewport.Id;
                 var record = state.Sheets.GetValueOrDefault(pageId) ??
-                    new SheetRecord(pageId, state.RootFolderId, page.PageNumber, [],
-                        new Dictionary<string, string>(StringComparer.Ordinal), null);
+                    new SheetRecord(PageViewId: pageId, FolderId: state.RootFolderId, Order: page.PageNumber, Metadata: new Dictionary<string, string>(StringComparer.Ordinal), TitleBlock: null);
                 var details = page.GetDetailViews().Select(detail =>
                 {
                     referencedDisplayModes.Add(detail.Viewport.DisplayMode.Id);
@@ -323,33 +322,26 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
                     .Select(item => item.Id)
                     .ToArray();
                 sheets.Add(new LayoutPackageSheet(
-                    pageId,
-                    record.FolderId,
-                    record.Order,
-                    page.PageName,
-                    new PaperRecipe(page.PageWidth, page.PageHeight, document.PageUnitSystem.ToString()),
-                    details,
-                    pageObjectIds,
-                    record.Tags,
-                    record.Metadata,
-                    record.TitleBlock,
-                    record.IncludeInPrintAll,
-                    record.TitleBlockData,
-                    record.NamingBinding is { } binding && string.Equals(
+                    SourcePageViewId: pageId,
+                    SourceFolderId: record.FolderId,
+                    Order: record.Order,
+                    Name: page.PageName,
+                    Paper: new PaperRecipe(page.PageWidth, page.PageHeight, document.PageUnitSystem.ToString()),
+                    Details: details,
+                    PageSpaceObjectIds: pageObjectIds,
+                    Metadata: record.Metadata,
+                    TitleBlock: record.TitleBlock,
+                    IncludeInPrintAll: record.IncludeInPrintAll,
+                    TitleBlockData: record.TitleBlockData,
+                    NamingBinding: record.NamingBinding is { } binding && string.Equals(
                         page.PageName,
                         binding.LastGeneratedName,
                         StringComparison.Ordinal)
                         ? binding
                         : null,
-                    record.Notes ?? string.Empty,
-                    record.DetailNamedViewAssignments));
+                    Notes: record.Notes ?? string.Empty)
+                { DetailNamedViews = record.DetailNamedViews });
             }
-
-            foreach (var rule in state.DisplayRules) referencedDisplayModes.Add(rule.DisplayModeId);
-            foreach (var modeId in state.Templates.SelectMany(template => template.DetailSlots)
-                         .Where(slot => slot.DisplayModeId is not null)
-                         .Select(slot => slot.DisplayModeId!.Value))
-                referencedDisplayModes.Add(modeId);
 
             var assets = new Dictionary<string, byte[]>(StringComparer.Ordinal)
             {
@@ -364,9 +356,9 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
                 .Select(name => new LayoutPackageNamedLayerState(name, Fingerprint(name)))
                 .ToArray();
             var retainedObjectIds = asset.Objects.Select(item => item.Id).ToHashSet();
-            var titleBlocks = asset.AllInstanceDefinitions
+            var blockDefinitions = asset.AllInstanceDefinitions
                 .Where(definition => definition.GetObjectIds().Any(retainedObjectIds.Contains))
-                .Select(definition => new LayoutPackageTitleBlockDefinition(
+                .Select(definition => new LayoutPackageBlockDefinition(
                     definition.Id,
                     definition.Name,
                     FingerprintDefinition(asset, definition)))
@@ -376,17 +368,19 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
                 ? "Untitled"
                 : Path.GetFileNameWithoutExtension(document.Name);
             var manifest = new LayoutPackageManifest(
-                LayoutPackageManifest.CurrentPackageVersion,
-                sourceName,
-                DateTimeOffset.UtcNow,
-                typeof(RhinoLayoutPackageService).Assembly.GetName().Version?.ToString() ?? "0.1.0",
-                state with { SchemaVersion = DocumentState.CurrentSchemaVersion },
-                sheets,
-                namedViews,
-                namedLayerStates,
-                displayModes,
-                new Dictionary<string, string>(StringComparer.Ordinal),
-                titleBlocks);
+                PackageVersion: LayoutPackageManifest.CurrentPackageVersion,
+                SourceDocumentName: sourceName,
+                CreatedUtc: DateTimeOffset.UtcNow,
+                ProducerVersion: typeof(RhinoLayoutPackageService).Assembly.GetName().Version?.ToString() ?? "0.1.0",
+                FoundryState: state with { SchemaVersion = DocumentState.CurrentSchemaVersion },
+                Sheets: sheets,
+                NamedViews: namedViews,
+                NamedLayerStates: namedLayerStates,
+                DisplayModes: displayModes,
+                AssetChecksums: new Dictionary<string, string>(StringComparer.Ordinal))
+            {
+                BlockDefinitions = blockDefinitions
+            };
             return new CapturedPackage(manifest, assets);
         }
         finally
@@ -486,21 +480,22 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
         var bounds = detail.DetailGeometry.GetBoundingBox(true);
         var viewport = detail.Viewport;
         return new DetailSlotRecipe(
-            detail.Viewport.Id,
-            string.IsNullOrWhiteSpace(detail.Attributes.Name) ? viewport.Name : detail.Attributes.Name,
-            bounds.Min.X,
-            bounds.Min.Y,
-            bounds.Max.X,
-            bounds.Max.Y,
-            viewport.IsPerspectiveProjection ? "Perspective" : "Top",
-            detail.DetailGeometry.IsParallelProjection ? detail.DetailGeometry.PageToModelRatio : null,
-            detail.DetailGeometry.IsProjectionLocked,
-            viewport.DisplayMode.Id,
-            null,
-            [viewport.CameraLocation.X, viewport.CameraLocation.Y, viewport.CameraLocation.Z],
-            [viewport.CameraTarget.X, viewport.CameraTarget.Y, viewport.CameraTarget.Z],
-            [viewport.CameraUp.X, viewport.CameraUp.Y, viewport.CameraUp.Z],
-            document.Layers
+            Id: detail.Viewport.Id,
+            Name: string.IsNullOrWhiteSpace(detail.Attributes.Name) ? viewport.Name : detail.Attributes.Name,
+            Left: bounds.Min.X,
+            Bottom: bounds.Min.Y,
+            Right: bounds.Max.X,
+            Top: bounds.Max.Y,
+            Projection: viewport.IsPerspectiveProjection ? "Perspective" : "Top",
+            PageToModelRatio: detail.DetailGeometry.IsParallelProjection ? detail.DetailGeometry.PageToModelRatio : null,
+            ProjectionLocked: detail.DetailGeometry.IsProjectionLocked,
+            DisplayModeId: viewport.DisplayMode.Id,
+            DefaultNamedView: null,
+            CameraLocation: [viewport.CameraLocation.X, viewport.CameraLocation.Y, viewport.CameraLocation.Z],
+            CameraTarget: [viewport.CameraTarget.X, viewport.CameraTarget.Y, viewport.CameraTarget.Z],
+            CameraUp: [viewport.CameraUp.X, viewport.CameraUp.Y, viewport.CameraUp.Z])
+        {
+            LayerRules = document.Layers
                 .Where(layer => !layer.IsDeleted && !layer.IsReference &&
                                 layer.HasPerViewportSettings(viewport.Id))
                 .Select(layer => new LayerVisibilityRule(
@@ -509,7 +504,7 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
                         ? LayerVisibilityOverride.Visible
                         : LayerVisibilityOverride.Hidden))
                 .ToArray(),
-            document.Objects
+            ObjectDisplayRules = document.Objects
                 .Where(item => item is not DetailViewObject &&
                                item.Attributes.Space == ActiveSpace.ModelSpace &&
                                item.Attributes.HasDisplayModeOverride(viewport.Id))
@@ -522,7 +517,8 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
                         modeId,
                         mode?.LocalName ?? "Missing display mode");
                 })
-                .ToArray());
+                .ToArray()
+        };
     }
 
     private static IReadOnlyList<LayoutPackageLayerOverride> CaptureLayerOverrides(
@@ -561,20 +557,14 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
             if (document.NamedLayerStates.FindName(state.Name) >= 0)
                 yield return Conflict(LayoutPackageDependencyKind.NamedLayerState, state.Name, canOverwrite: true);
 
-        foreach (var definition in contents.Manifest.TitleBlocks)
+        foreach (var definition in contents.Manifest.BlockDefinitions)
         {
             var existing = document.InstanceDefinitions.Find(definition.Name);
             if (existing is null ||
                 string.Equals(FingerprintDefinition(existing), definition.Fingerprint,
                     StringComparison.OrdinalIgnoreCase)) continue;
-            yield return Conflict(LayoutPackageDependencyKind.TitleBlockDefinition, definition.Name, canOverwrite: false);
+            yield return Conflict(LayoutPackageDependencyKind.BlockDefinition, definition.Name, canOverwrite: false);
         }
-
-        foreach (var template in contents.Manifest.FoundryState.Templates)
-            if (_stateStore.Get(document).Templates.Any(existing =>
-                    string.Equals(existing.Name, template.Name, StringComparison.OrdinalIgnoreCase) &&
-                    existing != template))
-                yield return Conflict(LayoutPackageDependencyKind.Template, template.Name, canOverwrite: false);
     }
 
     private static LayoutPackageConflict Conflict(
@@ -856,14 +846,14 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
         IReadOnlyDictionary<Guid, Guid> displayModeMap,
         IReadOnlyDictionary<Guid, Guid> objectMap)
     {
-        var layers = recipe.Layers.Select(rule =>
+        var layers = recipe.LayerRules.Select(rule =>
         {
             var index = document.Layers.FindByFullPath(rule.Layer.FullPath, -1);
             return index >= 0
                 ? rule with { Layer = new LayerReference(document.Layers[index].Id, rule.Layer.FullPath) }
                 : rule;
         }).ToArray();
-        var objects = recipe.Objects.Select(rule =>
+        var objects = recipe.ObjectDisplayRules.Select(rule =>
         {
             var selector = rule.Selector;
             if (selector.Kind == ObjectDisplaySelectorKind.ExactObject && selector.ObjectId is { } objectId)
@@ -1030,11 +1020,11 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
         var source = file.AllInstanceDefinitions.FirstOrDefault(item => item.Id == sourceId);
         if (source is null) return null;
         var existing = document.InstanceDefinitions.Find(source.Name);
-        var packaged = manifest.TitleBlocks.FirstOrDefault(item => item.SourceId == sourceId);
+        var packaged = manifest.BlockDefinitions.FirstOrDefault(item => item.SourceId == sourceId);
         var sameContent = existing is not null && packaged is not null &&
                           string.Equals(FingerprintDefinition(existing), packaged.Fingerprint,
                               StringComparison.OrdinalIgnoreCase);
-        var key = $"{LayoutPackageDependencyKind.TitleBlockDefinition}:{source.Name}";
+        var key = $"{LayoutPackageDependencyKind.BlockDefinition}:{source.Name}";
         var resolution = resolutions.GetValueOrDefault(key, LayoutPackageConflictResolution.ImportRenamedCopy);
         if (existing is not null &&
             (sameContent || resolution == LayoutPackageConflictResolution.ReuseDestination))
@@ -1204,12 +1194,11 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
                 .FirstOrDefault(folder => folder.Id == source.SourceFolderId)?.Name ?? string.Empty;
             var destinationFolderName = folders
                 .FirstOrDefault(folder => folder.Id == folderMap[source.SourceFolderId])?.Name ?? string.Empty;
-            var remappedViews = source.NamingBinding?.NamedViews
-                .Where(pair => detailsBySource.ContainsKey(pair.Key))
+            var remappedViews = source.NamingBinding?.NamedViewAssignments.Where(pair => detailsBySource.ContainsKey(pair.Key))
                 .ToDictionary(
                     pair => detailsBySource[pair.Key],
                     pair => namedViewMap.GetValueOrDefault(pair.Value, pair.Value)) ?? [];
-            var remappedDetailNamedViews = (source.DetailNamedViewAssignments ??
+            var remappedDetailNamedViews = (source.DetailNamedViews ??
                                             new Dictionary<Guid, string>())
                 .Where(pair => detailsBySource.ContainsKey(pair.Key))
                 .ToDictionary(
@@ -1231,17 +1220,18 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
                 }
                 : null;
             sheets[page.MainViewport.Id] = new SheetRecord(
-                page.MainViewport.Id,
-                folderMap[source.SourceFolderId],
-                source.Order,
-                source.Tags,
-                source.Metadata,
-                titleBlock,
-                source.IncludeInPrintAll,
-                source.TitleBlockData,
-                namingBinding,
-                source.Notes ?? string.Empty,
-                remappedDetailNamedViews);
+                PageViewId: page.MainViewport.Id,
+                FolderId: folderMap[source.SourceFolderId],
+                Order: source.Order,
+                Metadata: source.Metadata,
+                TitleBlock: titleBlock,
+                IncludeInPrintAll: source.IncludeInPrintAll,
+                TitleBlockData: source.TitleBlockData,
+                NamingBinding: namingBinding,
+                Notes: source.Notes ?? string.Empty)
+            {
+                DetailNamedViews = remappedDetailNamedViews
+            };
         }
 
         var recovery = (mode == LayoutPackageImportMode.Merge ? before.Recovery : [])
@@ -1249,113 +1239,6 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
             .ToList();
         foreach (var warning in warnings.Distinct(StringComparer.Ordinal))
             recovery.Add(new ImportRecoveryRecord("import", manifest.SourceDocumentName, warning));
-
-        var rules = mode == LayoutPackageImportMode.Merge
-            ? before.DisplayRules.ToList()
-            : [];
-        foreach (var rule in manifest.FoundryState.DisplayRules)
-        {
-            var missingObjects = rule.ObjectIds.Where(id => document.Objects.FindId(id) is null).ToArray();
-            var selectors = rule.Targets.Select(selector => selector.Kind switch
-            {
-                HierarchySelectorKind.Folder when folderMap.TryGetValue(selector.Id, out var id) => selector with { Id = id },
-                HierarchySelectorKind.Sheet when pagesBySource.TryGetValue(selector.Id, out var page) =>
-                    selector with { Id = page.MainViewport.Id },
-                HierarchySelectorKind.Detail when detailsBySource.TryGetValue(selector.Id, out var detail) =>
-                    selector with { Id = detail },
-                _ => selector,
-            }).ToArray();
-            if (missingObjects.Length > 0)
-            {
-                recovery.Add(new ImportRecoveryRecord(
-                    "display-rule",
-                    rule.Name,
-                    $"Disabled because {missingObjects.Length} source model object(s) are unavailable.",
-                    rule.Id));
-            }
-            rules.Add(rule with
-            {
-                Id = Guid.NewGuid(),
-                Enabled = rule.Enabled && missingObjects.Length == 0,
-                Targets = selectors,
-                DisplayModeId = displayModeMap.GetValueOrDefault(rule.DisplayModeId, rule.DisplayModeId),
-            });
-        }
-
-        var templates = mode == LayoutPackageImportMode.Merge ? before.Templates.ToList() : [];
-        var templateNames = templates.Select(item => item.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        foreach (var template in manifest.FoundryState.Templates)
-        {
-            var conflictKey = $"{LayoutPackageDependencyKind.Template}:{template.Name}";
-            var resolution = resolutions.GetValueOrDefault(
-                conflictKey, LayoutPackageConflictResolution.ImportRenamedCopy);
-            if (templateNames.Contains(template.Name) &&
-                resolution == LayoutPackageConflictResolution.ReuseDestination) continue;
-            var name = UniqueName(template.Name, templateNames);
-            templates.Add(template with
-            {
-                Id = Guid.NewGuid(),
-                Name = name,
-                SourcePageViewId = template.SourcePageViewId is { } pageId && pagesBySource.TryGetValue(pageId, out var page)
-                    ? page.MainViewport.Id
-                    : null,
-                DetailSlots = template.DetailSlots.Select(slot => slot with
-                {
-                    Id = Guid.NewGuid(),
-                    DisplayModeId = slot.DisplayModeId is { } modeId
-                        ? displayModeMap.GetValueOrDefault(modeId, modeId)
-                        : null,
-                    DefaultNamedView = slot.DefaultNamedView is { } viewName
-                        ? namedViewMap.GetValueOrDefault(viewName, viewName)
-                        : null,
-                    LayerRules = slot.Layers.Select(rule =>
-                    {
-                        var layerIndex = document.Layers.FindByFullPath(rule.Layer.FullPath, -1);
-                        return layerIndex >= 0
-                            ? rule with
-                            {
-                                Layer = new LayerReference(
-                                    document.Layers[layerIndex].Id,
-                                    rule.Layer.FullPath),
-                            }
-                            : rule;
-                    }).ToArray(),
-                    ObjectDisplayRules = slot.Objects.Select(rule =>
-                    {
-                        var selector = rule.Selector;
-                        if (selector.Kind == ObjectDisplaySelectorKind.ExactObject &&
-                            selector.ObjectId is { } sourceObjectId)
-                            selector = selector with
-                            {
-                                ObjectId = objectMap.GetValueOrDefault(sourceObjectId, sourceObjectId),
-                            };
-                        else if (selector.Kind == ObjectDisplaySelectorKind.Layer &&
-                                 !string.IsNullOrWhiteSpace(selector.LayerFullPath))
-                        {
-                            var layerIndex = document.Layers.FindByFullPath(selector.LayerFullPath, -1);
-                            if (layerIndex >= 0)
-                                selector = selector with { LayerId = document.Layers[layerIndex].Id };
-                        }
-                        return rule with
-                        {
-                            Selector = selector,
-                            DisplayModeId = displayModeMap.GetValueOrDefault(
-                                rule.DisplayModeId,
-                                rule.DisplayModeId),
-                        };
-                    }).ToArray(),
-                }).ToArray(),
-                TitleBlock = template.TitleBlock is { } titleBlock &&
-                             definitionMap.TryGetValue(titleBlock.InstanceDefinitionId, out var mappedDefinition)
-                    ? titleBlock with
-                    {
-                        InstanceDefinitionId = mappedDefinition.Id,
-                        InstanceDefinitionName = mappedDefinition.Name,
-                    }
-                    : template.TitleBlock,
-            });
-            templateNames.Add(name);
-        }
 
         HierarchyScope? RemapScope(HierarchyScope source) => source.Kind switch
         {
@@ -1409,38 +1292,13 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
         var registrations = mode == LayoutPackageImportMode.Merge
             ? before.TemplateRegistrations.ToList()
             : [];
-        var registrationMap = new Dictionary<Guid, Guid>();
         foreach (var sourceRegistration in manifest.FoundryState.TemplateRegistrations)
         {
             if (RemapScope(sourceRegistration.Source) is not { } sourceScope) continue;
             var id = Guid.NewGuid();
-            registrationMap[sourceRegistration.Id] = id;
-            registrations.Add(new CapabilityTemplateRegistration(
+            registrations.Add(new LayoutTemplateRegistration(
                 id,
-                sourceScope,
-                sourceRegistration.Capabilities));
-        }
-
-        var capabilityLinks = mode == LayoutPackageImportMode.Merge
-            ? before.TemplateLinks.ToList()
-            : [];
-        foreach (var sourceLink in manifest.FoundryState.TemplateLinks)
-        {
-            if (RemapScope(sourceLink.Target) is not { } targetScope ||
-                !registrationMap.TryGetValue(sourceLink.SourceRegistrationId, out var registrationId))
-                continue;
-            capabilityLinks.Add(sourceLink with
-            {
-                Id = Guid.NewGuid(),
-                Target = targetScope,
-                SourceRegistrationId = registrationId,
-                DetailMappings = sourceLink.DetailMappings.Select(mapping => new TemplateDetailMapping(
-                    detailsBySource.GetValueOrDefault(mapping.SourceDetailViewportId,
-                        mapping.SourceDetailViewportId),
-                    detailsBySource.GetValueOrDefault(mapping.TargetDetailViewportId,
-                        mapping.TargetDetailViewportId))).ToArray(),
-                LastResolved = sourceLink.LastResolved,
-            });
+                sourceScope));
         }
 
         var appearanceStates = mode == LayoutPackageImportMode.Merge
@@ -1490,26 +1348,25 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
             pagesBySource,
             appearanceStateMap);
         return new DocumentState(
-            DocumentState.CurrentSchemaVersion,
-            rootId,
-            folders,
-            sheets,
-            rules,
-            metadata,
-            templates,
-            canvas,
-            recovery,
-            before.DedicatedDetailLayerId,
-            LayoutPackageProjectInformationPolicy.Resolve(
+            SchemaVersion: DocumentState.CurrentSchemaVersion,
+            RootFolderId: rootId,
+            Folders: folders,
+            Sheets: sheets,
+            Metadata: metadata)
+        {
+            Canvas = canvas,
+            Recovery = recovery,
+            DedicatedDetailLayerId = before.DedicatedDetailLayerId,
+            ProjectInfo = LayoutPackageProjectInformationPolicy.Resolve(
                 before.ProjectInfo,
                 manifest.FoundryState.ProjectInfo,
                 mode,
                 importProjectInformation),
-            appearanceRules,
-            registrations,
-            capabilityLinks,
-            appearanceStates,
-            appearanceAssignments);
+            AppearanceRules = appearanceRules,
+            TemplateRegistrations = registrations,
+            AppearanceStates = appearanceStates,
+            StateAssignments = appearanceAssignments
+        };
     }
 
     private static bool BindingSourcesUnchanged(
@@ -1532,7 +1389,7 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
                     MetadataValue(destinationMetadata, token),
                     StringComparison.Ordinal))
                 return false;
-        return !Uses("view") || binding.NamedViews.Values.SequenceEqual(remappedViews.Values);
+        return !Uses("view") || binding.NamedViewAssignments.Values.SequenceEqual(remappedViews.Values);
     }
 
     private static string UniqueImportedName(string source, IReadOnlySet<string> usedNames)
@@ -1607,12 +1464,11 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
         {
             if (!sheets.ContainsKey(entry.page.MainViewport.Id))
                 sheets[entry.page.MainViewport.Id] = new SheetRecord(
-                    entry.page.MainViewport.Id,
-                    folders.Contains(state.RootFolderId) ? state.RootFolderId : WellKnownIds.UnorganizedFolderId,
-                    entry.index,
-                    [],
-                    new Dictionary<string, string>(StringComparer.Ordinal),
-                    null);
+                    PageViewId: entry.page.MainViewport.Id,
+                    FolderId: folders.Contains(state.RootFolderId) ? state.RootFolderId : WellKnownIds.UnorganizedFolderId,
+                    Order: entry.index,
+                    Metadata: new Dictionary<string, string>(StringComparer.Ordinal),
+                    TitleBlock: null);
         }
         return state with { Sheets = sheets };
     }

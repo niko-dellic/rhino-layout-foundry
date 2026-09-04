@@ -11,9 +11,7 @@ public sealed record ObserverSnapshot(
     IReadOnlyList<ObserverFolderSnapshot> Folders,
     IReadOnlyList<ObserverSheetSnapshot> Sheets,
     ObserverCanvasState CanvasState,
-    IReadOnlyList<string>? NamedViewChoices = null,
-    IReadOnlyList<AppearanceStateRecord>? AppearanceStateResources = null,
-    IReadOnlyList<AppearanceStateAssignment>? AppearanceStateAssignments = null)
+    IReadOnlyList<string>? NamedViewChoices = null)
 {
     public static ObserverSnapshot NoDocument { get; } = new(
         0,
@@ -26,8 +24,8 @@ public sealed record ObserverSnapshot(
 
     public bool HasDocument => DocumentRuntimeSerialNumber != 0;
     public IReadOnlyList<string> NamedViews => NamedViewChoices ?? [];
-    public IReadOnlyList<AppearanceStateRecord> AppearanceStates => AppearanceStateResources ?? [];
-    public IReadOnlyList<AppearanceStateAssignment> StateAssignments => AppearanceStateAssignments ?? [];
+    public IReadOnlyList<AppearanceStateRecord> AppearanceStates { get; init; } = [];
+    public IReadOnlyList<AppearanceStateAssignment> StateAssignments { get; init; } = [];
 }
 
 public sealed record ObserverFolderSnapshot(

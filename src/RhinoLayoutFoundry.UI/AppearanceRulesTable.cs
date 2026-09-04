@@ -8,7 +8,7 @@ namespace RhinoLayoutFoundry.UI;
 /// Shared expandable editor for reusable appearance states and target-local rules.
 /// Missing values are inheritance; only authored values are emitted on save.
 /// </summary>
-internal sealed partial class AppearanceRulesTable : Panel
+internal sealed class AppearanceRulesTable : Panel
 {
     private const string Inherit = "Inherit";
     private readonly DocumentSnapshot _snapshot;
@@ -60,10 +60,8 @@ internal sealed partial class AppearanceRulesTable : Panel
             AllowMultipleSelection = true,
             AllowEmptySelection = true,
             AllowColumnReordering = false,
-            ShowHeader = true,
-            RowHeight = 24,
-            GridLines = GridLines.None,
         };
+        FoundryTable.Configure(_tree);
         _tree.Columns.Add(new GridColumn
         {
             HeaderText = "Item",
@@ -90,7 +88,6 @@ internal sealed partial class AppearanceRulesTable : Panel
         _tree.CellFormatting += OnCellFormatting;
         _tree.MouseDown += OnMouseDown;
         _tree.CellClick += OnCellClick;
-        Load += (_, _) => ConfigureNativeRowAppearance();
         _search.TextChanged += (_, _) =>
         {
             _pickedTargets.Clear();
@@ -263,20 +260,11 @@ internal sealed partial class AppearanceRulesTable : Panel
     private void OnCellFormatting(object? sender, GridCellFormatEventArgs args)
     {
         if (args.Item is not AppearanceRow row) return;
-        args.Font = FoundryTheme.HierarchyTableFont;
-        if (_pickedTargets.Contains(row.Target))
-        {
-            args.BackgroundColor = SystemColors.Selection;
-            args.ForegroundColor = SystemColors.SelectionText;
+        if (FoundryTable.FormatCell(args, _pickedTargets.Contains(row.Target) ||
+                _tree.SelectedItems.OfType<AppearanceRow>().Any(item => item.Target == row.Target)))
             return;
-        }
         if (row.IsObject && ReferenceEquals(args.Column, _visibilityColumn))
             args.ForegroundColor = FoundryTheme.MutedText;
-        if (!OperatingSystem.IsMacOS() && !_tree.SelectedItems.OfType<AppearanceRow>()
-                .Any(item => item.Target == row.Target))
-            args.BackgroundColor = args.Row % 2 == 0
-                ? FoundryTheme.ContentBackground
-                : FoundryTheme.HierarchyAlternateRowBackground;
     }
 
     private void OnMouseDown(object? sender, MouseEventArgs args)
@@ -548,7 +536,6 @@ internal sealed partial class AppearanceRulesTable : Panel
         }
     }
 
-    partial void ConfigureNativeRowAppearance();
 
     private enum RuleTargetKind { Layer, Object }
 

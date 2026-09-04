@@ -7,6 +7,7 @@ namespace RhinoLayoutFoundry.UI;
 internal static class FoundryTheme
 {
     private const float HierarchyTableFontSize = 11;
+    internal const int TableRowHeight = 24;
 
     // Physical paper remains white; its placeholders are content, not panel chrome.
     internal static Color SheetPaper => Colors.White;

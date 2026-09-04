@@ -10,14 +10,14 @@ public sealed class OverviewPanelPresentationTests
         var rootId = Guid.NewGuid();
         var folderId = Guid.NewGuid();
         var overview = new DocumentOverview(
-            42,
-            "Test",
-            rootId,
-            [
-                new FolderOverview(rootId, null, "Root", 0),
-                new FolderOverview(folderId, rootId, "Plans", 0),
+            DocumentRuntimeSerialNumber: 42,
+            DocumentName: "Test",
+            RootFolderId: rootId,
+            Folders: [
+                new FolderOverview(Id: rootId, ParentId: null, Name: "Root", Order: 0),
+                new FolderOverview(Id: folderId, ParentId: rootId, Name: "Plans", Order: 0),
             ],
-            []);
+                    Sheets: []);
 
         var presentation = OverviewPanelPresentation.Create(
             overview,
@@ -48,11 +48,11 @@ public sealed class OverviewPanelPresentationTests
     {
         var rootId = Guid.NewGuid();
         var overview = new DocumentOverview(
-            12,
-            "Empty model",
-            rootId,
-            [new FolderOverview(rootId, null, "Unorganized", 0)],
-            []);
+            DocumentRuntimeSerialNumber: 12,
+            DocumentName: "Empty model",
+            RootFolderId: rootId,
+            Folders: [new FolderOverview(Id: rootId, ParentId: null, Name: "Unorganized", Order: 0)],
+            Sheets: []);
 
         var presentation = OverviewPanelPresentation.Create(
             overview,

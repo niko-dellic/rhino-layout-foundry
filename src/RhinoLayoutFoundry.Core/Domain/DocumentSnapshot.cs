@@ -1,5 +1,5 @@
 namespace RhinoLayoutFoundry.Core.Domain;
-
+/// <summary>Owned snapshot values for planning; absent optional resources use empty collections.</summary>
 public sealed record DocumentSnapshot(
     uint DocumentRuntimeSerialNumber,
     long Revision,
@@ -7,60 +7,33 @@ public sealed record DocumentSnapshot(
     IReadOnlyDictionary<Guid, FolderRecord> Folders,
     IReadOnlyDictionary<Guid, SheetSnapshot> Sheets,
     IReadOnlySet<Guid> ExistingObjectIds,
-    IReadOnlySet<Guid> DisplayModeIds,
-    IReadOnlyList<SheetTemplateRecipe>? SheetTemplates = null,
-    IReadOnlyDictionary<string, string>? DocumentMetadata = null,
-    IReadOnlySet<string>? NamedViewNames = null,
-    IReadOnlySet<Guid>? InstanceDefinitionIds = null,
-    IReadOnlyDictionary<Guid, string>? DisplayModeNames = null,
-    IReadOnlyDictionary<Guid, TitleBlockInstanceSnapshot>? TitleBlockInstanceChoices = null,
-    ObserverCanvasState? ObserverCanvas = null,
-    ProjectInformation? ProjectData = null,
-    IReadOnlyDictionary<Guid, string>? LayerNames = null,
-    IReadOnlyDictionary<Guid, LayerSnapshot>? LayerSettings = null,
-    IReadOnlyDictionary<Guid, ModelObjectSnapshot>? ModelObjectSettings = null,
-    IReadOnlyList<DetailLayerVisibilitySnapshot>? DetailLayerVisibilities = null,
-    IReadOnlyList<DetailObjectDisplayOverrideSnapshot>? DetailObjectDisplayOverrides = null,
-    IReadOnlyList<HierarchyViewportRuleSet>? ViewportRuleSets = null,
-    IReadOnlyList<CapabilityTemplateRegistration>? CapabilityTemplates = null,
-    IReadOnlyList<CapabilityTemplateLink>? CapabilityLinks = null,
-    IReadOnlyList<AppearanceStateRecord>? AppearanceStateResources = null,
-    IReadOnlyList<AppearanceStateAssignment>? AppearanceStateAssignments = null,
-    Guid? DedicatedDetailLayerId = null,
-    ModelBoundsSnapshot? ModelBounds = null,
-    IReadOnlyList<NamedViewSnapshot>? NamedViewDetails = null,
-    IReadOnlyList<ClippingPlaneSnapshot>? ClippingPlaneDetails = null,
-    IReadOnlyList<Guid>? StandardViewportIds = null,
-    Guid? ActiveViewportDisplayModeId = null)
+    IReadOnlySet<Guid> DisplayModeIds)
 {
-    public IReadOnlyList<SheetTemplateRecipe> Templates => SheetTemplates ?? [];
-    public IReadOnlyDictionary<string, string> Metadata =>
-        DocumentMetadata ?? new Dictionary<string, string>(StringComparer.Ordinal);
-    public IReadOnlySet<string> NamedViews =>
-        NamedViewNames ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-    public IReadOnlySet<Guid> InstanceDefinitions => InstanceDefinitionIds ?? new HashSet<Guid>();
-    public IReadOnlyDictionary<Guid, string> DisplayModes =>
-        DisplayModeNames ?? new Dictionary<Guid, string>();
-    public IReadOnlyDictionary<Guid, TitleBlockInstanceSnapshot> TitleBlockInstances =>
-        TitleBlockInstanceChoices ?? new Dictionary<Guid, TitleBlockInstanceSnapshot>();
-    public ObserverCanvasState Canvas => ObserverCanvas ?? ObserverCanvasState.Empty;
-    public ProjectInformation ProjectInfo => ProjectData ?? ProjectInformation.Empty;
-    public IReadOnlyDictionary<Guid, string> Layers => LayerNames ?? new Dictionary<Guid, string>();
-    public IReadOnlyDictionary<Guid, LayerSnapshot> LayerSnapshots =>
-        LayerSettings ?? new Dictionary<Guid, LayerSnapshot>();
-    public IReadOnlyDictionary<Guid, ModelObjectSnapshot> ModelObjects =>
-        ModelObjectSettings ?? new Dictionary<Guid, ModelObjectSnapshot>();
-    public IReadOnlyList<DetailLayerVisibilitySnapshot> DetailLayers => DetailLayerVisibilities ?? [];
-    public IReadOnlyList<DetailObjectDisplayOverrideSnapshot> ObjectOverrides =>
-        DetailObjectDisplayOverrides ?? [];
-    public IReadOnlyList<HierarchyViewportRuleSet> AppearanceRules => ViewportRuleSets ?? [];
-    public IReadOnlyList<CapabilityTemplateRegistration> TemplateRegistrations => CapabilityTemplates ?? [];
-    public IReadOnlyList<CapabilityTemplateLink> TemplateLinks => CapabilityLinks ?? [];
-    public IReadOnlyList<AppearanceStateRecord> AppearanceStates => AppearanceStateResources ?? [];
-    public IReadOnlyList<AppearanceStateAssignment> StateAssignments => AppearanceStateAssignments ?? [];
-    public IReadOnlyList<NamedViewSnapshot> NamedViewSnapshots => NamedViewDetails ?? [];
-    public IReadOnlyList<ClippingPlaneSnapshot> ClippingPlanes => ClippingPlaneDetails ?? [];
-    public IReadOnlyList<Guid> StandardViewports => StandardViewportIds ?? [];
+    public IReadOnlyList<SheetTemplateRecipe> Templates { get; init; } = [];
+    public IReadOnlyDictionary<string, string> Metadata { get; init; } = new Dictionary<string, string>(StringComparer.Ordinal);
+    public IReadOnlySet<string> NamedViews { get; init; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    public IReadOnlyDictionary<Guid, string> DisplayModes { get; init; } = new Dictionary<Guid, string>();
+    public ObserverCanvasState Canvas { get; init; } = ObserverCanvasState.Empty;
+    public ProjectInformation ProjectInfo { get; init; } = ProjectInformation.Empty;
+    public IReadOnlyDictionary<Guid, string> Layers { get; init; } = new Dictionary<Guid, string>();
+    public IReadOnlyDictionary<Guid, LayerSnapshot> LayerSnapshots { get; init; } = new Dictionary<Guid, LayerSnapshot>();
+    public IReadOnlyDictionary<Guid, ModelObjectSnapshot> ModelObjects { get; init; } = new Dictionary<Guid, ModelObjectSnapshot>();
+    public IReadOnlyList<DetailLayerVisibilitySnapshot> DetailLayers { get; init; } = [];
+    public IReadOnlyList<DetailObjectDisplayOverrideSnapshot> ObjectOverrides { get; init; } = [];
+    public IReadOnlyList<HierarchyViewportRuleSet> AppearanceRules { get; init; } = [];
+    public IReadOnlyList<LayoutTemplateRegistration> TemplateRegistrations
+    {
+        get;
+        init;
+    } = [];
+    public IReadOnlyList<AppearanceStateRecord> AppearanceStates { get; init; } = [];
+    public IReadOnlyList<AppearanceStateAssignment> StateAssignments { get; init; } = [];
+    public IReadOnlyList<NamedViewSnapshot> NamedViewSnapshots { get; init; } = [];
+    public IReadOnlyList<ClippingPlaneSnapshot> ClippingPlanes { get; init; } = [];
+    public IReadOnlyList<Guid> StandardViewports { get; init; } = [];
+    public Guid? DedicatedDetailLayerId { get; init; }
+    public ModelBoundsSnapshot? ModelBounds { get; init; }
+    public Guid? ActiveViewportDisplayModeId { get; init; }
 }
 
 public sealed record SheetSnapshot(
@@ -79,15 +52,11 @@ public sealed record SheetSnapshot(
     bool IncludeInPrintAll = true,
     SheetTitleBlockData? TitleBlockData = null,
     BuiltInTitleBlockKind? TitleBlockBuiltInKind = null,
-    IReadOnlyList<string>? SheetTags = null,
     SheetNamingBinding? NamingBinding = null,
-    string Notes = "",
-    IReadOnlyDictionary<Guid, string>? DetailNamedViewAssignments = null)
+    string Notes = "")
 {
     public IReadOnlyList<DetailSnapshot> Details => DetailSettings ?? [];
-    public IReadOnlyList<string> Tags => SheetTags ?? [];
-    public IReadOnlyDictionary<Guid, string> DetailNamedViews =>
-        DetailNamedViewAssignments ?? new Dictionary<Guid, string>();
+    public IReadOnlyDictionary<Guid, string> DetailNamedViews { get; init; } = new Dictionary<Guid, string>();
 }
 
 public sealed record DetailSnapshot(
@@ -114,12 +83,3 @@ public sealed record DetailPageBounds(
         Right > Left &&
         Top > Bottom;
 }
-
-public sealed record TitleBlockInstanceSnapshot(
-    Guid InstanceObjectId,
-    Guid InstanceDefinitionId,
-    string InstanceDefinitionName,
-    Guid SourcePageViewId,
-    string SourcePageName,
-    IReadOnlyList<double>? Transform = null,
-    string AnchorName = "Template");

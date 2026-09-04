@@ -65,7 +65,7 @@ public sealed partial class LayoutFoundryPanel : Panel
     private readonly PixelLayout _panelOverlayHost;
     private readonly DeleteConfirmationOverlay _deleteConfirmationOverlay;
     private readonly CreateResourceMenuOverlay _createMenuOverlay;
-    private readonly TemplateRolesOverlay _templateRolesOverlay;
+    private readonly LayoutTemplateOverlay _layoutTemplateOverlay;
     private ButtonMenuItem _setCurrentMenuItem = null!;
     private ButtonMenuItem _newFolderMenuItem = null!;
     private ButtonMenuItem _newPageMenuItem = null!;
@@ -321,9 +321,9 @@ public sealed partial class LayoutFoundryPanel : Panel
         _deleteConfirmationOverlay.CancelRequested += (_, _) => CancelDeleteConfirmation();
         _deleteConfirmationOverlay.ConfirmRequested += async (_, _) =>
             await ConfirmDeleteSelectionAsync();
-        _templateRolesOverlay = new TemplateRolesOverlay();
-        _templateRolesOverlay.CommitRequested += async (_, eventArgs) =>
-            await CommitTemplateRolesAsync(eventArgs.Values);
+        _layoutTemplateOverlay = new LayoutTemplateOverlay();
+        _layoutTemplateOverlay.CommitRequested += async (_, eventArgs) =>
+            await CommitTemplateRegistrationAsync(eventArgs.Values);
         _createMenuOverlay = new CreateResourceMenuOverlay();
         _createMenuOverlay.ItemInvoked += (_, eventArgs) =>
         {
@@ -338,7 +338,7 @@ public sealed partial class LayoutFoundryPanel : Panel
         };
         _panelOverlayHost.Add(_panelShell, 0, 0);
         _panelOverlayHost.Add(_createMenuOverlay, 0, 0);
-        _panelOverlayHost.Add(_templateRolesOverlay, 0, 0);
+        _panelOverlayHost.Add(_layoutTemplateOverlay, 0, 0);
         _panelOverlayHost.Add(_deleteConfirmationOverlay, 0, 0);
         _panelOverlayHost.SizeChanged += (_, _) => LayoutPanelOverlay();
         Content = _panelOverlayHost;
@@ -366,6 +366,10 @@ public sealed partial class LayoutFoundryPanel : Panel
         _treeGrid.KeyDown += OnTreeKeyDown;
         _treeGrid.MouseDown += OnTreeMouseDown;
         _treeGrid.MouseMove += OnTreeMouseMove;
+        _treeGrid.MouseUp += (_, _) =>
+        {
+            if (!_dragInProgress) ResetPendingDrag();
+        };
         _treeGrid.DragOver += OnTreeDragOver;
         _treeGrid.DragDrop += async (_, eventArgs) => await CompleteInternalDragAsync(eventArgs);
         _treeGrid.DragLeave += (_, _) => ClearTreeDropFeedback();
@@ -436,9 +440,8 @@ public sealed partial class LayoutFoundryPanel : Panel
             AllowMultipleSelection = true,
             AllowColumnReordering = true,
             AllowDrop = true,
-            ShowHeader = true,
-            RowHeight = 24,
         };
+        FoundryTable.Configure(treeGrid);
         var layoutsColumn = new GridColumn
         {
             HeaderText = "Layouts",
@@ -463,7 +466,7 @@ public sealed partial class LayoutFoundryPanel : Panel
         treeGrid.Columns.Add(printColumn);
         var templateColumn = new GridColumn
         {
-            HeaderText = "Template roles",
+            HeaderText = "Template registration",
             DataCell = new TextBoxCell
             {
                 Binding = Binding.Property<HierarchyTreeItem, string>(item => item.TemplateText),
@@ -567,7 +570,9 @@ public sealed partial class LayoutFoundryPanel : Panel
             return;
         }
 
-        eventArgs.Font = FoundryTheme.HierarchyTableFont;
+        if (FoundryTable.FormatCell(eventArgs, _treeGrid.SelectedItems
+                .OfType<HierarchyTreeItem>().Any(selected => selected.Node.Key == item.Node.Key)))
+            return;
 
         if (_treeDrop is { IsValid: true, HighlightFolderId: { } highlight } &&
             item.Node.Key.Kind == OverviewNodeKind.Folder && item.Node.Key.Id == highlight)
@@ -579,15 +584,6 @@ public sealed partial class LayoutFoundryPanel : Panel
 
         if (item.Node.Key.Kind != OverviewNodeKind.Folder)
             return;
-
-        if (_treeGrid.SelectedItems
-            .OfType<HierarchyTreeItem>()
-            .Any(selected => selected.Node.Key == item.Node.Key))
-        {
-            eventArgs.BackgroundColor = SystemColors.Selection;
-            eventArgs.ForegroundColor = SystemColors.SelectionText;
-            return;
-        }
 
         eventArgs.BackgroundColor = item.Node.IsDocumentRoot
             ? FoundryTheme.HierarchyDocumentBackground
@@ -1138,11 +1134,11 @@ public sealed partial class LayoutFoundryPanel : Panel
 
         _panelShell.Size = size;
         _createMenuOverlay.Size = size;
-        _templateRolesOverlay.Size = size;
+        _layoutTemplateOverlay.Size = size;
         _deleteConfirmationOverlay.Size = size;
         _panelOverlayHost.Move(_panelShell, 0, 0);
         _panelOverlayHost.Move(_createMenuOverlay, 0, 0);
-        _panelOverlayHost.Move(_templateRolesOverlay, 0, 0);
+        _panelOverlayHost.Move(_layoutTemplateOverlay, 0, 0);
         _panelOverlayHost.Move(_deleteConfirmationOverlay, 0, 0);
     }
 
@@ -1879,7 +1875,7 @@ public sealed partial class LayoutFoundryPanel : Panel
     {
         _fullscreenWindow?.Close();
         CloseHierarchyDisplayModePicker();
-        _templateRolesOverlay.Dismiss(commit: false);
+        _layoutTemplateOverlay.Dismiss(commit: false);
 
         if (!_isLoaded)
         {
@@ -2063,20 +2059,19 @@ public sealed partial class LayoutFoundryPanel : Panel
             InlineDraftKind.Folder => _overview with
             {
                 Folders = _overview.Folders.Append(new FolderOverview(
-                    draft.Id,
-                    draft.ParentFolderId,
-                    draft.Name,
-                    int.MaxValue)).ToArray(),
+                    Id: draft.Id,
+                    ParentId: draft.ParentFolderId,
+                    Name: draft.Name,
+                    Order: int.MaxValue)).ToArray(),
             },
             InlineDraftKind.Sheet => _overview with
             {
                 Sheets = _overview.Sheets.Append(new SheetOverview(
-                    draft.Id,
-                    draft.ParentFolderId,
-                    draft.Name,
-                    int.MaxValue,
-                    [],
-                    [])).ToArray(),
+                    PageViewId: draft.Id,
+                    FolderId: draft.ParentFolderId,
+                    Name: draft.Name,
+                    Order: int.MaxValue,
+                    Details: [])).ToArray(),
             },
             InlineDraftKind.RenameFolder or InlineDraftKind.RenameSheet or
                 InlineDraftKind.RenameAppearanceState => _overview,
@@ -2151,7 +2146,7 @@ public sealed partial class LayoutFoundryPanel : Panel
     {
         _layoutsColumn.HeaderText = SortHeader("Layouts", OverviewSortProperty.Name);
         _printColumn.HeaderText = SortHeader("Print", OverviewSortProperty.Print);
-        _templateColumn.HeaderText = SortHeader("Template roles", OverviewSortProperty.Template);
+        _templateColumn.HeaderText = SortHeader("Template registration", OverviewSortProperty.Template);
         _paperColumn.HeaderText = SortHeader("Paper size", OverviewSortProperty.PaperSize);
         _detailsColumn.HeaderText = SortHeader("Details", OverviewSortProperty.DetailCount);
         _displayModeColumn.HeaderText = SortHeader("Display mode", OverviewSortProperty.DisplayMode);
@@ -2349,7 +2344,7 @@ public sealed partial class LayoutFoundryPanel : Panel
 
         if (ReferenceEquals(eventArgs.GridColumn, _templateColumn))
         {
-            ShowTemplateRolesPicker(PropertyInteractionTargets(item.Node.Key), eventArgs.Location);
+            ShowLayoutTemplatePicker(PropertyInteractionTargets(item.Node.Key), eventArgs.Location);
             return;
         }
 
@@ -2963,7 +2958,7 @@ public sealed partial class LayoutFoundryPanel : Panel
 
                     _selectionPreservingPropertyInteraction = null;
                     if (ReferenceEquals(column, _templateColumn))
-                        ShowTemplateRolesPicker(
+                        ShowLayoutTemplatePicker(
                             PropertyInteractionTargets(item.Node.Key),
                             eventArgs.Location);
                     else if (ReferenceEquals(column, _paperColumn))
@@ -3036,7 +3031,9 @@ public sealed partial class LayoutFoundryPanel : Panel
             eventArgs.Modifiers != Keys.None ||
             item is null ||
             item.IsInlineDraft ||
-            item.Node.IsDocumentRoot)
+            item.Node.IsDocumentRoot ||
+            item.Node.Key.Kind is not (OverviewNodeKind.Folder or OverviewNodeKind.Sheet) ||
+            !ReferenceEquals(column, _layoutsColumn))
         {
             ResetPendingDrag();
             return;
@@ -3047,6 +3044,11 @@ public sealed partial class LayoutFoundryPanel : Panel
             _treeGrid.SelectedItem = item;
         }
 
+        // Capture the group before AppKit updates selection while starting its drag.
+        _dragSourceKeys = SelectedItems()
+            .Where(selected => !selected.Node.IsDocumentRoot &&
+                selected.Node.Key.Kind is OverviewNodeKind.Folder or OverviewNodeKind.Sheet)
+            .Select(selected => selected.Node.Key).Distinct().ToArray();
         _dragStart = eventArgs.Location;
         _dragSourceItem = item;
     }
@@ -3103,22 +3105,30 @@ public sealed partial class LayoutFoundryPanel : Panel
 
         var deltaX = eventArgs.Location.X - start.X;
         var deltaY = eventArgs.Location.Y - start.Y;
-        if ((deltaX * deltaX) + (deltaY * deltaY) < 36)
+        // Eto's Mac outline handler offers one MouseMove callback when AppKit has
+        // already recognized a drag. Applying a second, larger threshold here can
+        // reject that only opportunity and make slow/short drags silently fail.
+        if (!OperatingSystem.IsMacOS() && (deltaX * deltaX) + (deltaY * deltaY) < 36)
         {
             return;
         }
 
-        var selectedItems = SelectedItems();
-        var sources = selectedItems.Contains(_dragSourceItem)
-            ? selectedItems
-            : [_dragSourceItem];
-        _dragSourceKeys = sources.Select(item => item.Node.Key).Distinct().ToArray();
+        if (_dragSourceKeys.Count == 0)
+            _dragSourceKeys = [_dragSourceItem.Node.Key];
         _dragInProgress = true;
         _statusLabel.Text =
             "Drop on a folder, between matching siblings, or on empty hierarchy space to move to the root.";
         var dragData = new DataObject();
         dragData.SetString("move", InternalHierarchyDragType);
-        _treeGrid.DoDragDrop(dragData, DragEffects.Move);
+        try
+        {
+            _treeGrid.DoDragDrop(dragData, DragEffects.Move);
+        }
+        catch
+        {
+            ResetPendingDrag();
+            throw;
+        }
     }
 
     private void OnTreeDragOver(object? sender, DragEventArgs eventArgs)
@@ -3376,9 +3386,7 @@ public sealed partial class LayoutFoundryPanel : Panel
         }
         var dialog = new BatchCreateLayoutsDialog(snapshot, targets);
         dialog.ShowModal(this);
-        await LayoutFoundryUiHost.CompleteDraftLayoutThumbnailSessionAsync(
-            snapshot.DocumentRuntimeSerialNumber,
-            restoreOriginalModifiedState: !dialog.Succeeded);
+        await dialog.PreviewCleanup;
         if (dialog.Succeeded)
         {
             _statusLabel.Text = $"Updated {targets.Count} layout{(targets.Count == 1 ? string.Empty : "s")}.";
@@ -3443,7 +3451,7 @@ public sealed partial class LayoutFoundryPanel : Panel
         }
     }
 
-    private void ShowTemplateRolesPicker(
+    private void ShowLayoutTemplatePicker(
         IReadOnlyList<OverviewNodeKey> selection,
         PointF hierarchyLocation)
     {
@@ -3454,38 +3462,34 @@ public sealed partial class LayoutFoundryPanel : Panel
             return;
         }
         var targets = selection.Distinct().Where(key => key.Kind is
-            OverviewNodeKind.Folder or OverviewNodeKind.Sheet or OverviewNodeKind.Detail).ToArray();
+            OverviewNodeKind.Sheet or OverviewNodeKind.Detail).ToArray();
         if (targets.Length == 0)
         {
-            _statusLabel.Text = "Template roles apply to folders, layouts, and details.";
+            _statusLabel.Text = "Only layouts and details can be templates.";
             return;
         }
 
         var initial = targets.ToDictionary(key => key, key =>
         {
             var scope = ToHierarchyScope(key);
-            return snapshot.TemplateRegistrations.LastOrDefault(item => item.Source == scope)
-                ?.Capabilities ?? TemplateCapability.None;
+            return snapshot.TemplateRegistrations.Any(item => item.Source == scope)
+;
         });
-        var allowed = targets.Select(key => TemplateCapabilityPolicy.AllowedFor(
-                ToHierarchyScope(key).Kind))
-            .Aggregate((left, right) => left & right);
         var screenPoint = _treeGrid.PointToScreen(hierarchyLocation);
         var overlayPoint = _panelOverlayHost.PointFromScreen(screenPoint);
-        _templateRolesOverlay.ShowPicker(
+        _layoutTemplateOverlay.ShowPicker(
             initial,
-            allowed,
             new Point((int)Math.Round(overlayPoint.X), (int)Math.Round(overlayPoint.Y + _treeGrid.RowHeight)));
     }
 
-    private async Task CommitTemplateRolesAsync(
-        IReadOnlyDictionary<OverviewNodeKey, TemplateCapability> values)
+    private async Task CommitTemplateRegistrationAsync(
+        IReadOnlyDictionary<OverviewNodeKey, bool> values)
     {
         if (values.Count == 0) return;
-        _statusLabel.Text = "Updating template roles…";
+        _statusLabel.Text = "Updating template registration…";
         foreach (var group in values.GroupBy(pair => pair.Value))
         {
-            var result = await LayoutFoundryUiHost.SetTemplateCapabilitiesAsync(
+            var result = await LayoutFoundryUiHost.SetLayoutTemplateRegistrationAsync(
                 group.Select(pair => pair.Key).ToArray(),
                 group.Key);
             if (result.Succeeded) continue;
@@ -3493,7 +3497,7 @@ public sealed partial class LayoutFoundryPanel : Panel
             RefreshOverview();
             return;
         }
-        _statusLabel.Text = "Template roles updated.";
+        _statusLabel.Text = "Template registration updated.";
         RefreshOverview();
     }
 
@@ -3507,7 +3511,7 @@ public sealed partial class LayoutFoundryPanel : Panel
         },
         key.Id);
 
-    private void OpenCreateLayouts(Guid? preferredFolderId)
+    private async void OpenCreateLayouts(Guid? preferredFolderId)
     {
         var snapshot = LayoutFoundryUiHost.CaptureSnapshot();
         if (snapshot is null)
@@ -3517,6 +3521,7 @@ public sealed partial class LayoutFoundryPanel : Panel
         }
         var dialog = new BatchCreateLayoutsDialog(snapshot, preferredFolderId);
         dialog.ShowModal(this);
+        await dialog.PreviewCleanup;
         if (dialog.Succeeded)
         {
             _statusLabel.Text = $"Created {dialog.CreatedCount} layout{(dialog.CreatedCount == 1 ? string.Empty : "s")}.";
@@ -3963,10 +3968,9 @@ public sealed partial class LayoutFoundryPanel : Panel
             }
         }
 
-        public string TemplateText => CapabilitySummary(Node.Folder?.TemplateCapabilities ??
-                                                        Node.Sheet?.TemplateCapabilities ??
-                                                        Node.Detail?.TemplateCapabilities ??
-                                                        TemplateCapability.None);
+        public string TemplateText => Node.Key.Kind == OverviewNodeKind.Folder ? string.Empty : (Node.Sheet?.IsTemplate ??
+                                                        Node.Detail?.IsTemplate ??
+false) ? "Layout" : "—";
 
         public string AppearanceStateText => Node.AppearanceState is { } state
             ? $"{state.RuleCount} rule{(state.RuleCount == 1 ? string.Empty : "s")} · {state.DirectAssignmentCount} use{(state.DirectAssignmentCount == 1 ? string.Empty : "s")}"
@@ -4012,15 +4016,6 @@ public sealed partial class LayoutFoundryPanel : Panel
 
         private AppearanceStateBindingOverview? StateBinding() =>
             Node.Folder?.AppearanceState ?? Node.Sheet?.AppearanceState ?? Node.Detail?.AppearanceState;
-
-        private static string CapabilitySummary(TemplateCapability capabilities)
-        {
-            if (capabilities == TemplateCapability.None) return "—";
-            var labels = new List<string>(2);
-            if (capabilities.HasFlag(TemplateCapability.Layout)) labels.Add("Layout");
-            if (capabilities.HasFlag(TemplateCapability.TitleBlock)) labels.Add("Title block");
-            return labels.Count == 0 ? "—" : string.Join(" · ", labels);
-        }
 
         private string? _paperText;
 
@@ -4074,8 +4069,8 @@ public sealed partial class LayoutFoundryPanel : Panel
         {
             if (node.Sheet is not null) yield return node.Sheet;
             foreach (var child in node.Children)
-            foreach (var sheet in DescendantSheets(child))
-                yield return sheet;
+                foreach (var sheet in DescendantSheets(child))
+                    yield return sheet;
         }
 
         private static IEnumerable<DetailOverview> DescendantDetails(OverviewTreeNode node)
@@ -4092,8 +4087,8 @@ public sealed partial class LayoutFoundryPanel : Panel
                 yield break;
             }
             foreach (var child in node.Children)
-            foreach (var detail in DescendantDetails(child))
-                yield return detail;
+                foreach (var detail in DescendantDetails(child))
+                    yield return detail;
         }
 
         private static bool Contains(

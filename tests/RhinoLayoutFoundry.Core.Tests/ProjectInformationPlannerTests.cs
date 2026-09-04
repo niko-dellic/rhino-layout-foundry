@@ -8,7 +8,7 @@ public sealed class ProjectInformationPlannerTests
     [Fact]
     public void ValidProjectInformationCreatesUpdate()
     {
-        var snapshot = TestSnapshots.Create() with { ProjectData = ProjectInformation.Empty };
+        var snapshot = TestSnapshots.Create() with { ProjectInfo = ProjectInformation.Empty };
         var information = ProjectInformation.Empty with
         {
             ProjectName = "Civic Library",

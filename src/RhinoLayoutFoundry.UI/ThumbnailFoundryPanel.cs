@@ -339,9 +339,7 @@ internal sealed class ThumbnailFoundryPanel : Panel
 
         var dialog = new BatchCreateLayoutsDialog(snapshot, targets);
         dialog.ShowModal(this);
-        await LayoutFoundryUiHost.CompleteDraftLayoutThumbnailSessionAsync(
-            snapshot.DocumentRuntimeSerialNumber,
-            restoreOriginalModifiedState: !dialog.Succeeded);
+        await dialog.PreviewCleanup;
         if (dialog.Succeeded) RefreshSnapshot();
     }
 

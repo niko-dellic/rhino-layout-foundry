@@ -35,23 +35,6 @@ internal sealed class RhinoDocumentSnapshotProvider : IDocumentSnapshotProvider
         }
 
         var pageViews = document.Views.GetPageViews();
-        var pageNames = pageViews.ToDictionary(page => page.MainViewport.Id, page => page.PageName);
-        var titleBlockInstances = document.Objects
-            .OfType<InstanceObject>()
-            .Where(instance => instance.Attributes.Space == ActiveSpace.PageSpace &&
-                               pageNames.ContainsKey(instance.Attributes.ViewportId))
-            .Select(instance => new TitleBlockInstanceSnapshot(
-                instance.Id,
-                instance.InstanceDefinition.Id,
-                instance.InstanceDefinition.Name,
-                instance.Attributes.ViewportId,
-                pageNames[instance.Attributes.ViewportId],
-                TransformValues(instance.InstanceXform),
-                state.Sheets.Values
-                    .Select(sheet => sheet.TitleBlock)
-                    .FirstOrDefault(role => role?.InstanceObjectId == instance.Id)?.AnchorName ?? "Template"))
-            .ToDictionary(instance => instance.InstanceObjectId);
-
         var sheets = pageViews
             .Select((page, index) =>
             {
@@ -77,30 +60,30 @@ internal sealed class RhinoDocumentSnapshotProvider : IDocumentSnapshotProvider
                 var titleBlock = record?.TitleBlock;
                 var titleBlockName = titleBlock is null
                     ? null
-                    : titleBlockInstances.GetValueOrDefault(titleBlock.InstanceObjectId)?.InstanceDefinitionName ??
-                      document.InstanceDefinitions.Find(titleBlock.InstanceDefinitionId, true)?.Name ??
+                    : document.InstanceDefinitions.Find(titleBlock.InstanceDefinitionId, true)?.Name ??
                       "Missing title block";
 
                 return new SheetSnapshot(
-                    pageId,
-                    folderId,
-                    record?.Order ?? index,
-                    page.PageName,
-                    detailIds,
-                    record?.Metadata ?? new Dictionary<string, string>(StringComparer.Ordinal),
-                    page.PageWidth,
-                    page.PageHeight,
-                    document.PageUnitSystem.ToString(),
-                    detailSettings,
-                    titleBlock?.InstanceObjectId,
-                    titleBlockName,
-                    record?.IncludeInPrintAll ?? true,
-                    record?.TitleBlockData,
-                    titleBlock?.BuiltInKind,
-                    record?.Tags,
-                    record?.NamingBinding,
-                    record?.Notes ?? string.Empty,
-                    record?.DetailNamedViewAssignments);
+                    PageViewId: pageId,
+                    FolderId: folderId,
+                    Order: record?.Order ?? index,
+                    Name: page.PageName,
+                    DetailIds: detailIds,
+                    Metadata: record?.Metadata ?? new Dictionary<string, string>(StringComparer.Ordinal),
+                    PageWidth: page.PageWidth,
+                    PageHeight: page.PageHeight,
+                    PageUnitSystem: document.PageUnitSystem.ToString(),
+                    DetailSettings: detailSettings,
+                    TitleBlockInstanceObjectId: titleBlock?.InstanceObjectId,
+                    TitleBlockDefinitionName: titleBlockName,
+                    IncludeInPrintAll: record?.IncludeInPrintAll ?? true,
+                    TitleBlockData: record?.TitleBlockData,
+                    TitleBlockBuiltInKind: titleBlock?.BuiltInKind,
+                    NamingBinding: record?.NamingBinding,
+                    Notes: record?.Notes ?? string.Empty)
+                {
+                    DetailNamedViews = record?.DetailNamedViews ?? new Dictionary<Guid, string>()
+                };
             })
             .ToDictionary(sheet => sheet.PageViewId);
 
@@ -204,40 +187,8 @@ internal sealed class RhinoDocumentSnapshotProvider : IDocumentSnapshotProvider
             }
         }
         var pagesById = pageViews.ToDictionary(page => page.MainViewport.Id);
-        var layoutTemplateSources = state.TemplateRegistrations
-            .Where(item => item.Capabilities.HasFlag(TemplateCapability.Layout))
-            .Select(item => item.Source)
-            .ToHashSet();
-        var templates = state.Templates
-            .Where(template => template.SourcePageViewId is not { } sourceId ||
-                               layoutTemplateSources.Contains(new HierarchyScope(
-                                   HierarchyScopeKind.Sheet, sourceId)))
-            .Select(template =>
-            {
-                var refreshed = RefreshDocumentBackedTemplate(
-                    document,
-                    template,
-                    pagesById,
-                    state.Sheets);
-                if (template.SourcePageViewId is not { } sourceId) return refreshed;
-                var capabilities = state.TemplateRegistrations.LastOrDefault(item =>
-                        item.Source == new HierarchyScope(HierarchyScopeKind.Sheet, sourceId))
-                    ?.Capabilities ?? TemplateCapability.None;
-                return refreshed with
-                {
-                    TitleBlock = capabilities.HasFlag(TemplateCapability.TitleBlock)
-                        ? refreshed.TitleBlock
-                        : null,
-                    DetailSlots = refreshed.DetailSlots.Select(slot => slot with
-                    {
-                        LayerRules = [],
-                        ObjectDisplayRules = [],
-                    }).ToArray(),
-                };
-            })
-            .ToList();
-        foreach (var registration in state.TemplateRegistrations.Where(item =>
-                     item.Capabilities.HasFlag(TemplateCapability.Layout)))
+        var templates = new List<SheetTemplateRecipe>();
+        foreach (var registration in state.TemplateRegistrations)
         {
             RhinoPageView? sourcePage = null;
             DetailViewObject[] sourceDetails = [];
@@ -251,73 +202,57 @@ internal sealed class RhinoDocumentSnapshotProvider : IDocumentSnapshotProvider
                 sourceDetails = sourcePage?.GetDetailViews()
                     .Where(detail => detail.Viewport.Id == registration.Source.Id).ToArray() ?? [];
             }
-            if (sourcePage is null || templates.Any(template =>
-                    template.SourcePageViewId == sourcePage.MainViewport.Id &&
-                    registration.Source.Kind == HierarchyScopeKind.Sheet))
+            if (sourcePage is null)
                 continue;
             var sourceRecord = state.Sheets.GetValueOrDefault(sourcePage.MainViewport.Id);
             templates.Add(new SheetTemplateRecipe(
-                registration.Id,
-                SheetTemplateRecipe.CurrentRecipeVersion,
-                registration.Source.Kind == HierarchyScopeKind.Detail
+                Id: registration.Id,
+                Name: registration.Source.Kind == HierarchyScopeKind.Detail
                     ? $"{sourceDetails[0].DescriptiveTitle} — Detail template"
                     : $"{sourcePage.PageName} — Layout template",
-                new PaperRecipe(sourcePage.PageWidth, sourcePage.PageHeight,
+                Paper: new PaperRecipe(sourcePage.PageWidth, sourcePage.PageHeight,
                     document.PageUnitSystem.ToString()),
-                sourceDetails.Select(detail =>
-                {
-                    var slot = CaptureDetail(document, detail, null);
-                    return slot with
-                    {
-                        LayerRules = [],
-                        ObjectDisplayRules = [],
-                    };
-                }).ToArray(),
-                registration.Source.Kind == HierarchyScopeKind.Sheet &&
-                registration.Capabilities.HasFlag(TemplateCapability.TitleBlock)
-                    ? CaptureTitleBlock(document, sourceRecord?.TitleBlock, null)
-                    : null,
-                sourceRecord?.Tags.ToArray() ?? [],
-                sourceRecord?.Metadata.ToDictionary(pair => pair.Key, pair => pair.Value) ??
+                DetailSlots: sourceDetails.Select(CaptureTemplateDetail).ToArray(),
+                TitleBlock: null,
+                DefaultMetadata: sourceRecord?.Metadata.ToDictionary(pair => pair.Key, pair => pair.Value) ??
                 new Dictionary<string, string>(StringComparer.Ordinal),
-                "{Template}-{n}")
+                DefaultNamingPattern: "{Template}-{n}")
             {
                 SourcePageViewId = sourcePage.MainViewport.Id,
             });
         }
 
         return new DocumentSnapshot(
-            document.RuntimeSerialNumber,
-            _revisionTracker.Current(document),
-            state.RootFolderId,
-            folders,
-            sheets,
-            objectIds,
-            displayModeIds,
-            templates.ToArray(),
-            state.Metadata,
-            document.NamedViews.Select(view => view.Name).ToHashSet(StringComparer.OrdinalIgnoreCase),
-            document.InstanceDefinitions.Select(definition => definition.Id).ToHashSet(),
-            displayModeNames,
-            titleBlockInstances,
-            state.Canvas,
-            state.ProjectInfo,
-            layerNames,
-            layerSettings,
-            modelObjects,
-            detailLayerVisibilities,
-            objectOverrides,
-            state.AppearanceRules,
-            state.TemplateRegistrations,
-            state.TemplateLinks,
-            state.AppearanceStates,
-            state.StateAssignments,
-            state.DedicatedDetailLayerId,
-            modelBounds,
-            namedViewSnapshots,
-            clippingPlanes,
-            standardViewportIds,
-            document.Views.ActiveView?.ActiveViewport.DisplayMode.Id);
+            DocumentRuntimeSerialNumber: document.RuntimeSerialNumber,
+            Revision: _revisionTracker.Current(document),
+            RootFolderId: state.RootFolderId,
+            Folders: folders,
+            Sheets: sheets,
+            ExistingObjectIds: objectIds,
+            DisplayModeIds: displayModeIds)
+        {
+            Templates = templates.ToArray(),
+            Metadata = state.Metadata,
+            NamedViews = document.NamedViews.Select(view => view.Name).ToHashSet(StringComparer.OrdinalIgnoreCase),
+            DisplayModes = displayModeNames,
+            Canvas = state.Canvas,
+            ProjectInfo = state.ProjectInfo,
+            Layers = layerNames,
+            LayerSnapshots = layerSettings,
+            ModelObjects = modelObjects,
+            DetailLayers = detailLayerVisibilities,
+            ObjectOverrides = objectOverrides,
+            AppearanceRules = state.AppearanceRules,
+            TemplateRegistrations = state.TemplateRegistrations,
+            AppearanceStates = state.AppearanceStates,
+            StateAssignments = state.StateAssignments,
+            DedicatedDetailLayerId = state.DedicatedDetailLayerId,
+            ModelBounds = modelBounds,
+            NamedViewSnapshots = namedViewSnapshots,
+            ClippingPlanes = clippingPlanes,
+            StandardViewports = standardViewportIds,
+            ActiveViewportDisplayModeId = document.Views.ActiveView?.ActiveViewport.DisplayMode.Id
+        };
     }
 
     private static ModelBoundsSnapshot? CaptureModelBounds(RhinoDoc document)
@@ -347,44 +282,13 @@ internal sealed class RhinoDocumentSnapshotProvider : IDocumentSnapshotProvider
             : null;
     }
 
-    private static SheetTemplateRecipe RefreshDocumentBackedTemplate(
-        RhinoDoc document,
-        SheetTemplateRecipe template,
-        IReadOnlyDictionary<Guid, RhinoPageView> pagesById,
-        IReadOnlyDictionary<Guid, SheetRecord> sheetRecords)
-    {
-        if (template.SourcePageViewId is not { } sourcePageViewId ||
-            !pagesById.TryGetValue(sourcePageViewId, out var page))
-            return template;
-
-        var existingSlots = template.DetailSlots;
-        var details = page.GetDetailViews()
-            .Select((detail, index) => CaptureDetail(
-                document,
-                detail,
-                index < existingSlots.Count ? existingSlots[index] : null))
-            .ToArray();
-        var titleBlock = CaptureTitleBlock(
-            document,
-            sheetRecords.GetValueOrDefault(sourcePageViewId)?.TitleBlock,
-            template.TitleBlock);
-        return template with
-        {
-            Paper = new PaperRecipe(page.PageWidth, page.PageHeight, document.PageUnitSystem.ToString()),
-            DetailSlots = details,
-            TitleBlock = titleBlock,
-        };
-    }
-
-    private static DetailSlotRecipe CaptureDetail(
-        RhinoDoc document,
-        DetailViewObject detail,
-        DetailSlotRecipe? existing)
+    private static DetailSlotRecipe CaptureTemplateDetail(
+        DetailViewObject detail)
     {
         var bounds = detail.DetailGeometry.GetBoundingBox(true);
         var viewport = detail.Viewport;
         return new DetailSlotRecipe(
-            existing?.Id ?? Guid.NewGuid(),
+viewport.Id,
             string.IsNullOrWhiteSpace(detail.Attributes.Name) ? viewport.Name : detail.Attributes.Name,
             bounds.Min.X,
             bounds.Min.Y,
@@ -394,56 +298,9 @@ internal sealed class RhinoDocumentSnapshotProvider : IDocumentSnapshotProvider
             detail.DetailGeometry.IsParallelProjection ? detail.DetailGeometry.PageToModelRatio : null,
             detail.DetailGeometry.IsProjectionLocked,
             viewport.DisplayMode.Id,
-            existing?.DefaultNamedView,
+null,
             [viewport.CameraLocation.X, viewport.CameraLocation.Y, viewport.CameraLocation.Z],
             [viewport.CameraTarget.X, viewport.CameraTarget.Y, viewport.CameraTarget.Z],
-            [viewport.CameraUp.X, viewport.CameraUp.Y, viewport.CameraUp.Z],
-            document.Layers
-                .Where(layer => !layer.IsDeleted && !layer.IsReference &&
-                                layer.HasPerViewportSettings(viewport.Id))
-                .Select(layer => new LayerVisibilityRule(
-                    new LayerReference(layer.Id, layer.FullPath),
-                    layer.PerViewportIsVisible(viewport.Id)
-                        ? LayerVisibilityOverride.Visible
-                        : LayerVisibilityOverride.Hidden))
-                .ToArray(),
-            document.Objects
-                .Where(item => item is not DetailViewObject &&
-                               item.Attributes.Space == ActiveSpace.ModelSpace &&
-                               item.Attributes.HasDisplayModeOverride(viewport.Id))
-                .Select(item =>
-                {
-                    var modeId = item.Attributes.GetDisplayModeOverride(viewport.Id);
-                    using var mode = DisplayModeDescription.GetDisplayMode(modeId);
-                    return new ObjectDisplayRule(
-                        new ObjectDisplaySelector(ObjectDisplaySelectorKind.ExactObject, ObjectId: item.Id),
-                        modeId,
-                        mode?.LocalName ?? "Missing display mode");
-                })
-                .ToArray());
+            [viewport.CameraUp.X, viewport.CameraUp.Y, viewport.CameraUp.Z]);
     }
-
-    private static TitleBlockTemplateRecipe? CaptureTitleBlock(
-        RhinoDoc document,
-        TitleBlockRole? role,
-        TitleBlockTemplateRecipe? existing)
-    {
-        if (role is null) return existing;
-        if (document.Objects.FindId(role.InstanceObjectId) is not InstanceObject instance) return null;
-        return new TitleBlockTemplateRecipe(
-            instance.InstanceDefinition.Id,
-            instance.InstanceDefinition.Name,
-            TransformValues(instance.InstanceXform),
-            role.AnchorName,
-            existing?.FieldMappings ?? new Dictionary<string, string>(StringComparer.Ordinal),
-            role.BuiltInKind);
-    }
-
-    private static IReadOnlyList<double> TransformValues(global::Rhino.Geometry.Transform transform) =>
-    [
-        transform.M00, transform.M01, transform.M02, transform.M03,
-        transform.M10, transform.M11, transform.M12, transform.M13,
-        transform.M20, transform.M21, transform.M22, transform.M23,
-        transform.M30, transform.M31, transform.M32, transform.M33,
-    ];
 }

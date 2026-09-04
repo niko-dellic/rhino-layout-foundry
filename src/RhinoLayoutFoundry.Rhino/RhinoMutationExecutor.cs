@@ -35,17 +35,14 @@ internal sealed partial class RhinoMutationExecutor(
             [BatchUpdateSheetsChange update] => ApplyBatchUpdate(document, plan, update),
             [UpdateDetailDisplayModesChange updateDetails] => ApplyDetailDisplayModes(document, plan, updateDetails),
             [AssignNamedViewToDetailsChange assignNamedView] => ApplyNamedView(document, plan, assignNamedView),
-            [CaptureSheetTemplateChange capture] => ApplyCaptureTemplate(document, plan, capture),
             [UpdateProjectInformationChange project] => ApplyProjectInformation(document, plan, project),
             [SetHierarchyViewportRulesChange appearance] =>
                 ApplyViewportAppearanceRules(document, plan, appearance),
-            [SetTemplateCapabilitiesChange capabilities] =>
-                ApplyViewportTemplateCapabilities(document, plan, capabilities),
+            [SetLayoutTemplateRegistrationChange capabilities] =>
+                ApplyTemplateRegistration(document, plan, capabilities),
             _ when plan.Changes.Count > 0 && plan.Changes.All(change => change is
                 SetAppearanceStateResourceChange or SetAppearanceStateAssignmentChange) =>
                 ApplyAppearanceStateChanges(document, plan),
-            _ when plan.Changes.Count > 0 && plan.Changes.All(change => change is DeleteSheetTemplateChange) =>
-                ApplyDeleteTemplates(document, plan, plan.Changes.Cast<DeleteSheetTemplateChange>().ToArray()),
             _ when plan.Changes.All(change => change is DeleteFolderChange or DeleteSheetChange or
                 SetAppearanceStateResourceChange) =>
                 ApplyDeleteHierarchySelection(document, plan),
@@ -70,8 +67,7 @@ internal sealed partial class RhinoMutationExecutor(
         return change is AddFolderChange or RenameFolderChange or
             MoveSheetChange or MoveFolderChange or SetPrintInclusionChange or
             SetObserverCanvasStateChange or ReorderSheetsChange or
-            ReorganizeHierarchyChange or SetTemplateCapabilitiesChange or
-            SetCapabilityTemplateLinkChange or UpdateLinkedSheetNamesChange or
+            ReorganizeHierarchyChange or SetLayoutTemplateRegistrationChange or UpdateLinkedSheetNamesChange or
             UpdateHierarchyNotesChange;
     }
 
@@ -128,7 +124,7 @@ internal sealed partial class RhinoMutationExecutor(
                 var sheets = stateBefore.Sheets.ToDictionary(pair => pair.Key, pair => pair.Value);
                 sheets[rename.PageViewId] = record with { NamingBinding = null };
                 stateAfter = stateBefore with { Sheets = sheets };
-                _stateStore.SetCurrentSchema(document, stateAfter);
+                _stateStore.Set(document, stateAfter);
             }
             RefreshManagedTitleBlockAttributes(document, page, stateAfter);
 
@@ -172,7 +168,6 @@ internal sealed partial class RhinoMutationExecutor(
             .Select(page => page.MainViewport.Id)
             .ToHashSet();
         var templateRegistrations = beforeState.TemplateRegistrations.ToList();
-        var templateLinks = beforeState.TemplateLinks.ToList();
 
         foreach (var change in plan.Changes)
         {
@@ -196,9 +191,8 @@ internal sealed partial class RhinoMutationExecutor(
                 ReorderSheetsChange reorder => ApplyReorderSheets(sheets, reorder),
                 ReorganizeHierarchyChange reorganize => ApplyReorganizeHierarchy(
                     beforeState.RootFolderId, folders, sheets, reorganize),
-                SetTemplateCapabilitiesChange templates => ApplyTemplateCapabilities(
-                    templateRegistrations, templateLinks, templates),
-                SetCapabilityTemplateLinkChange link => ApplyTemplateLink(templateLinks, link),
+                SetLayoutTemplateRegistrationChange templates => UpdateTemplateRegistration(
+                    templateRegistrations, templates),
                 UpdateLinkedSheetNamesChange naming => ApplyLinkedSheetBindings(sheets, naming),
                 UpdateHierarchyNotesChange notes => ApplyHierarchyNotes(folders, sheets, notes),
                 _ => Failure("operation.unsupported_plan", "The hierarchy operation is not supported."),
@@ -213,12 +207,11 @@ internal sealed partial class RhinoMutationExecutor(
         {
             Folders = folders.ToArray(),
             Sheets = sheets,
-            ObserverCanvas = plan.Changes
+            Canvas = plan.Changes
                 .OfType<SetObserverCanvasStateChange>()
                 .Select(change => change.NewState)
                 .LastOrDefault() ?? beforeState.Canvas,
-            CapabilityTemplates = templateRegistrations.ToArray(),
-            CapabilityLinks = templateLinks.ToArray(),
+            TemplateRegistrations = templateRegistrations.ToArray(),
         };
         var undoRecord = document.BeginUndoRecord(plan.UndoDescription);
         if (undoRecord == 0)
@@ -386,28 +379,6 @@ internal sealed partial class RhinoMutationExecutor(
             ? result
             : throw new InvalidOperationException($"Page unit system '{value}' is not supported.");
 
-    private static double[] TransformValues(Transform transform) =>
-    [
-        transform.M00, transform.M01, transform.M02, transform.M03,
-        transform.M10, transform.M11, transform.M12, transform.M13,
-        transform.M20, transform.M21, transform.M22, transform.M23,
-        transform.M30, transform.M31, transform.M32, transform.M33,
-    ];
-
-    private static Transform RestoreTransform(IReadOnlyList<double> values)
-    {
-        if (values.Count != 16)
-            throw new InvalidOperationException("The title-block transform is invalid.");
-        var transform = new Transform
-        {
-            M00 = values[0], M01 = values[1], M02 = values[2], M03 = values[3],
-            M10 = values[4], M11 = values[5], M12 = values[6], M13 = values[7],
-            M20 = values[8], M21 = values[9], M22 = values[10], M23 = values[11],
-            M30 = values[12], M31 = values[13], M32 = values[14], M33 = values[15],
-        };
-        return transform;
-    }
-
     private void OnUndoDocumentState(object? sender, CustomUndoEventArgs eventArgs)
     {
         if (eventArgs.Tag is not DocumentStateUndoTag tag)
@@ -459,7 +430,7 @@ internal sealed partial class RhinoMutationExecutor(
         IReadOnlyList<DetailModeBefore> DetailModes);
 
     private sealed record DetailModeBefore(
-        DetailViewObject Detail,
+        Guid ObjectId,
         Guid DisplayModeId,
         int LayerIndex,
         ViewportInfo Viewport);

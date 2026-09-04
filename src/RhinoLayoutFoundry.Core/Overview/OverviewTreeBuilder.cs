@@ -15,8 +15,6 @@ public enum OverviewFilterKind
     All,
     Sheets,
     Details,
-    Tagged,
-    Untagged,
 }
 
 public readonly record struct OverviewNodeKey(OverviewNodeKind Kind, Guid Id);
@@ -291,8 +289,6 @@ public static class OverviewTreeBuilder
             OverviewFilterKind.All => true,
             OverviewFilterKind.Sheets => true,
             OverviewFilterKind.Details => sheet.DetailCount > 0,
-            OverviewFilterKind.Tagged => sheet.Tags.Count > 0,
-            OverviewFilterKind.Untagged => sheet.Tags.Count == 0,
             _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
         };
     }

@@ -5,37 +5,6 @@ namespace RhinoLayoutFoundry.Core.Tests;
 
 public sealed class SheetTemplatePlannerTests
 {
-    [Fact]
-    public void CaptureCreatesVersionedTemplateChange()
-    {
-        var snapshot = WithTemplates(TestSnapshots.Create(), []);
-        var source = snapshot.Sheets.Values.First();
-        var request = new CaptureSheetTemplateRequest(42, 1, Guid.NewGuid(), source.PageViewId,
-            "A3 Plan", "A-{index:000}", null);
-
-        var plan = new CaptureSheetTemplatePlanner().Plan(request, snapshot);
-
-        Assert.True(plan.CanApply);
-        Assert.Equal("A3 Plan", ((CaptureSheetTemplateChange)plan.Changes.Single()).Name);
-    }
-
-    [Fact]
-    public void CaptureRejectsAnAlreadyRegisteredSourceLayout()
-    {
-        var snapshot = TestSnapshots.Create();
-        var source = snapshot.Sheets.Values.First();
-        var existing = Template("Existing", 420, 297) with
-        {
-            SourcePageViewId = source.PageViewId,
-        };
-        snapshot = WithTemplates(snapshot, [existing]);
-
-        var plan = new CaptureSheetTemplatePlanner().Plan(new CaptureSheetTemplateRequest(
-            42, 1, Guid.NewGuid(), source.PageViewId, "Another", "{index:00}", null), snapshot);
-
-        Assert.False(plan.CanApply);
-        Assert.Contains(plan.Diagnostics, diagnostic => diagnostic.Code == "template.source_registered");
-    }
 
     [Fact]
     public void MixedTemplateBatchProducesOrderedUniqueNames()
@@ -43,9 +12,8 @@ public sealed class SheetTemplatePlannerTests
         var a3 = Template("A3", 420, 297);
         var a1 = Template("A1", 841, 594);
         var snapshot = WithTemplates(TestSnapshots.Create(), [a3, a1]);
-        var request = new BatchCreateSheetsRequest(42, 1, TestSnapshots.OtherFolderId,
-            [new TemplateQuantity(a3.Id, 2), new TemplateQuantity(a1.Id, 1)],
-            "S-{index:000}", 3, 2);
+        var request = new BatchCreateSheetsRequest(DocumentRuntimeSerialNumber: 42, SourceRevision: 1, DestinationFolderId: TestSnapshots.OtherFolderId,
+            NamingPattern: "S-{index:000}", Start: 3, Step: 2, CreationSpecs: [new LayoutCreationSpec(2, a3.Paper, TemplateId: a3.Id), new LayoutCreationSpec(1, a1.Paper, TemplateId: a1.Id)]);
 
         var plan = new BatchCreateSheetsPlanner().Plan(request, snapshot);
 
@@ -66,8 +34,7 @@ public sealed class SheetTemplatePlannerTests
         var template = Template("A3", 420, 297);
         var snapshot = WithTemplates(TestSnapshots.Create(), [template]);
         var plan = new BatchCreateSheetsPlanner().Plan(new BatchCreateSheetsRequest(
-            42, 1, TestSnapshots.RootFolderId, [new TemplateQuantity(template.Id, 2)],
-            "A-{index:000}", 1, 1), snapshot);
+            DocumentRuntimeSerialNumber: 42, SourceRevision: 1, DestinationFolderId: TestSnapshots.RootFolderId, NamingPattern: "A-{index:000}", Start: 1, Step: 1, CreationSpecs: [new LayoutCreationSpec(2, template.Paper, TemplateId: template.Id)]), snapshot);
 
         Assert.True(plan.CanApply);
         var changes = plan.Changes.Cast<CreateSheetFromTemplateChange>().ToArray();
@@ -80,13 +47,12 @@ public sealed class SheetTemplatePlannerTests
     {
         var invalid = Template("Broken", 420, 297) with
         {
-            DetailSlots = [new DetailSlotRecipe(Guid.NewGuid(), "Bad", 10, 10, 5, 20,
-                "Top", null, false, null, null)],
+            DetailSlots = [new DetailSlotRecipe(Id: Guid.NewGuid(), Name: "Bad", Left: 10, Bottom: 10, Right: 5, Top: 20,
+                Projection:                 "Top", PageToModelRatio: null, ProjectionLocked: false, DisplayModeId: null, DefaultNamedView: null)],
         };
         var snapshot = WithTemplates(TestSnapshots.Create(), [invalid]);
         var plan = new BatchCreateSheetsPlanner().Plan(new BatchCreateSheetsRequest(
-            42, 1, TestSnapshots.RootFolderId, [new TemplateQuantity(invalid.Id, 1)],
-            "X-{index}", 1, 1), snapshot);
+            DocumentRuntimeSerialNumber: 42, SourceRevision: 1, DestinationFolderId: TestSnapshots.RootFolderId, NamingPattern: "X-{index}", Start: 1, Step: 1, CreationSpecs: [new LayoutCreationSpec(1, invalid.Paper, TemplateId: invalid.Id)]), snapshot);
 
         Assert.False(plan.CanApply);
         Assert.Contains(plan.Diagnostics, item => item.Code == "template.detail_bounds_invalid");
@@ -99,8 +65,7 @@ public sealed class SheetTemplatePlannerTests
         var snapshot = WithTemplates(TestSnapshots.Create(), [template]);
         var slot = template.DetailSlots.Single();
         var plan = new BatchCreateSheetsPlanner().Plan(new BatchCreateSheetsRequest(
-            42, 1, TestSnapshots.RootFolderId, [new TemplateQuantity(template.Id, 1)],
-            "X-{index}", 1, 1, new Dictionary<Guid, string> { [slot.Id] = "Deleted View" }), snapshot);
+            DocumentRuntimeSerialNumber: 42, SourceRevision: 1, DestinationFolderId: TestSnapshots.RootFolderId, NamingPattern: "X-{index}", Start: 1, Step: 1, CreationSpecs: [new LayoutCreationSpec(1, template.Paper, TemplateId: template.Id, NamedViewsByDetail: ["Deleted View"])]), snapshot);
 
         Assert.False(plan.CanApply);
         Assert.Contains(plan.Diagnostics, item => item.Code == "template.named_view_unresolved");
@@ -111,27 +76,25 @@ public sealed class SheetTemplatePlannerTests
     {
         var snapshot = WithTemplates(TestSnapshots.Create(), []) with
         {
-            DisplayModeNames = new Dictionary<Guid, string>
+            DisplayModes = new Dictionary<Guid, string>
             {
                 [TestSnapshots.DisplayModeOneId] = "Technical",
             },
         };
         var request = new BatchCreateSheetsRequest(
-            42,
-            1,
-            TestSnapshots.RootFolderId,
-            [],
-            "Page {index}",
-            1,
-            1,
+            DocumentRuntimeSerialNumber: 42,
+            SourceRevision: 1,
+            DestinationFolderId: TestSnapshots.RootFolderId,
+            NamingPattern: "Page {index}",
+            Start: 1,
+            Step: 1,
             CreationSpecs:
             [
                 new LayoutCreationSpec(
                     3,
                     new PaperRecipe(594, 420, "Millimeters"),
                     BuiltInLayoutKind.FourDetailsGrid,
-                    DetailDisplayModeId: TestSnapshots.DisplayModeOneId,
-                    UseTemplateTitleBlock: false),
+                    DetailDisplayModeId: TestSnapshots.DisplayModeOneId),
             ]);
 
         var plan = new BatchCreateSheetsPlanner().Plan(request, snapshot);
@@ -157,13 +120,12 @@ public sealed class SheetTemplatePlannerTests
     {
         var snapshot = WithTemplates(TestSnapshots.Create(), []);
         var plan = new BatchCreateSheetsPlanner().Plan(new BatchCreateSheetsRequest(
-            42,
-            1,
-            TestSnapshots.RootFolderId,
-            [],
-            "Page {index}",
-            1,
-            1,
+            DocumentRuntimeSerialNumber: 42,
+            SourceRevision: 1,
+            DestinationFolderId: TestSnapshots.RootFolderId,
+            NamingPattern: "Page {index}",
+            Start: 1,
+            Step: 1,
             CreationSpecs:
             [
                 new LayoutCreationSpec(
@@ -182,13 +144,12 @@ public sealed class SheetTemplatePlannerTests
     {
         var snapshot = WithTemplates(TestSnapshots.Create(), []);
         var plan = new BatchCreateSheetsPlanner().Plan(new BatchCreateSheetsRequest(
-            42,
-            1,
-            TestSnapshots.RootFolderId,
-            [],
-            "Page {index}",
-            1,
-            1,
+            DocumentRuntimeSerialNumber: 42,
+            SourceRevision: 1,
+            DestinationFolderId: TestSnapshots.RootFolderId,
+            NamingPattern: "Page {index}",
+            Start: 1,
+            Step: 1,
             CreationSpecs:
             [
                 new LayoutCreationSpec(
@@ -220,20 +181,19 @@ public sealed class SheetTemplatePlannerTests
             "Technical");
         var snapshot = WithTemplates(TestSnapshots.Create(), []) with
         {
-            AppearanceStateResources =
+            AppearanceStates =
             [
                 new AppearanceStateRecord(appearanceStateId, TestSnapshots.RootFolderId, 0,
                     "Presentation appearance", [layerRule], [objectRule]),
             ],
         };
         var plan = new BatchCreateSheetsPlanner().Plan(new BatchCreateSheetsRequest(
-            42,
-            1,
-            TestSnapshots.RootFolderId,
-            [],
-            "Page {index}",
-            1,
-            1,
+            DocumentRuntimeSerialNumber: 42,
+            SourceRevision: 1,
+            DestinationFolderId: TestSnapshots.RootFolderId,
+            NamingPattern: "Page {index}",
+            Start: 1,
+            Step: 1,
             CreationSpecs:
             [
                 new LayoutCreationSpec(
@@ -247,8 +207,8 @@ public sealed class SheetTemplatePlannerTests
         var change = Assert.IsType<CreateSheetFromTemplateChange>(Assert.Single(plan.Changes));
         Assert.Equal(appearanceStateId, change.AppearanceStateId);
         var detail = Assert.Single(change.Template.DetailSlots);
-        Assert.Empty(detail.Layers);
-        Assert.Empty(detail.Objects);
+        Assert.Empty(detail.LayerRules);
+        Assert.Empty(detail.ObjectDisplayRules);
     }
 
     [Fact]
@@ -258,14 +218,14 @@ public sealed class SheetTemplatePlannerTests
         var secondStateId = Guid.NewGuid();
         var snapshot = WithTemplates(TestSnapshots.Create(), []) with
         {
-            AppearanceStateResources =
+            AppearanceStates =
             [
                 new AppearanceStateRecord(firstStateId, TestSnapshots.RootFolderId, 0, "First", [], []),
                 new AppearanceStateRecord(secondStateId, TestSnapshots.RootFolderId, 1, "Second", [], []),
             ],
         };
         var plan = new BatchCreateSheetsPlanner().Plan(new BatchCreateSheetsRequest(
-            42, 1, TestSnapshots.RootFolderId, [], "Page {index}", 1, 1,
+            DocumentRuntimeSerialNumber: 42, SourceRevision: 1, DestinationFolderId: TestSnapshots.RootFolderId, NamingPattern: "Page {index}", Start: 1, Step: 1,
             CreationSpecs:
             [
                 new LayoutCreationSpec(
@@ -288,13 +248,12 @@ public sealed class SheetTemplatePlannerTests
     {
         var snapshot = WithTemplates(TestSnapshots.Create(), []);
         var plan = new BatchCreateSheetsPlanner().Plan(new BatchCreateSheetsRequest(
-            42,
-            1,
-            TestSnapshots.RootFolderId,
-            [],
-            "Page {index}",
-            1,
-            1,
+            DocumentRuntimeSerialNumber: 42,
+            SourceRevision: 1,
+            DestinationFolderId: TestSnapshots.RootFolderId,
+            NamingPattern: "Page {index}",
+            Start: 1,
+            Step: 1,
             CreationSpecs:
             [
                 new LayoutCreationSpec(
@@ -315,13 +274,12 @@ public sealed class SheetTemplatePlannerTests
         var snapshot = WithTemplates(TestSnapshots.Create(), []);
         var missingId = Guid.Parse("50000000-0000-0000-0000-000000000099");
         var plan = new BatchCreateSheetsPlanner().Plan(new BatchCreateSheetsRequest(
-            42,
-            1,
-            TestSnapshots.RootFolderId,
-            [],
-            "Page {index}",
-            1,
-            1,
+            DocumentRuntimeSerialNumber: 42,
+            SourceRevision: 1,
+            DestinationFolderId: TestSnapshots.RootFolderId,
+            NamingPattern: "Page {index}",
+            Start: 1,
+            Step: 1,
             CreationSpecs:
             [
                 new LayoutCreationSpec(
@@ -340,13 +298,12 @@ public sealed class SheetTemplatePlannerTests
     {
         var snapshot = WithTemplates(TestSnapshots.Create(), []);
         var plan = new BatchCreateSheetsPlanner().Plan(new BatchCreateSheetsRequest(
-            42,
-            1,
-            TestSnapshots.RootFolderId,
-            [],
-            "Layer {index}",
-            1,
-            1,
+            DocumentRuntimeSerialNumber: 42,
+            SourceRevision: 1,
+            DestinationFolderId: TestSnapshots.RootFolderId,
+            NamingPattern: "Layer {index}",
+            Start: 1,
+            Step: 1,
             CreationSpecs:
             [
                 new LayoutCreationSpec(
@@ -370,16 +327,15 @@ public sealed class SheetTemplatePlannerTests
         var layerId = Guid.Parse("60000000-0000-0000-0000-000000000001");
         var snapshot = WithTemplates(TestSnapshots.Create(), []) with
         {
-            LayerNames = new Dictionary<Guid, string> { [layerId] = "Documentation::Details" },
+            Layers = new Dictionary<Guid, string> { [layerId] = "Documentation::Details" },
         };
         var plan = new BatchCreateSheetsPlanner().Plan(new BatchCreateSheetsRequest(
-            42,
-            1,
-            TestSnapshots.RootFolderId,
-            [],
-            "Layer {index}",
-            1,
-            1,
+            DocumentRuntimeSerialNumber: 42,
+            SourceRevision: 1,
+            DestinationFolderId: TestSnapshots.RootFolderId,
+            NamingPattern: "Layer {index}",
+            Start: 1,
+            Step: 1,
             CreationSpecs:
             [
                 new LayoutCreationSpec(
@@ -400,13 +356,12 @@ public sealed class SheetTemplatePlannerTests
     {
         var snapshot = WithTemplates(TestSnapshots.Create(), []);
         var plan = new BatchCreateSheetsPlanner().Plan(new BatchCreateSheetsRequest(
-            42,
-            1,
-            TestSnapshots.RootFolderId,
-            [],
-            "Layer {index}",
-            1,
-            1,
+            DocumentRuntimeSerialNumber: 42,
+            SourceRevision: 1,
+            DestinationFolderId: TestSnapshots.RootFolderId,
+            NamingPattern: "Layer {index}",
+            Start: 1,
+            Step: 1,
             CreationSpecs:
             [
                 new LayoutCreationSpec(
@@ -431,13 +386,12 @@ public sealed class SheetTemplatePlannerTests
             new SheetRevisionRecord("P02", "2026-09-02", "Client issue", "ND", "QA"),
         };
         var plan = new BatchCreateSheetsPlanner().Plan(new BatchCreateSheetsRequest(
-            42,
-            1,
-            TestSnapshots.RootFolderId,
-            [],
-            "Page {index}",
-            1,
-            1,
+            DocumentRuntimeSerialNumber: 42,
+            SourceRevision: 1,
+            DestinationFolderId: TestSnapshots.RootFolderId,
+            NamingPattern: "Page {index}",
+            Start: 1,
+            Step: 1,
             CreationSpecs:
             [
                 new LayoutCreationSpec(2, new PaperRecipe(594, 420, "Millimeters")),
@@ -455,11 +409,11 @@ public sealed class SheetTemplatePlannerTests
     {
         var snapshot = WithTemplates(TestSnapshots.Create(), []) with
         {
-            NamedViewNames = new HashSet<string>(["North", "South", "East", "West"],
+            NamedViews = new HashSet<string>(["North", "South", "East", "West"],
                 StringComparer.OrdinalIgnoreCase),
         };
         var plan = new BatchCreateSheetsPlanner().Plan(new BatchCreateSheetsRequest(
-            42, 1, TestSnapshots.RootFolderId, [], "Views {index}", 1, 1,
+            DocumentRuntimeSerialNumber: 42, SourceRevision: 1, DestinationFolderId: TestSnapshots.RootFolderId, NamingPattern: "Views {index}", Start: 1, Step: 1,
             CreationSpecs:
             [
                 new LayoutCreationSpec(
@@ -484,11 +438,11 @@ public sealed class SheetTemplatePlannerTests
         template = template with { DetailSlots = [first, second] };
         var snapshot = WithTemplates(TestSnapshots.Create(), [template]) with
         {
-            NamedViewNames = new HashSet<string>(["Captured camera", "Perspective"],
+            NamedViews = new HashSet<string>(["Captured camera", "Perspective"],
                 StringComparer.OrdinalIgnoreCase),
         };
         var plan = new BatchCreateSheetsPlanner().Plan(new BatchCreateSheetsRequest(
-            42, 1, TestSnapshots.RootFolderId, [], "Views {index}", 1, 1,
+            DocumentRuntimeSerialNumber: 42, SourceRevision: 1, DestinationFolderId: TestSnapshots.RootFolderId, NamingPattern: "Views {index}", Start: 1, Step: 1,
             CreationSpecs:
             [
                 new LayoutCreationSpec(
@@ -505,7 +459,7 @@ public sealed class SheetTemplatePlannerTests
         Assert.Equal("Perspective", change.NamedViewAssignments[change.Template.DetailSlots[1].Id]);
 
         var repeated = new BatchCreateSheetsPlanner().Plan(new BatchCreateSheetsRequest(
-            42, 1, TestSnapshots.RootFolderId, [], "Repeated {index}", 1, 1,
+            DocumentRuntimeSerialNumber: 42, SourceRevision: 1, DestinationFolderId: TestSnapshots.RootFolderId, NamingPattern: "Repeated {index}", Start: 1, Step: 1,
             CreationSpecs:
             [
                 new LayoutCreationSpec(
@@ -522,10 +476,10 @@ public sealed class SheetTemplatePlannerTests
     {
         var snapshot = WithTemplates(TestSnapshots.Create(), []) with
         {
-            NamedViewNames = new HashSet<string>(["Existing"], StringComparer.OrdinalIgnoreCase),
+            NamedViews = new HashSet<string>(["Existing"], StringComparer.OrdinalIgnoreCase),
         };
         BatchCreateSheetsRequest Request(IReadOnlyList<string?> assignments) => new(
-            42, 1, TestSnapshots.RootFolderId, [], "Views {index}", 1, 1,
+            42, 1, TestSnapshots.RootFolderId, NamingPattern: "Views {index}", Start: 1, Step: 1,
             CreationSpecs:
             [
                 new LayoutCreationSpec(
@@ -549,76 +503,17 @@ public sealed class SheetTemplatePlannerTests
     }
 
     [Fact]
-    public void LegacySingularNamedViewStillAppliesToEveryDetail()
-    {
-        var snapshot = WithTemplates(TestSnapshots.Create(), []) with
-        {
-            NamedViewNames = new HashSet<string>(["Legacy"], StringComparer.OrdinalIgnoreCase),
-        };
-        var plan = new BatchCreateSheetsPlanner().Plan(new BatchCreateSheetsRequest(
-            42, 1, TestSnapshots.RootFolderId, [], "Legacy {index}", 1, 1,
-            CreationSpecs:
-            [
-                new LayoutCreationSpec(
-                    1,
-                    new PaperRecipe(594, 420, "Millimeters"),
-                    BuiltInLayoutKind.TwoDetailsHorizontal,
-                    NamedView: "Legacy"),
-            ]), snapshot);
-
-        Assert.True(plan.CanApply);
-        var change = Assert.IsType<CreateSheetFromTemplateChange>(Assert.Single(plan.Changes));
-        Assert.Equal(2, change.NamedViewAssignments.Count);
-        Assert.All(change.Template.DetailSlots,
-            slot => Assert.Equal("Legacy", change.NamedViewAssignments[slot.Id]));
-    }
-
-    [Fact]
-    public void PerDetailAssignmentsTakePrecedenceOverLegacyRequestAssignments()
-    {
-        var template = Template("Captured", 420, 297);
-        var slot = template.DetailSlots.Single();
-        var snapshot = WithTemplates(TestSnapshots.Create(), [template]) with
-        {
-            NamedViewNames = new HashSet<string>(["Legacy", "Per detail"],
-                StringComparer.OrdinalIgnoreCase),
-        };
-        var plan = new BatchCreateSheetsPlanner().Plan(new BatchCreateSheetsRequest(
-            42,
-            1,
-            TestSnapshots.RootFolderId,
-            [],
-            "Priority {index}",
-            1,
-            1,
-            NamedViewAssignments: new Dictionary<Guid, string> { [slot.Id] = "Legacy" },
-            CreationSpecs:
-            [
-                new LayoutCreationSpec(
-                    1,
-                    new PaperRecipe(420, 297, "Millimeters"),
-                    TemplateId: template.Id,
-                    NamedViewsByDetail: ["Per detail"]),
-            ]), snapshot);
-
-        Assert.True(plan.CanApply);
-        var change = Assert.IsType<CreateSheetFromTemplateChange>(Assert.Single(plan.Changes));
-        Assert.Equal("Per detail", change.NamedViewAssignments[slot.Id]);
-    }
-
-    [Fact]
     public void CapturedTemplateIsScaledToSelectedPaperSize()
     {
         var template = Template("A3", 420, 297);
         var snapshot = WithTemplates(TestSnapshots.Create(), [template]);
         var plan = new BatchCreateSheetsPlanner().Plan(new BatchCreateSheetsRequest(
-            42,
-            1,
-            TestSnapshots.RootFolderId,
-            [],
-            "Scaled {index}",
-            1,
-            1,
+            DocumentRuntimeSerialNumber: 42,
+            SourceRevision: 1,
+            DestinationFolderId: TestSnapshots.RootFolderId,
+            NamingPattern: "Scaled {index}",
+            Start: 1,
+            Step: 1,
             CreationSpecs:
             [
                 new LayoutCreationSpec(
@@ -637,52 +532,6 @@ public sealed class SheetTemplatePlannerTests
     }
 
     [Fact]
-    public void SelectedTitleBlockInstanceBecomesCreationRecipe()
-    {
-        var instanceId = Guid.NewGuid();
-        var definitionId = Guid.NewGuid();
-        var transform = Enumerable.Range(0, 16).Select(index => (double)index).ToArray();
-        var snapshot = WithTemplates(TestSnapshots.Create(), []) with
-        {
-            InstanceDefinitionIds = new HashSet<Guid> { definitionId },
-            TitleBlockInstanceChoices = new Dictionary<Guid, TitleBlockInstanceSnapshot>
-            {
-                [instanceId] = new(
-                    instanceId,
-                    definitionId,
-                    "A2 Title Block",
-                    TestSnapshots.SheetOneId,
-                    "A-001",
-                    transform,
-                    "Bottom right"),
-            },
-        };
-        var plan = new BatchCreateSheetsPlanner().Plan(new BatchCreateSheetsRequest(
-            42,
-            1,
-            TestSnapshots.RootFolderId,
-            [],
-            "TB {index}",
-            1,
-            1,
-            CreationSpecs:
-            [
-                new LayoutCreationSpec(
-                    1,
-                    new PaperRecipe(594, 420, "Millimeters"),
-                    TitleBlockSourceInstanceObjectId: instanceId,
-                    UseTemplateTitleBlock: false),
-            ]), snapshot);
-
-        Assert.True(plan.CanApply);
-        var created = Assert.IsType<CreateSheetFromTemplateChange>(Assert.Single(plan.Changes));
-        Assert.NotNull(created.Template.TitleBlock);
-        Assert.Equal(definitionId, created.Template.TitleBlock.InstanceDefinitionId);
-        Assert.Equal("Bottom right", created.Template.TitleBlock.AnchorName);
-        Assert.Equal(transform, created.Template.TitleBlock.Transform);
-    }
-
-    [Fact]
     public void AdaptiveTitleBlockReservesSpaceAndCarriesSheetNumber()
     {
         var snapshot = WithTemplates(TestSnapshots.Create(), []);
@@ -692,31 +541,29 @@ public sealed class SheetTemplatePlannerTests
             FirmName = "Foundry Architects",
         };
         var plan = new BatchCreateSheetsPlanner().Plan(new BatchCreateSheetsRequest(
-            42,
-            1,
-            TestSnapshots.RootFolderId,
-            [],
-            "A-{index:000}",
-            101,
-            1,
+            DocumentRuntimeSerialNumber: 42,
+            SourceRevision: 1,
+            DestinationFolderId: TestSnapshots.RootFolderId,
+            NamingPattern: "A-{index:000}",
+            Start: 101,
+            Step: 1,
             CreationSpecs:
             [
                 new LayoutCreationSpec(
                     1,
                     new PaperRecipe(594, 420, "Millimeters"),
                     BuiltInLayoutKind.SingleDetail,
-                    UseTemplateTitleBlock: false,
-                    BuiltInTitleBlock: BuiltInTitleBlockKind.CompactLowerRight),
+                    BuiltInTitleBlock: BuiltInTitleBlockKind.RightSidebar),
             ],
-            ProjectData: project), snapshot);
+                        ProjectInfo: project), snapshot);
 
         Assert.True(plan.CanApply);
         var change = Assert.IsType<CreateSheetFromTemplateChange>(Assert.Single(plan.Changes));
         Assert.Equal("3", change.SheetNumber);
-        Assert.Equal("Civic Library", change.ProjectData!.ProjectName);
-        Assert.Equal(BuiltInTitleBlockKind.CompactLowerRight, change.Template.TitleBlock!.BuiltInKind);
+        Assert.Equal("Civic Library", change.ProjectInfo!.ProjectName);
+        Assert.Equal(BuiltInTitleBlockKind.RightSidebar, change.Template.TitleBlock!.BuiltInKind);
         var geometry = AdaptiveTitleBlockLayoutSolver.Solve(
-            BuiltInTitleBlockKind.CompactLowerRight,
+            BuiltInTitleBlockKind.RightSidebar,
             change.Template.Paper);
         var detail = Assert.Single(change.Template.DetailSlots);
         Assert.True(detail.Bottom >= geometry.Content.Bottom);
@@ -733,26 +580,21 @@ public sealed class SheetTemplatePlannerTests
             paper);
         var sourceContent = sourceLayout.Content;
         var sourceDetail = new DetailSlotRecipe(
-            Guid.NewGuid(),
-            "Plan",
-            sourceContent.Left + 8,
-            sourceContent.Bottom + 6,
-            sourceContent.Right - 10,
-            sourceContent.Top - 12,
-            "Top",
-            null,
-            false,
-            null,
-            null);
+            Id: Guid.NewGuid(),
+            Name: "Plan",
+            Left: sourceContent.Left + 8,
+            Bottom: sourceContent.Bottom + 6,
+            Right: sourceContent.Right - 10,
+            Top: sourceContent.Top - 12,
+            Projection: "Top",
+            PageToModelRatio: null,
+            ProjectionLocked: false,
+            DisplayModeId: null,
+            DefaultNamedView: null);
         var template = Template("Managed source", paper.Width, paper.Height) with
         {
             DetailSlots = [sourceDetail],
             TitleBlock = new TitleBlockTemplateRecipe(
-                Guid.Empty,
-                "Foundry — Right",
-                [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
-                "Right",
-                new Dictionary<string, string>(),
                 BuiltInTitleBlockKind.RightSidebar),
         };
         var snapshot = WithTemplates(TestSnapshots.Create(), [template]);
@@ -762,20 +604,18 @@ public sealed class SheetTemplatePlannerTests
         var targetContent = targetLayout.Content;
 
         var plan = new BatchCreateSheetsPlanner().Plan(new BatchCreateSheetsRequest(
-            42,
-            1,
-            TestSnapshots.RootFolderId,
-            [],
-            "Page {index}",
-            1,
-            1,
+            DocumentRuntimeSerialNumber: 42,
+            SourceRevision: 1,
+            DestinationFolderId: TestSnapshots.RootFolderId,
+            NamingPattern: "Page {index}",
+            Start: 1,
+            Step: 1,
             CreationSpecs:
             [
                 new LayoutCreationSpec(
                     1,
                     paper,
                     TemplateId: template.Id,
-                    UseTemplateTitleBlock: false,
                     BuiltInTitleBlock: BuiltInTitleBlockKind.FullWidthBottom),
             ]), snapshot);
 
@@ -794,20 +634,18 @@ public sealed class SheetTemplatePlannerTests
         var paper = new PaperRecipe(594, 420, "Millimeters");
         var snapshot = WithTemplates(TestSnapshots.Create(), []);
         var plan = new BatchCreateSheetsPlanner().Plan(new BatchCreateSheetsRequest(
-            42,
-            1,
-            TestSnapshots.RootFolderId,
-            [],
-            "Page {index}",
-            1,
-            1,
+            DocumentRuntimeSerialNumber: 42,
+            SourceRevision: 1,
+            DestinationFolderId: TestSnapshots.RootFolderId,
+            NamingPattern: "Page {index}",
+            Start: 1,
+            Step: 1,
             CreationSpecs:
             [
                 new LayoutCreationSpec(
                     1,
                     paper,
                     BuiltInLayoutKind.FourDetailsGrid,
-                    UseTemplateTitleBlock: false,
                     BuiltInTitleBlock: BuiltInTitleBlockKind.RightSidebar),
             ]), snapshot);
 
@@ -824,19 +662,18 @@ public sealed class SheetTemplatePlannerTests
     }
 
     private static SheetTemplateRecipe Template(string name, double width, double height) => new(
-        Guid.NewGuid(), SheetTemplateRecipe.CurrentRecipeVersion, name,
+        Guid.NewGuid(), name,
         new PaperRecipe(width, height, "Millimeters"),
-        [new DetailSlotRecipe(Guid.NewGuid(), "Plan", 10, 10, width - 10, height - 20,
-            "Top", 0.02, true, null, null)],
-        null, [], new Dictionary<string, string>(), "{index:000}");
+        [new DetailSlotRecipe(Id: Guid.NewGuid(), Name: "Plan", Left: 10, Bottom: 10, Right: width - 10, Top: height - 20,
+            Projection:             "Top", PageToModelRatio: 0.02, ProjectionLocked: true, DisplayModeId: null, DefaultNamedView: null)],
+        null, new Dictionary<string, string>(), "{index:000}");
 
     private static DocumentSnapshot WithTemplates(
         DocumentSnapshot snapshot,
         IReadOnlyList<SheetTemplateRecipe> templates) => snapshot with
         {
-            SheetTemplates = templates,
-            DocumentMetadata = new Dictionary<string, string> { ["project"] = "Foundry" },
-            NamedViewNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase),
-            InstanceDefinitionIds = new HashSet<Guid>(),
+            Templates = templates,
+            Metadata = new Dictionary<string, string> { ["project"] = "Foundry" },
+            NamedViews = new HashSet<string>(StringComparer.OrdinalIgnoreCase),
         };
 }

@@ -9,7 +9,6 @@ public sealed record DocumentOverview(
     IReadOnlyList<FolderOverview> Folders,
     IReadOnlyList<SheetOverview> Sheets,
     IReadOnlyList<OverviewIssue>? Diagnostics = null,
-    IReadOnlyList<AppearanceStateOverview>? AppearanceStateResources = null,
     DocumentFileDates? FileDates = null)
 {
     public static DocumentOverview NoDocument { get; } = new(
@@ -21,7 +20,7 @@ public sealed record DocumentOverview(
         []);
 
     public IReadOnlyList<OverviewIssue> Issues => Diagnostics ?? [];
-    public IReadOnlyList<AppearanceStateOverview> AppearanceStates => AppearanceStateResources ?? [];
+    public IReadOnlyList<AppearanceStateOverview> AppearanceStates { get; init; } = [];
 }
 
 public sealed record DocumentFileDates(
@@ -33,7 +32,6 @@ public sealed record FolderOverview(
     Guid? ParentId,
     string Name,
     int Order,
-    TemplateCapability TemplateCapabilities = TemplateCapability.None,
     ViewportAppearanceSummary? Appearance = null,
     AppearanceStateBindingOverview? AppearanceState = null,
     string Notes = "");
@@ -43,7 +41,6 @@ public sealed record SheetOverview(
     Guid FolderId,
     string Name,
     int Order,
-    IReadOnlyList<string> Tags,
     IReadOnlyList<DetailOverview> Details,
     IReadOnlyList<OverviewIssue>? Diagnostics = null,
     double PageWidth = 0,
@@ -51,7 +48,6 @@ public sealed record SheetOverview(
     string PageUnitSystem = "",
     bool IncludeInPrintAll = true,
     bool IsTemplate = false,
-    TemplateCapability TemplateCapabilities = TemplateCapability.None,
     ViewportAppearanceSummary? Appearance = null,
     AppearanceStateBindingOverview? AppearanceState = null,
     string Notes = "")
@@ -69,7 +65,7 @@ public sealed record DetailOverview(
     int Order,
     Guid DisplayModeId = default,
     string DisplayModeName = "",
-    TemplateCapability TemplateCapabilities = TemplateCapability.None,
+bool IsTemplate = false,
     ViewportAppearanceSummary? Appearance = null,
     AppearanceStateBindingOverview? AppearanceState = null);
 

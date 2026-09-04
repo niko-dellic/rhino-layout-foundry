@@ -48,7 +48,7 @@ def check(name, run):
 
 def preview_ownership():
     doc = Rhino.RhinoDoc.ActiveDoc
-    if doc is None or os.path.basename(doc.Path).lower() != "foundry-boundary-fixture.3dm":
+    if doc is None or os.path.basename(doc.Path or "").lower() != "foundry-boundary-fixture.3dm":
         raise Exception("Open a disposable copy named foundry-boundary-fixture.3dm for the live preview check.")
     before = len(doc.Views.GetPageViews())
     undo = doc.UndoRecordingEnabled
@@ -133,7 +133,7 @@ def protected_archive():
 
 def import_rollback(stage, mode_name="Merge"):
     doc = Rhino.RhinoDoc.ActiveDoc
-    if doc is None or os.path.basename(doc.Path).lower() != "foundry-boundary-fixture.3dm":
+    if doc is None or os.path.basename(doc.Path or "").lower() != "foundry-boundary-fixture.3dm":
         raise Exception("Import checks require the disposable foundry-boundary-fixture.3dm.")
     plugin_type = host.GetType("RhinoLayoutFoundry.Rhino.LayoutFoundryPlugin")
     plugin = plugin_type.GetProperty("Instance", STATIC).GetValue(None, None)
@@ -185,11 +185,13 @@ def import_rollback(stage, mode_name="Merge"):
 
 
 check("preview ownership after partial construction", preview_ownership)
-check("cleanup failure preserves Undo recording", preview_cleanup_failure)
-check("future metadata native save/reopen", protected_archive)
 for stage in ["display-modes", "named-views", "layer-states", "page", "page-objects", "metadata", "cancel:layer-states"]:
     check("Merge rollback at " + stage, lambda stage=stage: import_rollback(stage))
 check("Replace rollback after cutover", lambda: import_rollback("replace-cutover", "Replace"))
+# Run headless checks last: on macOS opening/disposing a headless document can
+# clear ActiveDoc even while the fixture's native window remains visible.
+check("cleanup failure preserves Undo recording", preview_cleanup_failure)
+check("future metadata native save/reopen", protected_archive)
 report = os.path.join(tempfile.gettempdir(), "foundry-boundary-checks.json")
 with open(report, "w") as output:
     json.dump({"rhino": str(Rhino.RhinoApp.Version), "host": host.Location, "results": results}, output, indent=2)

@@ -1006,9 +1006,7 @@ public sealed class ObserverFoundryPanel : Panel
 
         var dialog = new BatchCreateLayoutsDialog(snapshot, targets);
         dialog.ShowModal(this);
-        await LayoutFoundryUiHost.CompleteDraftLayoutThumbnailSessionAsync(
-            snapshot.DocumentRuntimeSerialNumber,
-            restoreOriginalModifiedState: !dialog.Succeeded);
+        await dialog.PreviewCleanup;
         if (dialog.Succeeded) RefreshSnapshot(fit: false);
     }
 

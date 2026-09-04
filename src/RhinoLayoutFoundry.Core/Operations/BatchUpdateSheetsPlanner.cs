@@ -16,7 +16,6 @@ public sealed record BatchUpdateSheetsRequest(
     string? PaperUnitSystem,
     Guid? DetailDisplayModeId,
     bool ChangeTitleBlock = false,
-    Guid? TitleBlockSourceInstanceObjectId = null,
     IReadOnlyList<SheetRevisionRecord>? ReplaceRevisionSchedule = null,
     SheetRevisionRecord? AppendRevision = null,
     BuiltInTitleBlockKind? BuiltInTitleBlock = null,
@@ -113,11 +112,9 @@ public sealed class BatchUpdateSheetsPlanner : IOperationPlanner<BatchUpdateShee
         }
         if (request.DetailDisplayModeId is { } modeId && !snapshot.DisplayModeIds.Contains(modeId))
             diagnostics.Add(Error("batch.display_mode_missing", "The selected display mode is no longer available."));
-        if (request.ChangeTitleBlock && request.TitleBlockSourceInstanceObjectId is { } sourceId &&
-            !snapshot.TitleBlockInstances.ContainsKey(sourceId))
-            diagnostics.Add(Error("batch.title_block_missing", "The selected title-block instance is no longer available."));
-        if (request.TitleBlockSourceInstanceObjectId is not null && request.BuiltInTitleBlock is not null)
-            diagnostics.Add(Error("batch.title_block_mode", "Choose either a built-in title block or a source instance."));
+        if (request.BuiltInTitleBlock is { } selectedKind &&
+            !Enum.IsDefined(selectedKind))
+            diagnostics.Add(Error("batch.title_block_invalid", "Choose a valid built-in title block."));
         foreach (var id in ids.Where(snapshot.Sheets.ContainsKey))
         {
             var sheet = snapshot.Sheets[id];
@@ -227,26 +224,25 @@ public sealed class BatchUpdateSheetsPlanner : IOperationPlanner<BatchUpdateShee
         IReadOnlyList<OperationChange> changes = diagnostics.Any(item => item.Severity == DiagnosticSeverity.Error)
             ? []
             : [new BatchUpdateSheetsChange(
-                ids,
-                newNames,
-                request.PaperWidth,
-                request.PaperHeight,
-                changesPaper ? request.PaperUnitSystem : null,
-                request.DetailDisplayModeId,
-                request.ChangeTitleBlock,
-                request.TitleBlockSourceInstanceObjectId,
-                request.ReplaceRevisionSchedule,
-                request.AppendRevision,
-                request.BuiltInTitleBlock,
-                namingBindings.Count == 0 ? null : namingBindings,
-                namingBindingRemovals.Count == 0 ? null : namingBindingRemovals,
-                request.DestinationFolderId,
-                request.ChangeAppearanceState,
-                request.AppearanceStateId,
-                request.ChangeDetailLayer,
-                request.UseDedicatedDetailLayer,
-                request.DetailLayerId,
-                detailUpdates.Length == 0 ? null : detailUpdates)];
+                SheetPageViewIds:                 ids,
+                NewNames:                 newNames,
+                PaperWidth:                 request.PaperWidth,
+                PaperHeight:                 request.PaperHeight,
+                PaperUnitSystem:                 changesPaper ? request.PaperUnitSystem : null,
+                DetailDisplayModeId:                 request.DetailDisplayModeId,
+                ChangeTitleBlock:                 request.ChangeTitleBlock,
+                ReplaceRevisionSchedule:                 request.ReplaceRevisionSchedule,
+                AppendRevision:                 request.AppendRevision,
+                BuiltInTitleBlock:                 request.BuiltInTitleBlock,
+                NamingBindings:                 namingBindings.Count == 0 ? null : namingBindings,
+                NamingBindingRemovals:                 namingBindingRemovals.Count == 0 ? null : namingBindingRemovals,
+                DestinationFolderId:                 request.DestinationFolderId,
+                ChangeAppearanceState:                 request.ChangeAppearanceState,
+                AppearanceStateId:                 request.AppearanceStateId,
+                ChangeDetailLayer:                 request.ChangeDetailLayer,
+                UseDedicatedDetailLayer:                 request.UseDedicatedDetailLayer,
+                DetailLayerId:                 request.DetailLayerId,
+                DetailUpdates:                 detailUpdates.Length == 0 ? null : detailUpdates)];
         if (changes.Count > 0)
             diagnostics.Add(new Diagnostic("batch.undo_unavailable", DiagnosticSeverity.Warning,
                 "Rhino does not expose native Undo for these layout properties. Foundry restores every before-value if Apply fails."));

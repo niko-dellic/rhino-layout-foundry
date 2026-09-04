@@ -24,8 +24,7 @@ public enum LayoutPackageDependencyKind
     DisplayMode,
     NamedView,
     NamedLayerState,
-    TitleBlockDefinition,
-    Template,
+    BlockDefinition,
 }
 
 public sealed record LayoutPackageManifest(
@@ -34,19 +33,18 @@ public sealed record LayoutPackageManifest(
     DateTimeOffset CreatedUtc,
     string ProducerVersion,
     DocumentState FoundryState,
-    IReadOnlyList<LayoutPackageSheet> Sheets,
-    IReadOnlyList<LayoutPackageNamedView> NamedViews,
-    IReadOnlyList<LayoutPackageNamedLayerState> NamedLayerStates,
-    IReadOnlyList<LayoutPackageDisplayMode> DisplayModes,
-    IReadOnlyDictionary<string, string> AssetChecksums,
-    IReadOnlyList<LayoutPackageTitleBlockDefinition>? TitleBlockDefinitions = null)
+    [property: System.Text.Json.Serialization.JsonRequired] IReadOnlyList<LayoutPackageSheet> Sheets,
+    [property: System.Text.Json.Serialization.JsonRequired] IReadOnlyList<LayoutPackageNamedView> NamedViews,
+    [property: System.Text.Json.Serialization.JsonRequired] IReadOnlyList<LayoutPackageNamedLayerState> NamedLayerStates,
+    [property: System.Text.Json.Serialization.JsonRequired] IReadOnlyList<LayoutPackageDisplayMode> DisplayModes,
+    [property: System.Text.Json.Serialization.JsonRequired] IReadOnlyDictionary<string, string> AssetChecksums)
 {
-    public const int CurrentPackageVersion = 5;
+    public const int CurrentPackageVersion = 6;
     public const string ManifestEntryName = "manifest.json";
     public const string LayoutAssetEntryName = "assets/layouts.3dm";
 
-    [JsonIgnore]
-    public IReadOnlyList<LayoutPackageTitleBlockDefinition> TitleBlocks => TitleBlockDefinitions ?? [];
+    [JsonRequired]
+    public IReadOnlyList<LayoutPackageBlockDefinition> BlockDefinitions { get; init; } = [];
 }
 
 public sealed record LayoutPackageSheet(
@@ -55,21 +53,23 @@ public sealed record LayoutPackageSheet(
     int Order,
     string Name,
     PaperRecipe Paper,
-    IReadOnlyList<LayoutPackageDetail> Details,
-    IReadOnlyList<Guid> PageSpaceObjectIds,
-    IReadOnlyList<string> Tags,
-    IReadOnlyDictionary<string, string> Metadata,
+    [property: System.Text.Json.Serialization.JsonRequired] IReadOnlyList<LayoutPackageDetail> Details,
+    [property: System.Text.Json.Serialization.JsonRequired] IReadOnlyList<Guid> PageSpaceObjectIds,
+    [property: System.Text.Json.Serialization.JsonRequired] IReadOnlyDictionary<string, string> Metadata,
     TitleBlockRole? TitleBlock,
     bool IncludeInPrintAll,
     SheetTitleBlockData? TitleBlockData = null,
     SheetNamingBinding? NamingBinding = null,
-    string Notes = "",
-    IReadOnlyDictionary<Guid, string>? DetailNamedViewAssignments = null);
+    string Notes = "")
+{
+    [JsonRequired]
+    public IReadOnlyDictionary<Guid, string> DetailNamedViews { get; init; } = new Dictionary<Guid, string>();
+}
 
 public sealed record LayoutPackageDetail(
     Guid SourceDetailViewportId,
     DetailSlotRecipe Recipe,
-    IReadOnlyList<LayoutPackageLayerOverride> LayerOverrides);
+    [property: System.Text.Json.Serialization.JsonRequired] IReadOnlyList<LayoutPackageLayerOverride> LayerOverrides);
 
 public sealed record LayoutPackageLayerOverride(
     string LayerFullPath,
@@ -78,9 +78,9 @@ public sealed record LayoutPackageLayerOverride(
 public sealed record LayoutPackageNamedView(
     string Name,
     string Fingerprint,
-    IReadOnlyList<double> CameraLocation,
-    IReadOnlyList<double> CameraTarget,
-    IReadOnlyList<double> CameraUp,
+    [property: System.Text.Json.Serialization.JsonRequired] IReadOnlyList<double> CameraLocation,
+    [property: System.Text.Json.Serialization.JsonRequired] IReadOnlyList<double> CameraTarget,
+    [property: System.Text.Json.Serialization.JsonRequired] IReadOnlyList<double> CameraUp,
     bool IsPerspective);
 
 public sealed record LayoutPackageNamedLayerState(
@@ -94,7 +94,7 @@ public sealed record LayoutPackageDisplayMode(
     bool IsBuiltIn,
     string? AssetPath);
 
-public sealed record LayoutPackageTitleBlockDefinition(
+public sealed record LayoutPackageBlockDefinition(
     Guid SourceId,
     string Name,
     string Fingerprint);
@@ -111,8 +111,8 @@ public sealed record LayoutPackagePreflight(
     bool IsValid,
     string FilePath,
     LayoutPackageManifest? Manifest,
-    IReadOnlyList<LayoutPackageConflict> Conflicts,
-    IReadOnlyList<string> Warnings,
+    [property: System.Text.Json.Serialization.JsonRequired] IReadOnlyList<LayoutPackageConflict> Conflicts,
+    [property: System.Text.Json.Serialization.JsonRequired] IReadOnlyList<string> Warnings,
     string? ErrorMessage = null);
 
 public sealed record LayoutPackageExportRequest(
@@ -130,7 +130,7 @@ public sealed record LayoutPackageImportRequest(
     long SourceRevision,
     string FilePath,
     LayoutPackageImportMode Mode,
-    IReadOnlyDictionary<string, LayoutPackageConflictResolution>? ConflictResolutions = null,
+    [property: System.Text.Json.Serialization.JsonRequired] IReadOnlyDictionary<string, LayoutPackageConflictResolution>? ConflictResolutions = null,
     bool ImportProjectInformation = false);
 
 public static class LayoutPackageProjectInformationPolicy
@@ -178,8 +178,7 @@ public static class LayoutPackageProjectInformationPolicy
             ApprovedBy = Prefer(destination.ApprovedBy, source.ApprovedBy),
             CustomFields = custom,
             Logo = destination.Logo ?? source.Logo,
-            DefaultRevision = destination.DefaultRevision ?? source.DefaultRevision,
-            TitleBlockOptions = destinationOptions with { CustomFields = customOptions },
+            ContentOptions = destinationOptions with { CustomFields = customOptions },
         };
     }
 }
@@ -187,7 +186,7 @@ public static class LayoutPackageProjectInformationPolicy
 public sealed record LayoutPackageImportResult(
     bool Succeeded,
     int LayoutCount,
-    IReadOnlyList<string> Warnings,
+    [property: System.Text.Json.Serialization.JsonRequired] IReadOnlyList<string> Warnings,
     string? ErrorMessage = null,
     string? RecoveryPackagePath = null);
 
@@ -208,7 +207,7 @@ public interface ILayoutPackageService
 
 public sealed record LayoutPackageContents(
     LayoutPackageManifest Manifest,
-    IReadOnlyDictionary<string, byte[]> Assets);
+    [property: System.Text.Json.Serialization.JsonRequired] IReadOnlyDictionary<string, byte[]> Assets);
 
 public static class LayoutPackageArchive
 {
@@ -227,6 +226,7 @@ public static class LayoutPackageArchive
         ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
         ArgumentNullException.ThrowIfNull(manifest);
         ArgumentNullException.ThrowIfNull(assets);
+        ValidateManifest(manifest);
 
         var normalizedAssets = assets.OrderBy(pair => pair.Key, StringComparer.Ordinal)
             .ToDictionary(pair => ValidateEntryName(pair.Key), pair => pair.Value, StringComparer.Ordinal);
@@ -236,7 +236,6 @@ public static class LayoutPackageArchive
             StringComparer.Ordinal);
         var persisted = manifest with
         {
-            PackageVersion = LayoutPackageManifest.CurrentPackageVersion,
             AssetChecksums = checksums,
         };
 
@@ -285,23 +284,8 @@ public static class LayoutPackageArchive
         var manifestBytes = ReadEntry(manifestEntry);
         var manifest = JsonSerializer.Deserialize<LayoutPackageManifest>(manifestBytes, JsonOptions)
             ?? throw new InvalidDataException("The layout package manifest is empty.");
-        if (manifest.FoundryState is null || manifest.Sheets is null ||
-            manifest.NamedViews is null || manifest.NamedLayerStates is null ||
-            manifest.DisplayModes is null || manifest.AssetChecksums is null)
-            throw new InvalidDataException("The layout package manifest is incomplete.");
-        if (manifest.PackageVersion is < 1 or > LayoutPackageManifest.CurrentPackageVersion)
-            throw new NotSupportedException(
-                $"Layout package version {manifest.PackageVersion} is not supported; expected version 1 through {LayoutPackageManifest.CurrentPackageVersion}.");
-        if (manifest.FoundryState.SchemaVersion > DocumentState.CurrentSchemaVersion)
-            throw new NotSupportedException(
-                $"Document state schema {manifest.FoundryState.SchemaVersion} is newer than this plug-in supports.");
-        var normalizedState = DocumentStateSerializer.Deserialize(
-            JsonSerializer.Serialize(manifest.FoundryState, JsonOptions));
-        manifest = manifest with
-        {
-            PackageVersion = LayoutPackageManifest.CurrentPackageVersion,
-            FoundryState = normalizedState,
-        };
+        ValidateManifest(manifest)
+;
 
         var assets = new Dictionary<string, byte[]>(StringComparer.Ordinal);
         foreach (var expected in manifest.AssetChecksums.OrderBy(pair => pair.Key, StringComparer.Ordinal))
@@ -322,6 +306,18 @@ public static class LayoutPackageArchive
 
     public static string Sha256(ReadOnlySpan<byte> bytes) =>
         Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+    private static void ValidateManifest(LayoutPackageManifest manifest)
+    {
+        if (manifest.PackageVersion != LayoutPackageManifest.CurrentPackageVersion)
+            throw new NotSupportedException($"Layout package version {manifest.PackageVersion} is unsupported; expected {LayoutPackageManifest.CurrentPackageVersion}.");
+        if (manifest.FoundryState is null || manifest.Sheets is null || manifest.NamedViews is null || manifest.NamedLayerStates is null || manifest.DisplayModes is null || manifest.AssetChecksums is null || manifest.BlockDefinitions is null)
+            throw new InvalidDataException("The layout package manifest is incomplete.");
+        DocumentStateSerializer.Validate(manifest.FoundryState);
+        if (manifest.Sheets.Any(sheet => sheet is null || sheet.Paper is null || sheet.Details is null || sheet.PageSpaceObjectIds is null || sheet.Metadata is null || sheet.DetailNamedViews is null || sheet.Details.Any(detail => detail is null || detail.Recipe is null || detail.LayerOverrides is null)) || manifest.BlockDefinitions.Any(item => item is null) || manifest.NamedViews.Any(item => item is null) || manifest.NamedLayerStates.Any(item => item is null) || manifest.DisplayModes.Any(item => item is null))
+            throw new InvalidDataException("The layout package contains missing required values.");
+        if (manifest.Sheets.Select(sheet => sheet.SourcePageViewId).Distinct().Count() != manifest.Sheets.Count)
+            throw new InvalidDataException("The layout package contains duplicate layout identities.");
+    }
 
     private static string ValidateEntryName(string name)
     {

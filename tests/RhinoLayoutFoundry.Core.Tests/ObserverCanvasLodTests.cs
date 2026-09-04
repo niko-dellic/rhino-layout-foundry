@@ -169,20 +169,20 @@ public sealed class ObserverCanvasLodTests
         var firstFolder = Guid.NewGuid();
         var secondFolder = Guid.NewGuid();
         return new ObserverSnapshot(
-            42,
-            1,
-            "LOD",
-            root,
-            [
+            DocumentRuntimeSerialNumber: 42,
+            Revision: 1,
+            DocumentName: "LOD",
+            RootFolderId: root,
+            Folders: [
                 new ObserverFolderSnapshot(root, null, "LOD", 0),
                 new ObserverFolderSnapshot(firstFolder, root, "Plans", 0),
                 new ObserverFolderSnapshot(secondFolder, root, "Details", 1),
             ],
-            [
+                    Sheets: [
                 Sheet(firstFolder, "A-001", 0),
                 Sheet(secondFolder, "A-002", 1),
             ],
-            ObserverCanvasState.Empty);
+                    CanvasState: ObserverCanvasState.Empty);
     }
 
     private static ObserverSheetSnapshot Sheet(Guid folderId, string name, int order) => new(

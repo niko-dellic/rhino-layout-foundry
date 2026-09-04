@@ -68,12 +68,11 @@ internal sealed class RhinoDocumentOverviewNavigationService : IDocumentOverview
 
         var sheets = beforeState.Sheets.ToDictionary(pair => pair.Key, pair => pair.Value);
         var sourceRecord = sheets.GetValueOrDefault(sheetPageViewId) ?? new SheetRecord(
-            sheetPageViewId,
-            beforeState.RootFolderId,
-            0,
-            [],
-            new Dictionary<string, string>(StringComparer.Ordinal),
-            null);
+            PageViewId: sheetPageViewId,
+            FolderId: beforeState.RootFolderId,
+            Order: 0,
+            Metadata: new Dictionary<string, string>(StringComparer.Ordinal),
+            TitleBlock: null);
         var nextOrder = sheets.Values
             .Where(sheet => sheet.FolderId == sourceRecord.FolderId)
             .Select(sheet => sheet.Order)
@@ -156,7 +155,7 @@ internal sealed class RhinoDocumentOverviewNavigationService : IDocumentOverview
             {
                 var sheets = beforeState.Sheets.ToDictionary(pair => pair.Key, pair => pair.Value);
                 sheets[sheetPageViewId] = record with { NamingBinding = null };
-                _stateStore.SetCurrentSchema(document, beforeState with { Sheets = sheets });
+                _stateStore.Set(document, beforeState with { Sheets = sheets });
             }
         }
         catch (Exception exception)

@@ -72,16 +72,16 @@ public sealed class LayoutPrintScopeResolverTests
     private static DocumentOverview CreateOverview()
     {
         return new DocumentOverview(
-            42,
-            "Print fixture",
-            RootId,
-            [
-                new FolderOverview(RootId, null, "Root", 0),
-                new FolderOverview(FolderId, RootId, "Issue Set", 1),
-                new FolderOverview(NestedFolderId, FolderId, "Nested", 0),
-                new FolderOverview(EmptyFolderId, RootId, "Empty", 0),
+            DocumentRuntimeSerialNumber: 42,
+            DocumentName: "Print fixture",
+            RootFolderId: RootId,
+            Folders: [
+                new FolderOverview(Id: RootId, ParentId: null, Name: "Root", Order: 0),
+                new FolderOverview(Id: FolderId, ParentId: RootId, Name: "Issue Set", Order: 1),
+                new FolderOverview(Id: NestedFolderId, ParentId: FolderId, Name: "Nested", Order: 0),
+                new FolderOverview(Id: EmptyFolderId, ParentId: RootId, Name: "Empty", Order: 0),
             ],
-            [
+                    Sheets: [
                 Sheet(RootSheetId, RootId, "Root sheet", 0),
                 Sheet(FolderSheetId, FolderId, "Folder sheet", 0),
                 Sheet(NestedSheetId, NestedFolderId, "Nested sheet", 0),
@@ -90,6 +90,6 @@ public sealed class LayoutPrintScopeResolverTests
 
     private static SheetOverview Sheet(Guid id, Guid folderId, string name, int order)
     {
-        return new SheetOverview(id, folderId, name, order, [], []);
+        return new SheetOverview(PageViewId: id, FolderId: folderId, Name: name, Order: order, Details: []);
     }
 }

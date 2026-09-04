@@ -104,25 +104,27 @@ public sealed class SelectionInspectorModelTests
         var modeA = Guid.Parse("94000000-0000-0000-0000-000000000001");
         var modeB = Guid.Parse("94000000-0000-0000-0000-000000000002");
         return new DocumentSnapshot(
-            19, 8, root,
-            new Dictionary<Guid, FolderRecord>
-            {
-                [root] = new(root, null, "Root", 0),
-                [folder] = new(folder, root, "Plans", 0),
-                [nested] = new(nested, folder, "Nested", 0),
-            },
-            new Dictionary<Guid, SheetSnapshot>
-            {
-                [sheets[0]] = new(sheets[0], folder, 0, "Page 1", [details[0]],
+            DocumentRuntimeSerialNumber: 19, Revision: 8, RootFolderId: root,
+            Folders: new Dictionary<Guid, FolderRecord>
+{
+    [root] = new(root, null, "Root", 0),
+    [folder] = new(folder, root, "Plans", 0),
+    [nested] = new(nested, folder, "Nested", 0),
+},
+            Sheets: new Dictionary<Guid, SheetSnapshot>
+{
+    [sheets[0]] = new(sheets[0], folder, 0, "Page 1", [details[0]],
                     new Dictionary<string, string>(), 594, 420, "Millimeters",
                     [new DetailSnapshot(details[0], "Top", modeA, "Wireframe")],
                     IncludeInPrintAll: true),
-                [sheets[1]] = new(sheets[1], nested, 0, "Page 2", [details[1]],
+    [sheets[1]] = new(sheets[1], nested, 0, "Page 2", [details[1]],
                     new Dictionary<string, string>(), 11, 17, "Inches",
                     [new DetailSnapshot(details[1], "Section", modeB, "Rendered")],
                     IncludeInPrintAll: false),
-            },
-            new HashSet<Guid>(), new HashSet<Guid> { modeA, modeB },
-            DisplayModeNames: new Dictionary<Guid, string> { [modeA] = "Wireframe", [modeB] = "Rendered" });
+},
+                        ExistingObjectIds: new HashSet<Guid>(), DisplayModeIds: new HashSet<Guid> { modeA, modeB })
+        {
+            DisplayModes = new Dictionary<Guid, string> { [modeA] = "Wireframe", [modeB] = "Rendered" }
+        };
     }
 }

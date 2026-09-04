@@ -24,7 +24,7 @@ public sealed class LayoutPackageProjectInformationPolicyTests
         {
             ProjectName = "Destination",
             CustomFields = new Dictionary<string, string> { ["Existing"] = "Keep" },
-            TitleBlockOptions = new TitleBlockContentOptions(
+            ContentOptions = new TitleBlockContentOptions(
                 [TitleBlockContentField.ProjectName],
                 [new CustomTitleBlockFieldOption("Existing", false)],
                 true),
@@ -38,7 +38,7 @@ public sealed class LayoutPackageProjectInformationPolicyTests
                 ["Existing"] = "Replace",
                 ["Imported"] = "Add",
             },
-            TitleBlockOptions = new TitleBlockContentOptions(
+            ContentOptions = new TitleBlockContentOptions(
                 [TitleBlockContentField.FirmName],
                 [
                     new CustomTitleBlockFieldOption("Existing"),
