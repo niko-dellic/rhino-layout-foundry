@@ -1,5 +1,7 @@
 # Product Specification
 
+> This document records product intent. README describes current capabilities; TESTING_AND_RELEASE.md defines required evidence. Historical requirements are not claims that a current build implements or verifies every item.
+
 ## 1. Product definition
 
 Rhino Layout Foundry is a native Rhino 8 plug-in for organizing, inspecting, and mutating many page layouts at once. Its purpose is to turn repetitive sheet-by-sheet work into previewable, undoable batch operations while preserving normal Rhino documents and workflows.

@@ -2716,8 +2716,7 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
     {
         var delta = eventArgs.Delta.Height;
         if (Math.Abs(delta) < float.Epsilon) return;
-        if (_navigatorVisible && eventArgs.Location.X >= 0 && eventArgs.Location.X <= NavigatorWidth &&
-            eventArgs.Location.Y >= NavigatorTop)
+        if (TryNavigatorRowAt(eventArgs.Location, out _))
         {
             var rows = NavigatorRowsForDisplay();
             var visibleCount = NavigatorVisibleRowCount(ViewportSize());
@@ -2726,9 +2725,11 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
                 _navigatorScrollRow += delta > 0 ? -1 : 1;
                 ClampNavigatorScroll(rows.Length, visibleCount);
                 Invalidate();
-                eventArgs.Handled = true;
-                return;
             }
+            // A tree row owns its scroll event even when every row already
+            // fits. Letting it fall through turns a trackpad pan into zoom.
+            eventArgs.Handled = true;
+            return;
         }
 
         if (_namedViewsVisible &&
@@ -3384,7 +3385,9 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
 
     private bool IsCanvasOverlay(PointF point)
     {
-        if (_navigatorVisible && point.X >= 0 && point.X <= NavigatorWidth && point.Y >= NavigatorTop)
+        // Match the drawn rows, not the whole left column: the unused area
+        // beneath a short or collapsed tree is still pannable canvas.
+        if (TryNavigatorRowAt(point, out _))
             return true;
         return _namedViewsVisible &&
                point.X >= NamedViewsLeft(ViewportSize()) &&

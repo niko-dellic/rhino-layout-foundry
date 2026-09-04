@@ -155,9 +155,9 @@ internal sealed class ThumbnailGridDrawable : Drawable
         var cell = _layout.CellBounds(index);
         var image = PageBounds(cell, sheet);
         var selected = _selection.Contains(new OverviewNodeKey(OverviewNodeKind.Sheet, sheet.PageViewId));
-        graphics.FillRectangle(Color.FromArgb(48, 0, 0, 0),
+        graphics.FillRectangle(FoundryTheme.SheetShadow,
             image.X + 4, image.Y + 5, image.Width, image.Height);
-        graphics.FillRectangle(Colors.White, image);
+        graphics.FillRectangle(FoundryTheme.SheetPaper, image);
         if (_previews.TryGetValue(sheet.PageViewId, out var preview) &&
             preview.Key.ContentVersion == sheet.PreviewContentVersion)
         {
@@ -165,7 +165,7 @@ internal sealed class ThumbnailGridDrawable : Drawable
         }
         else
         {
-            graphics.FillRectangle(Colors.White, image);
+            graphics.FillRectangle(FoundryTheme.SheetPaper, image);
             foreach (var detail in sheet.Details)
             {
                 var bounds = new RectangleF(
@@ -173,17 +173,17 @@ internal sealed class ThumbnailGridDrawable : Drawable
                     image.Y + (float)(detail.NormalizedBounds.Y * image.Height),
                     (float)(detail.NormalizedBounds.Width * image.Width),
                     (float)(detail.NormalizedBounds.Height * image.Height));
-                graphics.FillRectangle(Color.FromArgb(255, 242, 243, 244), bounds);
-                graphics.DrawRectangle(Color.FromArgb(130, 100, 103, 106), bounds);
+                graphics.FillRectangle(FoundryTheme.SheetDetailPlaceholder, bounds);
+                graphics.DrawRectangle(FoundryTheme.SheetDetailBorder, bounds);
             }
         }
 
         graphics.DrawRectangle(
-            new Pen(selected ? FoundryTheme.SelectionAccent : Color.FromArgb(125, 90, 90, 90),
+            new Pen(selected ? FoundryTheme.SelectionAccent : FoundryTheme.SheetOutline,
                 selected ? 3 : 1),
             image);
         graphics.FillEllipse(
-            sheet.IncludeInPrintAll ? Color.FromArgb(255, 245, 188, 32) : Color.FromArgb(255, 95, 95, 95),
+            sheet.IncludeInPrintAll ? FoundryTheme.SheetPrintIncluded : FoundryTheme.SheetPrintExcluded,
             image.Right - 15,
             image.Top + 7,
             8,

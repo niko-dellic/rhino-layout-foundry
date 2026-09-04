@@ -1,0 +1,38 @@
+{
+  "version": 2,
+  "dependencies": {
+    "net8.0": {
+      "RhinoCommon": {
+        "type": "Direct",
+        "requested": "[8.34.26223.11001, )",
+        "resolved": "8.34.26223.11001",
+        "contentHash": "2C3O6JuoT+iAcgoOGoB0nr193JyjROWTgijGCycA/DZWLTvGNtLBYeERrZ5fiL+zcLJiBd9R2erkqvcMbmKWfA==",
+        "dependencies": {
+          "System.Drawing.Common": "7.0.0"
+        }
+      },
+      "Microsoft.Win32.SystemEvents": {
+        "type": "Transitive",
+        "resolved": "7.0.0",
+        "contentHash": "2nXPrhdAyAzir0gLl8Yy8S5Mnm/uBSQQA7jEsILOS1MTyS7DbmV1NgViMtvV1sfCD1ebITpNwb1NIinKeJgUVQ=="
+      },
+      "System.Drawing.Common": {
+        "type": "Transitive",
+        "resolved": "7.0.0",
+        "contentHash": "KIX+oBU38pxkKPxvLcLfIkOV5Ien8ReN78wro7OF5/erwcmortzeFx+iBswlh2Vz6gVne0khocQudGwaO1Ey6A==",
+        "dependencies": {
+          "Microsoft.Win32.SystemEvents": "7.0.0"
+        }
+      },
+      "rhinolayoutfoundry.core": {
+        "type": "Project"
+      },
+      "rhinolayoutfoundry.extensibility": {
+        "type": "Project",
+        "dependencies": {
+          "RhinoLayoutFoundry.Core": "[0.1.0, )"
+        }
+      }
+    }
+  }
+}

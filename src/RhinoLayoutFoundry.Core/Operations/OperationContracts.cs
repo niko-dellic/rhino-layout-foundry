@@ -3,6 +3,7 @@ using RhinoLayoutFoundry.Core.Domain;
 
 namespace RhinoLayoutFoundry.Core.Operations;
 
+/// <summary>Captures owned domain values; native implementations require the host UI thread.</summary>
 public interface IDocumentSnapshotProvider
 {
     DocumentSnapshot Capture();
@@ -13,6 +14,10 @@ public interface IOperationPlanner<in TRequest>
     OperationPlan Plan(TRequest request, DocumentSnapshot snapshot);
 }
 
+/// <summary>
+/// Validates document identity/revision before mutation. Cancellation is cooperative;
+/// a failed result must describe any incomplete compensation. Undo support is operation-specific.
+/// </summary>
 public interface IDocumentMutationService
 {
     Task<OperationResult> ApplyAsync(OperationPlan plan, CancellationToken cancellationToken);

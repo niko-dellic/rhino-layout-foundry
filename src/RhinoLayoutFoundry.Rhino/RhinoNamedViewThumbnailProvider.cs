@@ -82,68 +82,60 @@ internal sealed class RhinoNamedViewThumbnailProvider : INamedViewThumbnailProvi
         var previousDisplayModeId = view.ActiveViewport.DisplayMode.Id;
         var layerBefore = new Dictionary<Guid, Layer>();
         var objectBefore = new Dictionary<Guid, ObjectAttributes>();
-        var documentWasModified = document.Modified;
-        var undoRecordingWasEnabled = document.UndoRecordingEnabled;
         DisplayModeDescription? requestedDisplayMode = null;
-        using var transientChanges = RhinoThumbnailCaptureGate.BeginTransientDocumentChanges();
-        try
+        using var session = new RhinoPreviewSession(document);
+        session.Restore("Dispose requested display mode", () => requestedDisplayMode?.Dispose());
+        session.Restore("Restore viewport display mode", () =>
         {
-            document.UndoRecordingEnabled = false;
-            if (!document.NamedViews.RestoreWithAspectRatio(namedViewIndex, view.ActiveViewport))
-                return Failure(request, "Rhino could not restore the named view for preview capture.");
-            var effectiveDisplayModeId = request.Key.DisplayModeId ?? fallbackDisplayModeId;
-            if (effectiveDisplayModeId is { } displayModeId)
-            {
-                requestedDisplayMode = DisplayModeDescription.GetDisplayMode(displayModeId);
-                if (requestedDisplayMode is null)
-                    return Failure(request, "The requested display mode is unavailable.");
-                view.ActiveViewport.DisplayMode = requestedDisplayMode;
-            }
-
-            ApplyAppearance(
-                document,
-                view.ActiveViewport.Id,
-                request.Appearance,
-                layerBefore,
-                objectBefore);
-
-            var requestedSize = new System.Drawing.Size(request.Key.Width, request.Key.Height);
-            using var captureSettings = new ViewCaptureSettings(view, requestedSize, 96)
-            {
-                DrawBackground = false,
-                DrawBackgroundBitmap = false,
-                DrawWallpaper = false,
-                DrawGrid = false,
-                DrawAxis = false,
-                RasterMode = true,
-                OutputColor = ViewCaptureSettings.ColorMode.PrintColor,
-                UsePrintWidths = false,
-                ApplyDisplayModeThicknessScales = true,
-            };
-            captureSettings.SetLayout(
-                requestedSize,
-                new System.Drawing.Rectangle(System.Drawing.Point.Empty, requestedSize));
-            using var bitmap = RhinoDocumentThumbnailProvider.CaptureToBitmap(
-                captureSettings,
-                request.Key.BackgroundArgb);
-            if (bitmap is null)
-                return Failure(request, "Rhino did not return a named-view preview.");
-
-            using var stream = new MemoryStream();
-            bitmap.Save(stream, ImageFormat.Png);
-            return new NamedViewThumbnailResult(request.Key, stream.ToArray());
-        }
-        finally
+            using var mode = DisplayModeDescription.GetDisplayMode(previousDisplayModeId);
+            if (mode is not null) view.ActiveViewport.DisplayMode = mode;
+        });
+        session.Restore("Restore viewport camera", () => view.ActiveViewport.SetViewProjection(previous.Viewport, false));
+        session.Restore("Restore named-view appearance", () =>
+            RhinoPreviewSession.RestoreAppearance(document, layerBefore, objectBefore));
+        if (!document.NamedViews.RestoreWithAspectRatio(namedViewIndex, view.ActiveViewport))
+            return Failure(request, "Rhino could not restore the named view for preview capture.");
+        var effectiveDisplayModeId = request.Key.DisplayModeId ?? fallbackDisplayModeId;
+        if (effectiveDisplayModeId is { } displayModeId)
         {
-            RestoreAppearance(document, layerBefore, objectBefore);
-            view.ActiveViewport.SetViewProjection(previous.Viewport, false);
-            using var previousDisplayMode = DisplayModeDescription.GetDisplayMode(previousDisplayModeId);
-            if (previousDisplayMode is not null)
-                view.ActiveViewport.DisplayMode = previousDisplayMode;
-            requestedDisplayMode?.Dispose();
-            document.UndoRecordingEnabled = undoRecordingWasEnabled;
-            document.Modified = documentWasModified;
+            requestedDisplayMode = DisplayModeDescription.GetDisplayMode(displayModeId);
+            if (requestedDisplayMode is null)
+                return Failure(request, "The requested display mode is unavailable.");
+            view.ActiveViewport.DisplayMode = requestedDisplayMode;
         }
+
+        ApplyAppearance(
+            document,
+            view.ActiveViewport.Id,
+            request.Appearance,
+            layerBefore,
+            objectBefore);
+
+        var requestedSize = new System.Drawing.Size(request.Key.Width, request.Key.Height);
+        using var captureSettings = new ViewCaptureSettings(view, requestedSize, 96)
+        {
+            DrawBackground = false,
+            DrawBackgroundBitmap = false,
+            DrawWallpaper = false,
+            DrawGrid = false,
+            DrawAxis = false,
+            RasterMode = true,
+            OutputColor = ViewCaptureSettings.ColorMode.PrintColor,
+            UsePrintWidths = false,
+            ApplyDisplayModeThicknessScales = true,
+        };
+        captureSettings.SetLayout(
+            requestedSize,
+            new System.Drawing.Rectangle(System.Drawing.Point.Empty, requestedSize));
+        using var bitmap = RhinoDocumentThumbnailProvider.CaptureToBitmap(
+            captureSettings,
+            request.Key.BackgroundArgb);
+        if (bitmap is null)
+            return Failure(request, "Rhino did not return a named-view preview.");
+
+        using var stream = new MemoryStream();
+        bitmap.Save(stream, ImageFormat.Png);
+        return new NamedViewThumbnailResult(request.Key, stream.ToArray());
     }
 
     private static void ApplyAppearance(
@@ -181,25 +173,6 @@ internal sealed class RhinoNamedViewThumbnailProvider : INamedViewThumbnailProvi
                 !document.Objects.ModifyAttributes(item, attributes, quiet: true))
                 throw new InvalidOperationException(
                     $"Rhino could not apply a preview display override to '{item.Id}'.");
-        }
-    }
-
-    private static void RestoreAppearance(
-        RhinoDoc document,
-        IReadOnlyDictionary<Guid, Layer> layerBefore,
-        IReadOnlyDictionary<Guid, ObjectAttributes> objectBefore)
-    {
-        foreach (var pair in layerBefore)
-        {
-            var source = document.Layers.FindId(pair.Key);
-            if (source is not null)
-                document.Layers.Modify(pair.Value, source.Index, quiet: true);
-        }
-        foreach (var pair in objectBefore)
-        {
-            var item = document.Objects.FindId(pair.Key);
-            if (item is not null)
-                document.Objects.ModifyAttributes(item, pair.Value, quiet: true);
         }
     }
 

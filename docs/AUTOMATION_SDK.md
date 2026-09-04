@@ -1,7 +1,7 @@
-# Automation SDK
+# Experimental companion API
 
-Layout Foundry exposes a small, versioned automation boundary for separately
-distributed companion tools. The SDK is open source and deterministic. AI model
+Layout Foundry exposes an experimental, versioned automation boundary for separately
+distributed companion tools. The SDK is open source. Core record shapes and this API may change before a stable SDK is announced. AI model
 selection, prompts, billing, entitlements, and hosted services belong outside
 this repository.
 
@@ -11,7 +11,7 @@ Companions reference `RhinoLayoutFoundry.Extensibility` and resolve the active
 host through `FoundryAutomation.Current`. The host provides five operations:
 
 1. Read protocol capabilities.
-2. Capture an immutable, sanitized `DocumentSnapshot`.
+2. Capture a host-independent `DocumentSnapshot`. Its strings can include project information.
 3. Request a layout or named-view PNG capture.
 4. Stage an allow-listed Core `OperationPlan`.
 5. Mint a one-shot approval and apply the approved plan.
@@ -25,13 +25,16 @@ Snapshot strings are document data and must be treated as untrusted input. The
 SDK does not provide the full 3DM, arbitrary geometry serialization, arbitrary
 Rhino command execution, scripting, file access, or deletion tools.
 
-The host enforces two independent human boundaries:
+The companion is trusted in-process code, not a sandboxed client. It must obtain
+user consent before requesting images, sharing document data, or calling
+`ApprovePlan`. The host does not display or cryptographically verify that human
+consent. Any in-process caller with access to the interface can call approval.
 
-- Image data is returned only after a companion explicitly requests the capture
-  that its UI has asked the user to approve.
-- A mutation is inert when staged. Applying it requires a short-lived, one-shot
-  token minted by `ApprovePlan`; the plan must still match the active document
-  identity and revision.
+Staging freezes a defensive copy of the proposed changes. Applying requires a
+short-lived, one-shot token; identity and revision are checked at staging,
+approval and application, and again by the native mutation service. Protected
+metadata and unsupported operations remain blocked. Failed/canceled application
+consumes the token and requires a new review and approval.
 
 An AI model must never receive an approval token or call the approval method.
 Those calls belong in trusted UI/controller code after a direct user action.

@@ -17,6 +17,7 @@ public sealed partial class LayoutFoundryPanel : Panel
     private readonly Label _emptyDescriptionLabel;
     private readonly Label _summaryLabel;
     private readonly Label _statusLabel;
+    private readonly Label _documentWarning;
     private readonly TextBox _filterTextBox;
     private readonly DropDown _filterKindDropDown;
     private readonly FoundryToolbarIconButton _clearFilterButton;
@@ -144,6 +145,9 @@ public sealed partial class LayoutFoundryPanel : Panel
         _emptyDescriptionLabel = FoundryTheme.MutedLabel();
         _emptyDescriptionLabel.TextAlignment = TextAlignment.Center;
         _summaryLabel = FoundryTheme.MutedLabel();
+        _documentWarning = FoundryTheme.MutedLabel();
+        _documentWarning.Wrap = WrapMode.Word;
+        _documentWarning.Visible = false;
         _statusLabel = FoundryTheme.MutedLabel();
         _statusLabel.TextAlignment = TextAlignment.Left;
 
@@ -308,6 +312,7 @@ public sealed partial class LayoutFoundryPanel : Panel
                         _toolbarSurface,
                     },
                 },
+                _documentWarning,
                 new StackLayoutItem(_viewHost, expand: true),
                 CreateBottomBar(),
             },
@@ -1932,6 +1937,9 @@ public sealed partial class LayoutFoundryPanel : Panel
 
     private void PopulateTree()
     {
+        var protection = _overview.Issues.FirstOrDefault(issue => issue.Code == "metadata.protected");
+        _documentWarning.Text = protection?.Message ?? string.Empty;
+        _documentWarning.Visible = protection is not null;
         var filter = CurrentFilter;
         var renderOverview = OverviewWithInlineDraft();
         var nodes = OverviewTreeSorter.Sort(
@@ -2184,6 +2192,12 @@ public sealed partial class LayoutFoundryPanel : Panel
         _manageButton.Enabled = selectionCount > 0;
         _deleteButton.Enabled = selectionCount > 0 &&
                                 selectedKeys.All(key => !IsDocumentRootKey(key));
+        if (_overview.Issues.Any(issue => issue.Code == "metadata.protected"))
+        {
+            _importButton.Enabled = _exportButton.Enabled = _projectInfoButton.Enabled =
+                _createButton.Enabled = _manageButton.Enabled = _deleteButton.Enabled = false;
+            canRename = false;
+        }
         var renameAvailable = canRename && capabilities.PageRenameUndo.IsSupported;
         _renameActions.Visible = renameAvailable;
         _renameTextBox.Enabled = renameAvailable;

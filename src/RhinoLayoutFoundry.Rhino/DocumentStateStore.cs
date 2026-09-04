@@ -6,127 +6,88 @@ using RhinoLayoutFoundry.Core.Persistence;
 
 namespace RhinoLayoutFoundry.Rhino;
 
+/// <summary>UI-thread-owned state. Reads never reconcile or mark the Rhino document modified.</summary>
 internal sealed class DocumentStateStore
 {
     private const string PayloadKey = "Payload";
     private const string SchemaVersionKey = "SchemaVersion";
-    private readonly Dictionary<uint, DocumentState> _states = new();
-    private readonly Dictionary<uint, int> _writeSchemaVersions = new();
+    private readonly Dictionary<uint, Entry> _entries = new();
 
-    public DocumentState Get(RhinoDoc document)
+    private Entry Find(RhinoDoc document)
     {
-        if (_states.TryGetValue(document.RuntimeSerialNumber, out var state))
-        {
-            return RemoveTemplatesForMissingSources(document, state);
-        }
-
-        state = DocumentState.Empty();
-        _states[document.RuntimeSerialNumber] = state;
-        _writeSchemaVersions[document.RuntimeSerialNumber] = DocumentState.CurrentSchemaVersion;
-        return RemoveTemplatesForMissingSources(document, state);
+        if (!_entries.TryGetValue(document.RuntimeSerialNumber, out var entry))
+            _entries[document.RuntimeSerialNumber] = entry = new(
+                new(DocumentStateLoadStatus.Loaded, DocumentState.Empty()), null);
+        return entry;
     }
 
-    private DocumentState RemoveTemplatesForMissingSources(RhinoDoc document, DocumentState state)
+    public DocumentState Get(RhinoDoc document) => Find(document).Loaded.State;
+    public string? Diagnostic(RhinoDoc document) => Find(document).Loaded.Diagnostic;
+    public bool CanWrite(RhinoDoc document) => Find(document).Loaded.CanWrite;
+
+    public void EnsureWritable(RhinoDoc document)
     {
-        var pageViewIds = document.Views.GetPageViews()
-            .Select(page => page.MainViewport.Id)
-            .ToHashSet();
-        var cleaned = state.RemoveTemplatesForMissingSources(pageViewIds);
-        if (ReferenceEquals(cleaned, state)) return state;
-        _states[document.RuntimeSerialNumber] = cleaned;
-        document.Modified = true;
-        return cleaned;
+        if (!CanWrite(document)) throw new InvalidOperationException(Diagnostic(document));
     }
+
+    // Explicitly called at a mutation boundary, not during snapshots or archive writes.
+    public DocumentState Reconcile(RhinoDoc document, DocumentState state) =>
+        state.RemoveTemplatesForMissingSources(document.Views.GetPageViews()
+            .Select(page => page.MainViewport.Id).ToHashSet());
 
     public void Set(RhinoDoc document, DocumentState state)
     {
-        ArgumentNullException.ThrowIfNull(document);
         ArgumentNullException.ThrowIfNull(state);
-        var serial = document.RuntimeSerialNumber;
-        if (_states.TryGetValue(serial, out var before) &&
-            (!ObserverCanvasStateComparer.ContentEquals(before.Canvas, state.Canvas) ||
-             !before.AppearanceRules.SequenceEqual(state.AppearanceRules) ||
-             !before.TemplateRegistrations.SequenceEqual(state.TemplateRegistrations) ||
-             !before.TemplateLinks.SequenceEqual(state.TemplateLinks) ||
-             !before.AppearanceStates.SequenceEqual(state.AppearanceStates) ||
-             !before.StateAssignments.SequenceEqual(state.StateAssignments)))
-        {
-            _writeSchemaVersions[serial] = DocumentState.CurrentSchemaVersion;
-        }
-
-        _states[serial] = state;
+        EnsureWritable(document);
+        _entries[document.RuntimeSerialNumber] = new(
+            new(DocumentStateLoadStatus.Loaded, state with { SchemaVersion = DocumentState.CurrentSchemaVersion }), null);
     }
 
-    public void SetCurrentSchema(RhinoDoc document, DocumentState state)
+    internal Action CaptureRestoreAction(RhinoDoc document)
     {
-        Set(document, state with { SchemaVersion = DocumentState.CurrentSchemaVersion });
-        _writeSchemaVersions[document.RuntimeSerialNumber] = DocumentState.CurrentSchemaVersion;
+        var original = Find(document);
+        return () => _entries[document.RuntimeSerialNumber] = original;
     }
 
-    public void Remove(RhinoDoc document)
-    {
-        _states.Remove(document.RuntimeSerialNumber);
-        _writeSchemaVersions.Remove(document.RuntimeSerialNumber);
-    }
+    public void SetCurrentSchema(RhinoDoc document, DocumentState state) => Set(document, state);
+    public void Remove(RhinoDoc document) => _entries.Remove(document.RuntimeSerialNumber);
 
     public void Write(RhinoDoc document, BinaryArchiveWriter archive)
     {
-        var state = Get(document);
-        var writeVersion = _writeSchemaVersions.GetValueOrDefault(
-            document.RuntimeSerialNumber,
-            DocumentState.CurrentSchemaVersion);
-        var persistedState = state with
+        var entry = Find(document);
+        if (entry.OriginalEnvelope is { } original)
         {
-            SchemaVersion = writeVersion,
-            ObserverCanvas = writeVersion >= 4 ? state.Canvas : null,
-            ImportRecovery = writeVersion >= 5 ? state.Recovery : null,
-            DedicatedDetailLayerId = writeVersion >= 6 ? state.DedicatedDetailLayerId : null,
-            ProjectData = writeVersion >= 7 ? state.ProjectInfo : null,
-            ViewportRuleSets = writeVersion >= 9 ? state.AppearanceRules : null,
-            CapabilityTemplates = writeVersion >= 9 ? state.TemplateRegistrations : null,
-            CapabilityLinks = writeVersion >= 9 ? state.TemplateLinks : null,
-            AppearanceStateResources = writeVersion >= 10 ? state.AppearanceStates : null,
-            AppearanceStateAssignments = writeVersion >= 10 ? state.StateAssignments : null,
-        };
+            // Preserve old, unsupported, and invalid envelopes until an intentional successful mutation.
+            archive.WriteDictionary(original);
+            return;
+        }
+        if (!entry.Loaded.CanWrite)
+            throw new InvalidOperationException("Foundry cannot safely save an unreadable metadata archive. Save a recovery copy of the original file.");
         var envelope = new ArchivableDictionary(1, "RhinoLayoutFoundry.DocumentState");
-        envelope.Set(SchemaVersionKey, writeVersion);
-        envelope.Set(PayloadKey, DocumentStateSerializer.Serialize(persistedState));
+        envelope.Set(SchemaVersionKey, DocumentState.CurrentSchemaVersion);
+        envelope.Set(PayloadKey, DocumentStateSerializer.Serialize(entry.Loaded.State));
         archive.WriteDictionary(envelope);
     }
 
     public void Read(RhinoDoc document, BinaryArchiveReader archive)
     {
+        ArchivableDictionary? envelope = null;
+        DocumentStateLoadResult loaded;
         try
         {
-            var envelope = archive.ReadDictionary();
-            if (!envelope.ContainsKey(SchemaVersionKey) || !envelope.ContainsKey(PayloadKey))
-            {
-                _states[document.RuntimeSerialNumber] = DocumentState.Empty();
-                _writeSchemaVersions[document.RuntimeSerialNumber] = DocumentState.CurrentSchemaVersion;
-                return;
-            }
-
-            var schemaVersion = (int)envelope[SchemaVersionKey];
-            var payload = envelope[PayloadKey] as string;
-            if ((schemaVersion is < 1 or > DocumentState.CurrentSchemaVersion) ||
-                string.IsNullOrWhiteSpace(payload))
-            {
-                _states[document.RuntimeSerialNumber] = DocumentState.Empty();
-                _writeSchemaVersions[document.RuntimeSerialNumber] = DocumentState.CurrentSchemaVersion;
-                return;
-            }
-
-            _states[document.RuntimeSerialNumber] = DocumentStateSerializer.Deserialize(payload);
-            _writeSchemaVersions[document.RuntimeSerialNumber] = schemaVersion;
+            envelope = archive.ReadDictionary();
+            loaded = envelope is null ? DocumentStateLoadResult.Invalid("The archive envelope was unreadable.") : DocumentStateLoadResult.Read(
+                envelope.ContainsKey(SchemaVersionKey) && envelope[SchemaVersionKey] is int version ? version : null,
+                envelope.ContainsKey(PayloadKey) ? envelope[PayloadKey] as string : null);
         }
-        catch (Exception exception) when (
-            exception is InvalidCastException or NotSupportedException or System.Text.Json.JsonException)
+        // Archive and deserialization failures must fail closed, including Rhino BinaryArchiveException.
+        catch (Exception exception)
         {
-            _states[document.RuntimeSerialNumber] = DocumentState.Empty();
-            _writeSchemaVersions[document.RuntimeSerialNumber] = DocumentState.CurrentSchemaVersion;
-            RhinoApp.WriteLine(
-                "Rhino Layout Foundry could not read its document metadata and opened with empty metadata: {0}",
-                exception.Message);
+            loaded = DocumentStateLoadResult.Invalid(exception.Message);
         }
+        _entries[document.RuntimeSerialNumber] = new(loaded, envelope);
+        if (loaded.Diagnostic is { } diagnostic) RhinoApp.WriteLine(diagnostic);
     }
+
+    private sealed record Entry(DocumentStateLoadResult Loaded, ArchivableDictionary? OriginalEnvelope);
 }

@@ -4,7 +4,7 @@
     <AssemblyName>RhinoLayoutFoundry.UI</AssemblyName>
     <RhinoMacResources Condition="'$(RhinoMacResources)' == ''">/Applications/Rhino 8.app/Contents/Frameworks/RhCore.framework/Versions/A/Resources</RhinoMacResources>
   </PropertyGroup>
-  <PropertyGroup Condition="$([MSBuild]::IsOSPlatform('OSX')) and Exists('$(RhinoMacResources)/Microsoft.macOS.dll') and Exists('$(RhinoMacResources)/Eto.macOS.dll')">
+  <PropertyGroup Condition="'$(FoundryPlatform)' == 'MacOS'">
     <DefineConstants>$(DefineConstants);FOUNDRY_MACOS_NATIVE_GESTURES</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
@@ -12,7 +12,7 @@
     <ProjectReference Include="..\RhinoLayoutFoundry.Extensibility\RhinoLayoutFoundry.Extensibility.csproj" />
     <PackageReference Include="RhinoCommon" ExcludeAssets="runtime" />
   </ItemGroup>
-  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('OSX')) and Exists('$(RhinoMacResources)/Microsoft.macOS.dll') and Exists('$(RhinoMacResources)/Eto.macOS.dll')">
+  <ItemGroup Condition="'$(FoundryPlatform)' == 'MacOS'">
     <Reference Include="Eto.macOS">
       <HintPath>$(RhinoMacResources)/Eto.macOS.dll</HintPath>
       <Private>false</Private>
@@ -22,4 +22,8 @@
       <Private>false</Private>
     </Reference>
   </ItemGroup>
+  <Target Name="ValidateMacNativeReferences" BeforeTargets="ResolveReferences" Condition="'$(FoundryPlatform)' == 'MacOS'">
+    <Error Condition="!Exists('$(RhinoMacResources)/Microsoft.macOS.dll') or !Exists('$(RhinoMacResources)/Eto.macOS.dll')"
+           Text="MacOS builds require installed Rhino native assemblies. Set RhinoMacResources explicitly; use FoundryPlatform=Portable only for non-shipping CI checks." />
+  </Target>
 </Project>

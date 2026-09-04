@@ -1,5 +1,4 @@
 name: CI
-
 on:
   push:
     branches: [main]
@@ -10,19 +9,31 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest]
+        include:
+          - os: windows-latest
+            platform: Windows
+          - os: macos-latest
+            platform: Portable
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 8.0.x
+          dotnet-version: |
+            10.0.103
+            8.0.x
           cache: true
-          cache-dependency-path: Directory.Packages.props
-      - name: Restore
-        run: dotnet restore RhinoLayoutFoundry.sln
-      - name: Build
-        run: dotnet build RhinoLayoutFoundry.sln --configuration Release --no-restore
+          cache-dependency-path: '**/packages.lock.json'
+      - name: Restore locked graph
+        run: dotnet restore RhinoLayoutFoundry.sln --locked-mode
+      - name: Build (hosted Mac verifies portable code only)
+        run: dotnet build RhinoLayoutFoundry.sln -c Release --no-restore -p:FoundryPlatform=${{ matrix.platform }} -p:UseSharedCompilation=false
       - name: Test
-        run: dotnet test RhinoLayoutFoundry.sln --configuration Release --no-build --logger trx
-
+        run: dotnet test RhinoLayoutFoundry.sln -c Release --no-build --logger trx
+      - name: Check whitespace
+        run: git diff --check
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tests-${{ matrix.os }}
+          path: '**/TestResults/*.trx'

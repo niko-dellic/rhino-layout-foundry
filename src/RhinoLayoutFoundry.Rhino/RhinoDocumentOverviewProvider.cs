@@ -167,7 +167,9 @@ internal sealed class RhinoDocumentOverviewProvider : IDocumentOverviewProvider
                 $"import.{item.Kind}",
                 OverviewIssueSeverity.Warning,
                 item.Message,
-                item.EntityId)).ToArray(),
+                item.EntityId)).Concat(_stateStore.Diagnostic(document) is { } diagnostic
+                    ? new[] { new OverviewIssue("metadata.protected", OverviewIssueSeverity.Error, diagnostic) }
+                    : Array.Empty<OverviewIssue>()).ToArray(),
             stateOverviews,
             CaptureFileDates(document));
     }

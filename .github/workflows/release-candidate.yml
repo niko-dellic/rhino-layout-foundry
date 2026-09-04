@@ -1,0 +1,47 @@
+name: Build release candidate (no publication)
+on:
+  workflow_dispatch:
+
+# Run only trusted revisions on these licensed, provisioned hosts.
+# FOUNDRY_YAK must point to the installed Rhino Yak executable on each host.
+jobs:
+  candidate:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macOS
+            platform: MacOS
+            yakPlatform: mac
+          - runner: Windows
+            platform: Windows
+            yakPlatform: win
+    runs-on: [self-hosted, '${{ matrix.runner }}', foundry-release]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore
+        run: dotnet restore RhinoLayoutFoundry.sln --locked-mode
+      - name: Build isolated candidate
+        shell: pwsh
+        run: dotnet build RhinoLayoutFoundry.sln -c Release --no-restore -p:UseSharedCompilation=false -p:FoundryPlatform=${{ matrix.platform }} "-p:BaseOutputPath=$env:RUNNER_TEMP/foundry-${{ github.run_id }}/"
+      - name: Test candidate
+        shell: pwsh
+        run: dotnet test tests/RhinoLayoutFoundry.Core.Tests -c Release --no-build "-p:BaseOutputPath=$env:RUNNER_TEMP/foundry-${{ github.run_id }}/" --logger trx
+      - name: Verify and stage
+        shell: pwsh
+        run: |
+          dotnet "$env:RUNNER_TEMP/foundry-${{ github.run_id }}/Release/net8.0/Foundry.ReleaseCheck.dll" "$env:GITHUB_WORKSPACE" "$env:RUNNER_TEMP/foundry-${{ github.run_id }}/Release/net8.0" "$env:RUNNER_TEMP/staged-${{ github.run_id }}" '${{ matrix.platform }}'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Set-Location "$env:RUNNER_TEMP/staged-${{ github.run_id }}"
+          if (-not $env:FOUNDRY_YAK) { throw 'Set FOUNDRY_YAK on the release host.' }
+          & $env:FOUNDRY_YAK build --platform '${{ matrix.yakPlatform }}'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $package = (Get-ChildItem *.yak).FullName
+          dotnet "$env:RUNNER_TEMP/foundry-${{ github.run_id }}/Release/net8.0/Foundry.ReleaseCheck.dll" --verify-package "$env:GITHUB_WORKSPACE" "$package" '${{ matrix.platform }}'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: candidate-${{ matrix.platform }}
+          path: |
+            ${{ runner.temp }}/staged-${{ github.run_id }}/*
+            **/TestResults/*.trx

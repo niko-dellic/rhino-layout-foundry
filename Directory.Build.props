@@ -1,12 +1,25 @@
 <Project>
+  <Import Project="$(MSBuildThisFileDirectory)Version.props" />
   <PropertyGroup>
     <TargetFramework Condition="'$(FoundryTargetFramework)' != ''">$(FoundryTargetFramework)</TargetFramework>
     <TargetFramework Condition="'$(TargetFramework)' == ''">net8.0</TargetFramework>
-    <LangVersion>latest</LangVersion>
+    <LangVersion>12.0</LangVersion>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <FoundryPlatform Condition="'$(FoundryPlatform)' == '' and $([MSBuild]::IsOSPlatform('OSX'))">MacOS</FoundryPlatform>
+    <FoundryPlatform Condition="'$(FoundryPlatform)' == '' and $([MSBuild]::IsOSPlatform('Windows'))">Windows</FoundryPlatform>
+    <FoundryPlatform Condition="'$(FoundryPlatform)' == ''">Portable</FoundryPlatform>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <Deterministic>true</Deterministic>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
   </PropertyGroup>
+  <ItemGroup>
+    <AssemblyMetadata Include="FoundryPlatform" Value="$(FoundryPlatform)" />
+  </ItemGroup>
+  <Target Name="ValidateFoundryPlatform" BeforeTargets="PrepareForBuild">
+    <Error Condition="'$(FoundryPlatform)' != 'MacOS' and '$(FoundryPlatform)' != 'Windows' and '$(FoundryPlatform)' != 'Portable'"
+           Text="FoundryPlatform must be MacOS, Windows, or Portable. Portable is for tests, not distribution." />
+  </Target>
 </Project>

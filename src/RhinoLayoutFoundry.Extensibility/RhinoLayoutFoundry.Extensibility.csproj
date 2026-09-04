@@ -2,7 +2,6 @@
   <PropertyGroup>
     <RootNamespace>RhinoLayoutFoundry.Extensibility</RootNamespace>
     <AssemblyName>RhinoLayoutFoundry.Extensibility</AssemblyName>
-    <Version>0.1.0</Version>
     <Description>Versioned automation contracts for Rhino Layout Foundry extensions.</Description>
   </PropertyGroup>
   <ItemGroup>

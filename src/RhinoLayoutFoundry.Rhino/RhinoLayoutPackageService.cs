@@ -31,15 +31,18 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
     private readonly DocumentStateStore _stateStore;
     private readonly DocumentRevisionTracker _revisionTracker;
     private readonly Action _changed;
+    private readonly Action<string>? _checkpoint;
 
     public RhinoLayoutPackageService(
         DocumentStateStore stateStore,
         DocumentRevisionTracker revisionTracker,
-        Action changed)
+        Action changed,
+        Action<string>? checkpoint = null)
     {
         _stateStore = stateStore;
         _revisionTracker = revisionTracker;
         _changed = changed;
+        _checkpoint = checkpoint;
     }
 
     public Task<LayoutPackageExportResult> ExportAsync(
@@ -117,30 +120,38 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
         string? recoveryPath = null;
         var replaceCutoverStarted = false;
         var createdPages = new List<RhinoPageView>();
-        var importedDisplayModes = new List<Guid>();
+        RhinoImportTransaction? transaction = null;
+        RhinoDoc? targetDocument = null;
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
             var document = RequireDocument(request.DocumentRuntimeSerialNumber, request.SourceRevision);
             var contents = LayoutPackageArchive.Read(request.FilePath);
-            if (createRecovery && request.Mode == LayoutPackageImportMode.Replace &&
-                document.Views.GetPageViews().Length > 0)
+            targetDocument = document;
+            // Capture before ANY dependency import, even for Merge and empty layout documents.
+            var beforeState = _stateStore.Get(document);
+            var recovery = CapturePackage(document, cancellationToken);
+            if (createRecovery)
             {
-                recoveryPath = Path.Combine(
-                    Path.GetTempPath(),
-                    $"LayoutFoundry-Recovery-{DateTime.UtcNow:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}.rlf");
-                var recovery = CapturePackage(document, cancellationToken);
+                recoveryPath = Path.Combine(Path.GetTempPath(), $"LayoutFoundry-Recovery-{Guid.NewGuid():N}.rlf");
                 LayoutPackageArchive.Write(recoveryPath, recovery.Manifest, recovery.Assets);
             }
+            transaction = new RhinoImportTransaction(document, _stateStore,
+                recovery.Assets[LayoutPackageManifest.LayoutAssetEntryName]);
 
             var warnings = new List<string>();
             var resolutions = request.ConflictResolutions ??
                 new Dictionary<string, LayoutPackageConflictResolution>(StringComparer.Ordinal);
-            var displayModeMap = ImportDisplayModes(contents, resolutions, importedDisplayModes, warnings);
+            var displayModeMap = ImportDisplayModes(contents, resolutions, transaction.OwnDisplayMode, warnings);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (createRecovery) _checkpoint?.Invoke("display-modes");
             var namedViewMap = ImportNamedViews(document, contents, resolutions, warnings);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (createRecovery) _checkpoint?.Invoke("named-views");
             ImportNamedLayerStates(document, contents, resolutions, warnings);
 
-            var beforeState = _stateStore.Get(document);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (createRecovery) _checkpoint?.Invoke("layer-states");
             var folderMap = BuildFolderMap(document, beforeState, contents.Manifest, request.Mode);
             var pagesBySource = new Dictionary<Guid, RhinoPageView>();
             var detailsBySource = new Dictionary<Guid, Guid>();
@@ -163,8 +174,11 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
                     sheet.Paper.Width * scale,
                     sheet.Paper.Height * scale)
                     ?? throw new InvalidOperationException($"Rhino did not create layout '{sheet.Name}'.");
+                transaction.OwnPage(page);
                 createdPages.Add(page);
                 pagesBySource.Add(sheet.SourcePageViewId, page);
+                cancellationToken.ThrowIfCancellationRequested();
+                if (createRecovery) _checkpoint?.Invoke("page");
 
                 foreach (var detail in sheet.Details)
                 {
@@ -175,15 +189,17 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
                         objectMap);
                     var created = CreateDetail(document, page, recipe, unit, scale);
                     detailsBySource[detail.SourceDetailViewportId] = created.Viewport.Id;
-                    ApplyLayerOverrides(document, created.Viewport.Id, detail.LayerOverrides, warnings);
-                    ApplyLayerRules(document, created.Viewport.Id, recipe.Layers, warnings);
-                    ApplyObjectDisplayRules(document, created.Viewport.Id, recipe.Objects, warnings);
+                    ApplyLayerOverrides(document, created.Viewport.Id, detail.LayerOverrides, warnings, transaction);
+                    ApplyLayerRules(document, created.Viewport.Id, recipe.Layers, warnings, transaction);
+                    ApplyObjectDisplayRules(document, created.Viewport.Id, recipe.Objects, warnings, transaction);
                 }
             }
 
             ImportPageSpaceObjects(
                 document, contents, pagesBySource, objectMap, definitionMap, resolutions, warnings);
 
+            cancellationToken.ThrowIfCancellationRequested();
+            if (createRecovery) _checkpoint?.Invoke("page-objects");
             if (request.Mode == LayoutPackageImportMode.Replace)
             {
                 replaceCutoverStarted = true;
@@ -194,6 +210,8 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
                     if (!oldPage.Close())
                         throw new InvalidOperationException($"Rhino could not remove layout '{oldPage.PageName}'.");
                 }
+                cancellationToken.ThrowIfCancellationRequested();
+                if (createRecovery) _checkpoint?.Invoke("replace-cutover");
                 existingNames.Clear();
                 foreach (var sheet in contents.Manifest.Sheets.OrderBy(item => item.Order))
                 {
@@ -218,43 +236,43 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
                 resolutions,
                 warnings);
             _stateStore.SetCurrentSchema(document, importedState);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (createRecovery) _checkpoint?.Invoke("metadata");
             document.Modified = true;
             _revisionTracker.Bump(document);
             document.Views.Redraw();
             _changed();
+            transaction.Commit();
             return new LayoutPackageImportResult(true, createdPages.Count, warnings, RecoveryPackagePath: recoveryPath);
-        }
-        catch (OperationCanceledException)
-        {
-            RemoveCreatedPages(createdPages);
-            RemoveImportedDisplayModes(importedDisplayModes);
-            return new LayoutPackageImportResult(false, 0, [], "Layout package import was cancelled.", recoveryPath);
         }
         catch (Exception exception)
         {
-            RemoveCreatedPages(createdPages);
-            RemoveImportedDisplayModes(importedDisplayModes);
-            if (createRecovery && replaceCutoverStarted && recoveryPath is not null && File.Exists(recoveryPath) &&
-                RhinoDoc.ActiveDoc is { } document)
+            var failures = transaction?.Rollback() ?? Array.Empty<string>();
+            var recoveryMessage = failures.Count == 0 ? " Imported resources were rolled back." :
+                " Recovery was incomplete: " + string.Join("; ", failures);
+            if (createRecovery && replaceCutoverStarted && recoveryPath is not null &&
+                targetDocument is { } document && RhinoDoc.ActiveDoc?.RuntimeSerialNumber == document.RuntimeSerialNumber)
             {
-                var restoration = ImportOnUiThread(
-                    new LayoutPackageImportRequest(
-                        document.RuntimeSerialNumber,
-                        _revisionTracker.Current(document),
-                        recoveryPath,
-                        LayoutPackageImportMode.Replace,
-                        ImportProjectInformation: true),
-                    CancellationToken.None,
-                    createRecovery: false);
-                var restorationMessage = restoration.Succeeded
-                    ? " The original layouts were restored from the recovery package."
-                    : $" Automatic restoration also failed: {restoration.ErrorMessage}";
-                return new LayoutPackageImportResult(false, 0, [],
-                    $"Layout package import failed: {exception.Message}{restorationMessage}", recoveryPath);
+                var restoration = ImportOnUiThread(new LayoutPackageImportRequest(
+                    document.RuntimeSerialNumber, _revisionTracker.Current(document), recoveryPath,
+                    LayoutPackageImportMode.Replace, ImportProjectInformation: true),
+                    CancellationToken.None, createRecovery: false);
+                recoveryMessage += restoration.Succeeded
+                    ? " Original layouts were restored from the recovery package."
+                    : $" Automatic layout restoration failed: {restoration.ErrorMessage}";
             }
-            return new LayoutPackageImportResult(false, 0, [],
-                $"Layout package import failed: {exception.Message}", recoveryPath);
+            else if (replaceCutoverStarted)
+                recoveryMessage += " Original layouts require restoration from the recovery package.";
+            if (targetDocument is { } target)
+            {
+                target.Modified = true;
+                _revisionTracker.Bump(target);
+            }
+            var reason = exception is OperationCanceledException ? "Import was cancelled." :
+                $"Import failed: {exception.Message}";
+            return new LayoutPackageImportResult(false, 0, failures, reason + recoveryMessage, recoveryPath);
         }
+        finally { transaction?.Dispose(); }
     }
 
     private CapturedPackage CapturePackage(RhinoDoc document, CancellationToken cancellationToken)
@@ -584,7 +602,7 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
     private static Dictionary<Guid, Guid> ImportDisplayModes(
         LayoutPackageContents contents,
         IReadOnlyDictionary<string, LayoutPackageConflictResolution> resolutions,
-        ICollection<Guid> importedIds,
+        Action<Guid> ownDisplayMode,
         ICollection<string> warnings)
     {
         var result = new Dictionary<Guid, Guid>();
@@ -626,7 +644,7 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
                     warnings.Add($"Custom display mode '{item.Name}' could not be imported.");
                     continue;
                 }
-                importedIds.Add(importedId);
+                ownDisplayMode(importedId);
                 result[item.SourceId] = importedId;
             }
             finally
@@ -813,7 +831,8 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
         RhinoDoc document,
         Guid detailId,
         IReadOnlyList<LayoutPackageLayerOverride> overrides,
-        ICollection<string> warnings)
+        ICollection<string> warnings,
+        RhinoImportTransaction transaction)
     {
         foreach (var item in overrides)
         {
@@ -823,6 +842,7 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
                 warnings.Add($"Layer '{item.LayerFullPath}' is unavailable; its detail state was retained as unresolved.");
                 continue;
             }
+            transaction.CaptureLayer(document.Layers[index], document);
             var layer = new Layer();
             layer.CopyAttributesFrom(document.Layers[index]);
             layer.SetPerViewportVisible(detailId, item.IsVisible);
@@ -874,7 +894,8 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
         RhinoDoc document,
         Guid detailId,
         IReadOnlyList<LayerVisibilityRule> rules,
-        ICollection<string> warnings)
+        ICollection<string> warnings,
+        RhinoImportTransaction transaction)
     {
         foreach (var rule in rules)
         {
@@ -889,6 +910,7 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
                 warnings.Add($"Layer '{rule.Layer.FullPath}' is unavailable; its template rule remains unresolved.");
                 continue;
             }
+            transaction.CaptureLayer(layer, document);
             var copy = new Layer();
             copy.CopyAttributesFrom(layer);
             copy.SetPerViewportVisible(detailId, rule.Visibility == LayerVisibilityOverride.Visible);
@@ -900,7 +922,8 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
         RhinoDoc document,
         Guid detailId,
         IReadOnlyList<ObjectDisplayRule> rules,
-        ICollection<string> warnings)
+        ICollection<string> warnings,
+        RhinoImportTransaction transaction)
     {
         var layers = document.Layers.Where(layer => !layer.IsDeleted && !layer.IsReference)
             .Select(layer => new LayerSnapshot(
@@ -939,6 +962,7 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
                 warnings.Add("An object display-mode rule remains unresolved after import.");
                 continue;
             }
+            transaction.CaptureObject(item, document);
             var attributes = item.Attributes.Duplicate();
             if (!RhinoObjectDisplayModeOverride.TrySet(attributes, mode, detailId) ||
                 !document.Objects.ModifyAttributes(item, attributes, quiet: true))
@@ -1571,6 +1595,7 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
             throw new InvalidOperationException("The active Rhino document changed.");
         if (_revisionTracker.Current(document) != revision)
             throw new InvalidOperationException("The Rhino document changed. Refresh and try again.");
+        _stateStore.EnsureWritable(document);
         return document;
     }
 
@@ -1656,20 +1681,6 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
         var name = UniqueName(requested, existingNames.AsEnumerable());
         existingNames.Add(name);
         return name;
-    }
-
-    private static void RemoveCreatedPages(IEnumerable<RhinoPageView> pages)
-    {
-        foreach (var page in pages.Reverse())
-            try { page.Close(); }
-            catch { }
-    }
-
-    private static void RemoveImportedDisplayModes(IEnumerable<Guid> ids)
-    {
-        foreach (var id in ids.Reverse())
-            try { DisplayModeDescription.DeleteDisplayMode(id); }
-            catch { }
     }
 
     private static Task<T> RunOnUiThread<T>(Func<T> action)

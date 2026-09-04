@@ -4,7 +4,6 @@
     <AssemblyName>RhinoLayoutFoundry</AssemblyName>
     <TargetExt>.rhp</TargetExt>
     <EnableDynamicLoading>true</EnableDynamicLoading>
-    <Version>0.1.0</Version>
     <Title>Rhino Layout Foundry</Title>
     <Company>Rhino Layout Foundry contributors</Company>
     <Description>Batch layout management for Rhino 8.</Description>

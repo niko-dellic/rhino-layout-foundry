@@ -84,7 +84,7 @@ internal sealed class RhinoDocumentOverviewNavigationService : IDocumentOverview
             PageViewId = duplicate.MainViewport.Id,
             Order = nextOrder,
         };
-        _stateStore.Set(document, beforeState with { Sheets = sheets });
+        _stateStore.Set(document, _stateStore.Reconcile(document, beforeState with { Sheets = sheets }));
         document.Modified = true;
         _revisionTracker.Bump(document);
         document.Views.ActiveView = duplicate;
@@ -112,7 +112,7 @@ internal sealed class RhinoDocumentOverviewNavigationService : IDocumentOverview
         var sheets = beforeState.Sheets
             .Where(pair => pair.Key != sheetPageViewId)
             .ToDictionary(pair => pair.Key, pair => pair.Value);
-        _stateStore.Set(document, beforeState with { Sheets = sheets });
+        _stateStore.Set(document, _stateStore.Reconcile(document, beforeState with { Sheets = sheets }));
         document.Modified = true;
         _revisionTracker.Bump(document);
         document.Views.Redraw();
@@ -195,7 +195,7 @@ internal sealed class RhinoDocumentOverviewNavigationService : IDocumentOverview
             : new OverviewNavigationResult(false, $"Rhino could not start {command}.");
     }
 
-    private static (RhinoDoc? Document, global::Rhino.Display.RhinoPageView? Page, OverviewNavigationResult? Error)
+    private (RhinoDoc? Document, global::Rhino.Display.RhinoPageView? Page, OverviewNavigationResult? Error)
         FindPage(Guid sheetPageViewId)
     {
         var document = RhinoDoc.ActiveDoc;
@@ -203,6 +203,9 @@ internal sealed class RhinoDocumentOverviewNavigationService : IDocumentOverview
         {
             return (null, null, new OverviewNavigationResult(false, "No active Rhino document."));
         }
+
+        if (!_stateStore.CanWrite(document))
+            return (document, null, new OverviewNavigationResult(false, _stateStore.Diagnostic(document)!));
 
         var page = document.Views.GetPageViews()
             .FirstOrDefault(candidate => candidate.MainViewport.Id == sheetPageViewId);

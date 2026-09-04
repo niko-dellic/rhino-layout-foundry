@@ -1,5 +1,4 @@
 using System.Drawing.Imaging;
-using System.Collections.Concurrent;
 using Rhino;
 using Rhino.Display;
 using Rhino.DocObjects;
@@ -13,18 +12,17 @@ namespace RhinoLayoutFoundry.Rhino;
 internal sealed class RhinoDraftLayoutThumbnailProvider : IDraftLayoutThumbnailProvider
 {
     private readonly DocumentStateStore _stateStore;
-    private readonly ConcurrentDictionary<uint, bool> _modifiedBeforePreview = new();
+    private readonly Action<string>? _checkpoint;
 
-    internal RhinoDraftLayoutThumbnailProvider(DocumentStateStore stateStore)
+    internal RhinoDraftLayoutThumbnailProvider(DocumentStateStore stateStore, Action<string>? checkpoint = null)
     {
+        _checkpoint = checkpoint;
         _stateStore = stateStore ?? throw new ArgumentNullException(nameof(stateStore));
     }
 
     public void BeginSession(uint documentRuntimeSerialNumber)
     {
-        var document = RhinoDoc.FromRuntimeSerialNumber(documentRuntimeSerialNumber);
-        if (document is not null)
-            _modifiedBeforePreview.TryAdd(documentRuntimeSerialNumber, document.Modified);
+        // Each capture owns its resources. No document flags outlive that scope.
     }
 
     public async Task<DraftLayoutThumbnailResult> CaptureAsync(
@@ -116,45 +114,7 @@ internal sealed class RhinoDraftLayoutThumbnailProvider : IDraftLayoutThumbnailP
         CancellationToken cancellationToken = default)
     {
         await RhinoThumbnailCaptureGate.Gate.WaitAsync(cancellationToken);
-        try
-        {
-            var found = endSession
-                ? _modifiedBeforePreview.TryRemove(
-                    documentRuntimeSerialNumber,
-                    out var originalModifiedState)
-                : _modifiedBeforePreview.TryGetValue(
-                    documentRuntimeSerialNumber,
-                    out originalModifiedState);
-            if (!found ||
-                !restoreOriginalModifiedState)
-                return;
-
-            if (!RhinoApp.InvokeRequired)
-            {
-                RestoreModifiedState(documentRuntimeSerialNumber, originalModifiedState);
-                RestoreModifiedStateOnIdle(documentRuntimeSerialNumber, originalModifiedState);
-                _ = RestoreModifiedStateAfterDialogCloseAsync(
-                    documentRuntimeSerialNumber,
-                    originalModifiedState);
-                return;
-            }
-
-            var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            RhinoApp.InvokeOnUiThread((Action)(() =>
-            {
-                RestoreModifiedState(documentRuntimeSerialNumber, originalModifiedState);
-                RestoreModifiedStateOnIdle(documentRuntimeSerialNumber, originalModifiedState);
-                _ = RestoreModifiedStateAfterDialogCloseAsync(
-                    documentRuntimeSerialNumber,
-                    originalModifiedState);
-                completion.SetResult();
-            }));
-            await completion.Task;
-        }
-        finally
-        {
-            RhinoThumbnailCaptureGate.Gate.Release();
-        }
+        RhinoThumbnailCaptureGate.Gate.Release();
     }
 
     private DraftLayoutThumbnailResult CaptureOnUiThread(
@@ -166,45 +126,21 @@ internal sealed class RhinoDraftLayoutThumbnailProvider : IDraftLayoutThumbnailP
         if (source is null)
             return Failure(request, "The Rhino document is no longer available.");
 
-        RhinoPageView? page = null;
-        var previousActiveView = source.Views.ActiveView;
-        var documentWasModified = _modifiedBeforePreview.GetOrAdd(
-            request.Key.DocumentRuntimeSerialNumber,
-            source.Modified);
-        var undoRecordingWasEnabled = source.UndoRecordingEnabled;
+        _stateStore.EnsureWritable(source);
         var layerBefore = new Dictionary<Guid, Layer>();
         var objectBefore = new Dictionary<Guid, ObjectAttributes>();
-        using var transientChanges = RhinoThumbnailCaptureGate.BeginTransientDocumentChanges();
-        try
+        using var session = new RhinoPreviewSession(source);
+        session.Restore("Restore preview appearance", () => RhinoPreviewSession.RestoreAppearance(source, layerBefore, objectBefore));
+        var page = CreateDraftPage(source, request.Change, _stateStore.Get(source), layerBefore, objectBefore, page =>
         {
-            source.UndoRecordingEnabled = false;
-            cancellationToken.ThrowIfCancellationRequested();
-            var state = _stateStore.Get(source);
-            page = CreateDraftPage(
-                source,
-                request.Change,
-                state,
-                layerBefore,
-                objectBefore);
-            source.Views.ActiveView = page;
-            source.Views.Redraw();
-            page.Redraw();
-            cancellationToken.ThrowIfCancellationRequested();
-            return CapturePage(request, source, page);
-        }
-        finally
-        {
-            RestoreAppearance(source, layerBefore, objectBefore);
-            if (page is not null) page.Close();
-            if (previousActiveView is not null)
-                source.Views.ActiveView = previousActiveView;
-            source.Views.Redraw();
-            source.UndoRecordingEnabled = undoRecordingWasEnabled;
-            source.Modified = documentWasModified;
-            RestoreModifiedStateOnIdle(
-                request.Key.DocumentRuntimeSerialNumber,
-                documentWasModified);
-        }
+            session.Own(page);
+            _checkpoint?.Invoke("preview-page");
+        });
+        source.Views.ActiveView = page;
+        source.Views.Redraw();
+        page.Redraw();
+        cancellationToken.ThrowIfCancellationRequested();
+        return CapturePage(request, source, page);
     }
 
     private EditSheetThumbnailResult CaptureEditOnUiThread(
@@ -217,48 +153,22 @@ internal sealed class RhinoDraftLayoutThumbnailProvider : IDraftLayoutThumbnailP
             page.MainViewport.Id == request.Key.SheetPageViewId);
         if (document is null || sourcePage is null)
             return Failure(request, "The selected layout sheet is no longer available.");
-
-        RhinoPageView? previewPage = null;
-        var previousActiveView = document.Views.ActiveView;
-        var documentWasModified = _modifiedBeforePreview.GetOrAdd(
-            request.Key.DocumentRuntimeSerialNumber,
-            document.Modified);
-        var undoRecordingWasEnabled = document.UndoRecordingEnabled;
+        _stateStore.EnsureWritable(document);
         var layerBefore = new Dictionary<Guid, Layer>();
         var objectBefore = new Dictionary<Guid, ObjectAttributes>();
-        using var transientChanges = RhinoThumbnailCaptureGate.BeginTransientDocumentChanges();
-        try
-        {
-            document.UndoRecordingEnabled = false;
-            previewPage = sourcePage.Duplicate(duplicatePageGeometry: true)
-                ?? throw new InvalidOperationException("Rhino could not duplicate the sheet for preview.");
-            previewPage.PageName = $"__FoundryEditPreview_{Guid.NewGuid():N}";
-            document.Views.ActiveView = previewPage;
-            previewPage.SetPageAsActive();
-            ApplyEditAssignments(
-                document,
-                sourcePage,
-                previewPage,
-                request,
-                _stateStore.Get(document),
-                layerBefore,
-                objectBefore);
-            document.Views.Redraw();
-            previewPage.Redraw();
-            cancellationToken.ThrowIfCancellationRequested();
-            return CapturePage(request, document, previewPage);
-        }
-        finally
-        {
-            RestoreAppearance(document, layerBefore, objectBefore);
-            if (previewPage is not null) previewPage.Close();
-            if (previousActiveView is not null)
-                document.Views.ActiveView = previousActiveView;
-            document.Views.Redraw();
-            document.UndoRecordingEnabled = undoRecordingWasEnabled;
-            document.Modified = documentWasModified;
-            RestoreModifiedStateOnIdle(request.Key.DocumentRuntimeSerialNumber, documentWasModified);
-        }
+        using var session = new RhinoPreviewSession(document);
+        session.Restore("Restore preview appearance", () => RhinoPreviewSession.RestoreAppearance(document, layerBefore, objectBefore));
+        var previewPage = sourcePage.Duplicate(duplicatePageGeometry: true)
+            ?? throw new InvalidOperationException("Rhino could not duplicate the sheet for preview.");
+        session.Own(previewPage);
+        previewPage.PageName = $"__FoundryEditPreview_{Guid.NewGuid():N}";
+        document.Views.ActiveView = previewPage;
+        previewPage.SetPageAsActive();
+        ApplyEditAssignments(document, sourcePage, previewPage, request, _stateStore.Get(document), layerBefore, objectBefore);
+        document.Views.Redraw();
+        previewPage.Redraw();
+        cancellationToken.ThrowIfCancellationRequested();
+        return CapturePage(request, document, previewPage);
     }
 
     private static void ApplyEditAssignments(
@@ -319,7 +229,7 @@ internal sealed class RhinoDraftLayoutThumbnailProvider : IDraftLayoutThumbnailP
                 [sourceViewport.CameraUp.X, sourceViewport.CameraUp.Y, sourceViewport.CameraUp.Z]);
             if (!document.Objects.Delete(previewDetail.Id, quiet: true))
                 throw new InvalidOperationException("Rhino could not remove the stale preview detail.");
-            var rebuiltViewportId = RhinoDocumentMutationService.CreateDetail(
+            var rebuiltViewportId = RhinoMutationExecutor.CreateDetail(
                 document,
                 previewPage,
                 slot,
@@ -334,7 +244,7 @@ internal sealed class RhinoDraftLayoutThumbnailProvider : IDraftLayoutThumbnailP
             {
                 var namedViewIndex = document.NamedViews.FindByName(requested.NamedViewName!);
                 if (namedViewIndex < 0 ||
-                    !RhinoDocumentMutationService.RestoreNamedViewForDetail(
+                    !RhinoMutationExecutor.RestoreNamedViewForDetail(
                         document,
                         namedViewIndex,
                         rebuilt))
@@ -461,57 +371,15 @@ internal sealed class RhinoDraftLayoutThumbnailProvider : IDraftLayoutThumbnailP
             assignments.Add(new AppearanceStateAssignment(Guid.NewGuid(), target, id));
     }
 
-    private static void RestoreModifiedState(
-        uint documentRuntimeSerialNumber,
-        bool modified)
-    {
-        var document = RhinoDoc.FromRuntimeSerialNumber(documentRuntimeSerialNumber);
-        if (document is not null) document.Modified = modified;
-    }
-
-    private static async Task RestoreModifiedStateAfterDialogCloseAsync(
-        uint documentRuntimeSerialNumber,
-        bool modified)
-    {
-        // Eto's modal teardown completes after its Closed event. Give that
-        // teardown one short turn to finish, then make the final restoration on
-        // Rhino's UI thread. This prevents the temporary page close from
-        // winning the race and leaving a cancelled preview marked as an edit.
-        await Task.Delay(400);
-        RhinoApp.InvokeOnUiThread((Action)(() =>
-            RestoreModifiedState(documentRuntimeSerialNumber, modified)));
-    }
-
-    private static void RestoreModifiedStateOnIdle(
-        uint documentRuntimeSerialNumber,
-        bool modified)
-    {
-        // Closing a page view is finalized by Rhino during an idle turn. The
-        // document can therefore be marked modified after the first idle
-        // callback has restored the original flag. Repeat the restoration over
-        // the following idle turns so the deferred close cannot leak preview
-        // bookkeeping into the user's document state.
-        var remainingPasses = 3;
-        EventHandler? handler = null;
-        handler = (_, _) =>
-        {
-            var document = RhinoDoc.FromRuntimeSerialNumber(documentRuntimeSerialNumber);
-            if (document is not null) document.Modified = modified;
-            remainingPasses--;
-            if (remainingPasses > 0) return;
-            RhinoApp.Idle -= handler;
-        };
-        RhinoApp.Idle += handler;
-    }
-
-    private static RhinoPageView CreateDraftPage(
+    private RhinoPageView CreateDraftPage(
         RhinoDoc document,
         CreateSheetFromTemplateChange create,
         DocumentState state,
         IDictionary<Guid, Layer> layerBefore,
-        IDictionary<Guid, ObjectAttributes> objectBefore)
+        IDictionary<Guid, ObjectAttributes> objectBefore,
+        Action<RhinoPageView> ownPage)
     {
-        var recipeUnit = RhinoDocumentMutationService.ParseUnitSystem(
+        var recipeUnit = RhinoMutationExecutor.ParseUnitSystem(
             create.Template.Paper.UnitSystem);
         var pageScale = RhinoMath.UnitScale(recipeUnit, document.PageUnitSystem);
         var page = document.Views.AddPageView(
@@ -519,6 +387,7 @@ internal sealed class RhinoDraftLayoutThumbnailProvider : IDraftLayoutThumbnailP
             create.Template.Paper.Width * pageScale,
             create.Template.Paper.Height * pageScale)
             ?? throw new InvalidOperationException("Rhino could not create the isolated preview page.");
+        ownPage(page);
 
         int? detailLayerIndex = null;
         if (!create.UseDedicatedDetailLayer && create.DetailLayerId is { } layerId)
@@ -529,7 +398,7 @@ internal sealed class RhinoDraftLayoutThumbnailProvider : IDraftLayoutThumbnailP
 
         foreach (var slot in create.Template.DetailSlots)
         {
-            RhinoDocumentMutationService.CreateDetail(
+            RhinoMutationExecutor.CreateDetail(
                 document,
                 page,
                 slot,
@@ -537,6 +406,7 @@ internal sealed class RhinoDraftLayoutThumbnailProvider : IDraftLayoutThumbnailP
                 pageScale,
                 create.NamedViewAssignments.GetValueOrDefault(slot.Id),
                 detailLayerIndex);
+            _checkpoint?.Invoke("preview-detail");
         }
 
         var titleBlockData = new SheetTitleBlockData(
@@ -544,7 +414,7 @@ internal sealed class RhinoDraftLayoutThumbnailProvider : IDraftLayoutThumbnailP
             create.InitialRevisions?.ToArray() ?? []);
         if (create.Template.TitleBlock is { } titleBlock)
         {
-            RhinoDocumentMutationService.CreateTitleBlock(
+            RhinoMutationExecutor.CreateTitleBlock(
                 document,
                 page,
                 titleBlock,
@@ -554,7 +424,9 @@ internal sealed class RhinoDraftLayoutThumbnailProvider : IDraftLayoutThumbnailP
                 create.Template.DetailSlots);
         }
 
+        _checkpoint?.Invoke("preview-title-block");
         ApplySheetAppearance(document, page, create, state, layerBefore, objectBefore);
+        _checkpoint?.Invoke("preview-appearance");
         return page;
     }
 
@@ -689,25 +561,6 @@ internal sealed class RhinoDraftLayoutThumbnailProvider : IDraftLayoutThumbnailP
                 !document.Objects.ModifyAttributes(item, attributes, quiet: true))
                 throw new InvalidOperationException(
                     $"Rhino could not apply a preview display override to '{item.Id}'.");
-        }
-    }
-
-    private static void RestoreAppearance(
-        RhinoDoc document,
-        IReadOnlyDictionary<Guid, Layer> layerBefore,
-        IReadOnlyDictionary<Guid, ObjectAttributes> objectBefore)
-    {
-        foreach (var pair in layerBefore)
-        {
-            var source = document.Layers.FindId(pair.Key);
-            if (source is not null)
-                document.Layers.Modify(pair.Value, source.Index, quiet: true);
-        }
-        foreach (var pair in objectBefore)
-        {
-            var item = document.Objects.FindId(pair.Key);
-            if (item is not null)
-                document.Objects.ModifyAttributes(item, pair.Value, quiet: true);
         }
     }
 

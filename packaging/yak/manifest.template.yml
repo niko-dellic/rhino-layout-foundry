@@ -1,5 +1,5 @@
 name: rhino-layout-foundry
-version: 0.1.0
+version: ${VERSION}
 authors:
   - Rhino Layout Foundry contributors
 description: Batch layout management for Rhino 8.
