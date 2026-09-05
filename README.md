@@ -75,4 +75,35 @@ On Windows, build with Rhino closed, set `RHINO_PACKAGE_DIRS` to the host projec
 
 Historical milestone and architecture notes live in `docs/history` and are not current implementation contracts. [AGENTS.md](AGENTS.md) governs contributor safety and the Foundry design system.
 
+## Shared UI development dependency
+
+Layout Foundry requires the exact `0.3.0-preview.1` shared UI package set. `RhinoLayoutFoundry.Core` references `RhinoFoundry.UI.Primitives`; `RhinoLayoutFoundry.UI` references `RhinoFoundry.UI`; Mac builds add `RhinoFoundry.UI.MacOS`. The three versions are pinned together in [Directory.Packages.props](Directory.Packages.props). Bootstrap packages and their hash manifest are committed under `packages/`, and [NuGet.Config](NuGet.Config) registers that directory as the first restore source.
+
+A normal Layout checkout does not need a source checkout of `rhino-foundry-ui`. Clone the [Rhino Foundry UI repository](https://github.com/niko-dellic/rhino-foundry-ui) as a sibling only when implementing or debugging a shared component. Consumers must continue to reference the packed artifacts so testing uses the same bytes that will ship. Follow the UI library's [consumer guide](https://github.com/niko-dellic/rhino-foundry-ui/blob/main/docs/USAGE.md) and [component implementation guide](https://github.com/niko-dellic/rhino-foundry-ui/blob/main/docs/IMPLEMENTING_COMPONENTS.md).
+
+Restore and build the same explicit platform. For example, on macOS:
+
+```sh
+dotnet restore RhinoLayoutFoundry.sln --locked-mode -p:FoundryPlatform=MacOS
+dotnet build RhinoLayoutFoundry.sln --no-restore --disable-build-servers -m:1 -p:FoundryPlatform=MacOS -p:UseSharedCompilation=false
+```
+
+On Windows PowerShell:
+
+```powershell
+dotnet restore RhinoLayoutFoundry.sln --locked-mode -p:FoundryPlatform=Windows
+dotnet build RhinoLayoutFoundry.sln --no-restore --disable-build-servers -m:1 -p:FoundryPlatform=Windows -p:UseSharedCompilation=false
+```
+
+`LayoutFoundryUiHost` initializes the Mac adapter through `SharedUiPlatform`; feature code should not register native services again. The assembled Mac bundle must contain `RhinoFoundry.UI.dll`, `RhinoFoundry.UI.Primitives.dll`, and `RhinoFoundry.UI.MacOS.dll`. The Windows bundle contains the first two and must exclude the Mac adapter.
+
+Before installing, run the matching verifier against the staged plugin directory:
+
+```sh
+python3 scripts/verify-shared-ui.py PATH_TO_BUNDLE MacOS
+# Windows: pwsh -File scripts/verify-shared-ui.ps1 -Directory PATH_TO_BUNDLE -Platform Windows
+```
+
+See [shared UI setup and parity checks](docs/SHARED_UI.md) for package-update steps and native sign-off. Update all co-installed Foundry plugins together, then fully quit and reopen Rhino so every process loads the same shared assembly bytes.
+
 Licensed under [MIT](LICENSE). See [dependency notices](THIRD_PARTY_NOTICES.md).

@@ -409,18 +409,7 @@ PreviewCleanup = CleanupPreviewsAsync();
             new FoundryAccordionItem("Batch", CreateBatchEditor(), isExpanded: true),
             new FoundryAccordionItem("Page size", CreatePaperEditor(), isExpanded: true),
             new FoundryAccordionItem("Layout", CreateLayoutEditor(), isExpanded: true));
-        var settingsPane = new Scrollable
-        {
-            Border = BorderType.None,
-            // The content width is synchronized explicitly below. Eto/AppKit's
-            // automatic expansion remembers the largest measured child width,
-            // which prevents fields from contracting after this pane is widened.
-            ExpandContentWidth = false,
-            // AppKit anchors a shorter scroll document at its lower edge.
-            // Filling the viewport keeps collapsed accordion rows pinned to top.
-            ExpandContentHeight = true,
-            Content = settingsContent,
-        };
+        var settingsPane = new FoundryScrollable(settingsContent);
         var previewPane = new Panel
         {
             Content = CreateSheetPreview(),
@@ -433,21 +422,6 @@ PreviewCleanup = CleanupPreviewsAsync();
         var settingsResizeHandle = new FoundryPaneResizeHandle(
             FoundryPaneResizeAxis.Horizontal,
             "settings");
-        var appliedSettingsContentWidth = 0;
-        void FitSettingsContentToViewport()
-        {
-            var viewportWidth = settingsPane.ClientSize.Width;
-            if (viewportWidth <= 1 || viewportWidth == appliedSettingsContentWidth) return;
-            // AppKit can notify SizeChanged again when the scroll document is
-            // laid out, even when the viewport width is unchanged. Reassigning
-            // MinimumSize/Width from that notification starts another layout
-            // pass; cache before setting either property to break the cycle.
-            appliedSettingsContentWidth = viewportWidth;
-            settingsContent.MinimumSize = new Size(viewportWidth, 0);
-            settingsContent.Width = viewportWidth;
-        }
-        settingsPane.SizeChanged += (_, _) =>
-            Application.Instance.AsyncInvoke(FitSettingsContentToViewport);
         var upperPane = new Panel
         {
             Height = defaultUpperPaneHeight,
@@ -521,7 +495,7 @@ PreviewCleanup = CleanupPreviewsAsync();
                 minimumSettingsPaneWidth,
                 maximumSettingsPaneWidth);
             settingsPaneHost.Width = settingsPaneWidth;
-            Application.Instance.AsyncInvoke(FitSettingsContentToViewport);
+            settingsPane.RequestWidthSync();
         };
         settingsResizeHandle.CollapseToggleRequested += (_, _) =>
         {
@@ -530,7 +504,7 @@ PreviewCleanup = CleanupPreviewsAsync();
             settingsPaneHost.Width = settingsPaneCollapsed ? 1 : settingsPaneWidth;
             settingsResizeHandle.IsCollapsed = settingsPaneCollapsed;
             if (!settingsPaneCollapsed)
-                Application.Instance.AsyncInvoke(FitSettingsContentToViewport);
+                settingsPane.RequestWidthSync();
         };
         workspaceResizeHandle.ResizeRequested += (_, eventArgs) =>
         {
@@ -1656,7 +1630,7 @@ PreviewCleanup = CleanupPreviewsAsync();
             previewWidth,
             previewHeight,
             version,
-            PreviewBackgroundArgb(FoundryTheme.CanvasPreviewBackground));
+            PreviewBackgroundArgb(LayoutPresentationTheme.CanvasPreviewBackground));
         _layoutSelectorPreview.SetPagePreview(null, "Rendering preview…");
         var result = await LayoutFoundryUiHost.CaptureDraftLayoutThumbnailAsync(
             new DraftLayoutThumbnailRequest(
@@ -1712,7 +1686,7 @@ PreviewCleanup = CleanupPreviewsAsync();
                 previewWidth,
                 previewHeight,
                 _snapshot.Revision + version,
-                PreviewBackgroundArgb(FoundryTheme.CanvasPreviewBackground));
+                PreviewBackgroundArgb(LayoutPresentationTheme.CanvasPreviewBackground));
             var orderedDetails = OrderedDetailsForDraft(sheet, draft);
             var detailAssignments = orderedDetails.Select((detail, detailIndex) =>
                 new EditDetailPreviewAssignment(
@@ -1739,7 +1713,7 @@ PreviewCleanup = CleanupPreviewsAsync();
                 previewWidth,
                 previewHeight,
                 _snapshot.Revision + version,
-                BackgroundArgb: PreviewBackgroundArgb(FoundryTheme.CanvasPreviewBackground));
+                BackgroundArgb: PreviewBackgroundArgb(LayoutPresentationTheme.CanvasPreviewBackground));
             var result = await LayoutFoundryUiHost.CaptureThumbnailAsync(
                 new OverviewThumbnailRequest(key, Priority: -1),
                 _draftLayoutPreviewCancellation.Token);
@@ -1841,7 +1815,7 @@ PreviewCleanup = CleanupPreviewsAsync();
             previewAppearance?.AppearanceStateId,
             previewAppearance?.FolderId,
             previewAppearance?.DetailSlotId,
-            PreviewBackgroundArgb(FoundryTheme.CanvasPreviewBackground));
+            PreviewBackgroundArgb(LayoutPresentationTheme.CanvasPreviewBackground));
         if (!_pendingNamedViewPreviews.Add(key)) return;
         try
         {

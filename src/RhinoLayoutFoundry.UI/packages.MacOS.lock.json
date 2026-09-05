@@ -21,6 +21,15 @@
           "RhinoFoundry.UI.Primitives": "0.3.0-preview.1"
         }
       },
+      "RhinoFoundry.UI.MacOS": {
+        "type": "Direct",
+        "requested": "[0.3.0-preview.1, )",
+        "resolved": "0.3.0-preview.1",
+        "contentHash": "5AVrz/AiF0vLj72YYvnm4MihJZg9uPdNmWgRefcjGNLTB1mV/ygoVKtBcCtRuOeoPVOUiLjmecjS/F091sW+WA==",
+        "dependencies": {
+          "RhinoFoundry.UI": "0.3.0-preview.1"
+        }
+      },
       "Microsoft.Win32.SystemEvents": {
         "type": "Transitive",
         "resolved": "7.0.0",

@@ -11,6 +11,8 @@ namespace RhinoLayoutFoundry.UI;
 /// <summary>Rhino composition entry point; application state and workflows belong to the service instance.</summary>
 public static class LayoutFoundryUiHost
 {
+    static LayoutFoundryUiHost() => SharedUiPlatform.Initialize();
+
     private static readonly FoundryApplicationService Service = new();
     public static event EventHandler<OverviewInvalidationEventArgs> OverviewChanged
     {

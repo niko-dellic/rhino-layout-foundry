@@ -11,16 +11,6 @@
           "System.Drawing.Common": "7.0.0"
         }
       },
-      "RhinoFoundry.UI": {
-        "type": "Direct",
-        "requested": "[0.3.0-preview.1, )",
-        "resolved": "0.3.0-preview.1",
-        "contentHash": "4yPAPVKCnjhILxI6RLGj7RGASbjqLuqp5FSSuYTpWiPQFzvHnS7YLj7OpQPkWgw5uW5eEduer130WvW6gbFNWQ==",
-        "dependencies": {
-          "RhinoCommon": "8.34.26223.11001",
-          "RhinoFoundry.UI.Primitives": "0.3.0-preview.1"
-        }
-      },
       "Microsoft.Win32.SystemEvents": {
         "type": "Transitive",
         "resolved": "7.0.0",
@@ -44,6 +34,35 @@
         "type": "Project",
         "dependencies": {
           "RhinoLayoutFoundry.Core": "[0.1.0, )"
+        }
+      },
+      "rhinolayoutfoundry.ui": {
+        "type": "Project",
+        "dependencies": {
+          "RhinoCommon": "[8.34.26223.11001, )",
+          "RhinoFoundry.UI": "[0.3.0-preview.1, )",
+          "RhinoFoundry.UI.MacOS": "[0.3.0-preview.1, )",
+          "RhinoLayoutFoundry.Core": "[0.1.0, )",
+          "RhinoLayoutFoundry.Extensibility": "[0.1.0, )"
+        }
+      },
+      "RhinoFoundry.UI": {
+        "type": "CentralTransitive",
+        "requested": "[0.3.0-preview.1, )",
+        "resolved": "0.3.0-preview.1",
+        "contentHash": "4yPAPVKCnjhILxI6RLGj7RGASbjqLuqp5FSSuYTpWiPQFzvHnS7YLj7OpQPkWgw5uW5eEduer130WvW6gbFNWQ==",
+        "dependencies": {
+          "RhinoCommon": "8.34.26223.11001",
+          "RhinoFoundry.UI.Primitives": "0.3.0-preview.1"
+        }
+      },
+      "RhinoFoundry.UI.MacOS": {
+        "type": "CentralTransitive",
+        "requested": "[0.3.0-preview.1, )",
+        "resolved": "0.3.0-preview.1",
+        "contentHash": "5AVrz/AiF0vLj72YYvnm4MihJZg9uPdNmWgRefcjGNLTB1mV/ygoVKtBcCtRuOeoPVOUiLjmecjS/F091sW+WA==",
+        "dependencies": {
+          "RhinoFoundry.UI": "0.3.0-preview.1"
         }
       },
       "RhinoFoundry.UI.Primitives": {

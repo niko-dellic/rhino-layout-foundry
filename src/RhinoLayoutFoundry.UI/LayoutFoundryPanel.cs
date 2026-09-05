@@ -743,7 +743,7 @@ public sealed partial class LayoutFoundryPanel : Panel
             VerticalContentAlignment = VerticalAlignment.Center,
             Items =
             {
-                new ImageView { Image = FoundryViewIcons.BrandMark() },
+                new ImageView { Image = LayoutBrandIcon.BrandMark() },
                 title,
                 new StackLayoutItem(null, true),
             },

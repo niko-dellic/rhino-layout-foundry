@@ -1,3 +1,5 @@
+using RhinoFoundry.UI.Primitives;
+
 namespace RhinoLayoutFoundry.Core.Observer;
 
 public readonly record struct ObserverPoint(double X, double Y)
@@ -58,76 +60,32 @@ public readonly record struct ObserverRect(double X, double Y, double Width, dou
     }
 }
 
-public sealed record ObserverCamera(
-    ObserverPoint WorldCenter,
-    double Zoom)
+/// <summary>Retains Layout's public and persisted value shape while delegating camera math.</summary>
+public sealed record ObserverCamera(ObserverPoint WorldCenter, double Zoom)
 {
-    public const double MinimumZoom = 0.05;
-    public const double MaximumZoom = 16;
-
-    public static ObserverCamera Default { get; } = new(new ObserverPoint(0, 0), 1);
-
-    public ObserverPoint WorldToScreen(ObserverPoint world, ObserverSize viewport) => new(
-        (world.X - WorldCenter.X) * Zoom + viewport.Width / 2,
-        (world.Y - WorldCenter.Y) * Zoom + viewport.Height / 2);
-
-    public ObserverPoint ScreenToWorld(ObserverPoint screen, ObserverSize viewport) => new(
-        (screen.X - viewport.Width / 2) / Zoom + WorldCenter.X,
-        (screen.Y - viewport.Height / 2) / Zoom + WorldCenter.Y);
-
-    public ObserverRect WorldToScreen(ObserverRect world, ObserverSize viewport)
+    public const double MinimumZoom = FoundryCamera.MinimumZoom;
+    public const double MaximumZoom = FoundryCamera.MaximumZoom;
+    public static ObserverCamera Default { get; } = FromShared(FoundryCamera.Default);
+    public FoundryCamera ToShared() => new(new(WorldCenter.X, WorldCenter.Y), Zoom);
+    public static ObserverCamera FromShared(FoundryCamera camera) => new(new(camera.WorldCenter.X, camera.WorldCenter.Y), camera.Zoom);
+    private static FoundrySize Size(ObserverSize viewport) => new(viewport.Width, viewport.Height);
+    private static ObserverRect Rect(FoundryRect rect) => new(rect.X, rect.Y, rect.Width, rect.Height);
+    public ObserverPoint WorldToScreen(ObserverPoint world, ObserverSize viewport)
     {
-        var topLeft = WorldToScreen(new ObserverPoint(world.Left, world.Top), viewport);
-        return new ObserverRect(
-            topLeft.X,
-            topLeft.Y,
-            (world.Right - world.Left) * Zoom,
-            (world.Bottom - world.Top) * Zoom);
+        var point = ToShared().WorldToScreen(new FoundryPoint(world.X, world.Y), Size(viewport));
+        return new(point.X, point.Y);
     }
-
-    public ObserverRect VisibleWorld(ObserverSize viewport)
+    public ObserverPoint ScreenToWorld(ObserverPoint screen, ObserverSize viewport)
     {
-        var topLeft = ScreenToWorld(new ObserverPoint(0, 0), viewport);
-        var bottomRight = ScreenToWorld(new ObserverPoint(viewport.Width, viewport.Height), viewport);
-        return new ObserverRect(
-            topLeft.X,
-            topLeft.Y,
-            bottomRight.X - topLeft.X,
-            bottomRight.Y - topLeft.Y);
+        var point = ToShared().ScreenToWorld(new(screen.X, screen.Y), Size(viewport));
+        return new(point.X, point.Y);
     }
-
-    public ObserverCamera PanScreen(double deltaX, double deltaY) => this with
-    {
-        WorldCenter = new ObserverPoint(
-            WorldCenter.X - deltaX / Zoom,
-            WorldCenter.Y - deltaY / Zoom),
-    };
-
-    public ObserverCamera ZoomAt(
-        ObserverPoint screenAnchor,
-        double factor,
-        ObserverSize viewport)
-    {
-        var before = ScreenToWorld(screenAnchor, viewport);
-        var nextZoom = Math.Clamp(Zoom * factor, MinimumZoom, MaximumZoom);
-        var provisional = this with { Zoom = nextZoom };
-        var after = provisional.ScreenToWorld(screenAnchor, viewport);
-        return provisional with { WorldCenter = WorldCenter + (before - after) };
-    }
-
-    public static ObserverCamera Fit(ObserverRect bounds, ObserverSize viewport, double padding = 48)
-    {
-        if (bounds.IsEmpty || viewport.IsEmpty)
-        {
-            return Default;
-        }
-
-        var availableWidth = Math.Max(1, viewport.Width - padding * 2);
-        var availableHeight = Math.Max(1, viewport.Height - padding * 2);
-        var zoom = Math.Clamp(
-            Math.Min(availableWidth / bounds.Width, availableHeight / bounds.Height),
-            MinimumZoom,
-            MaximumZoom);
-        return new ObserverCamera(bounds.Center, zoom);
-    }
+    public ObserverRect WorldToScreen(ObserverRect world, ObserverSize viewport) =>
+        Rect(ToShared().WorldToScreen(new FoundryRect(world.X, world.Y, world.Width, world.Height), Size(viewport)));
+    public ObserverRect VisibleWorld(ObserverSize viewport) => Rect(ToShared().VisibleWorld(Size(viewport)));
+    public ObserverCamera PanScreen(double deltaX, double deltaY) => FromShared(ToShared().PanScreen(deltaX, deltaY));
+    public ObserverCamera ZoomAt(ObserverPoint screenAnchor, double factor, ObserverSize viewport) =>
+        FromShared(ToShared().ZoomAt(new(screenAnchor.X, screenAnchor.Y), factor, Size(viewport)));
+    public static ObserverCamera Fit(ObserverRect bounds, ObserverSize viewport, double padding = 48) =>
+        FromShared(FoundryCamera.Fit(new(bounds.X, bounds.Y, bounds.Width, bounds.Height), Size(viewport), padding));
 }

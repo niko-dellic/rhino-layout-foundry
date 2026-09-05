@@ -10,6 +10,9 @@ plugin_dir="${RHINO_LAYOUT_FOUNDRY_MAC_PLUGIN_DIR:-${HOME}/Library/Application S
 ai_plugin_dir="${RHINO_LAYOUT_FOUNDRY_AI_MAC_PLUGIN_DIR:-${HOME}/Library/Application Support/McNeel/Rhinoceros/8.0/MacPlugIns/RhinoLayoutFoundry.AI.rhp}"
 
 required_files=(
+  RhinoFoundry.UI.dll
+  RhinoFoundry.UI.Primitives.dll
+  RhinoFoundry.UI.MacOS.dll
   RhinoLayoutFoundry.rhp
   RhinoLayoutFoundry.Core.dll
   RhinoLayoutFoundry.Extensibility.dll
@@ -25,6 +28,8 @@ for file_name in "${required_files[@]}"; do
   fi
 done
 
+python3 "${script_dir}/verify-shared-ui.py" "${output_dir}" MacOS
+
 mkdir -p "${plugin_dir}"
 for file_name in "${required_files[@]}"; do
   cp "${output_dir}/${file_name}" "${plugin_dir}/${file_name}"
@@ -35,6 +40,9 @@ done
 # cannot select an older UI or Core assembly.
 if [[ -d "${ai_plugin_dir}" ]]; then
   shared_files=(
+    RhinoFoundry.UI.dll
+    RhinoFoundry.UI.Primitives.dll
+    RhinoFoundry.UI.MacOS.dll
     RhinoLayoutFoundry.Core.dll
     RhinoLayoutFoundry.Extensibility.dll
     RhinoLayoutFoundry.UI.dll

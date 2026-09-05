@@ -20,13 +20,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Restore
-        run: dotnet restore RhinoLayoutFoundry.sln --locked-mode
+        run: dotnet restore RhinoLayoutFoundry.sln --locked-mode -p:FoundryPlatform=${{ matrix.platform }}
       - name: Build isolated candidate
         shell: pwsh
         run: dotnet build RhinoLayoutFoundry.sln -c Release --no-restore -p:UseSharedCompilation=false -p:FoundryPlatform=${{ matrix.platform }} "-p:BaseOutputPath=$env:RUNNER_TEMP/foundry-${{ github.run_id }}/"
       - name: Test candidate
         shell: pwsh
-        run: dotnet test tests/RhinoLayoutFoundry.Core.Tests -c Release --no-build "-p:BaseOutputPath=$env:RUNNER_TEMP/foundry-${{ github.run_id }}/" --logger trx
+        run: dotnet test tests/RhinoLayoutFoundry.Core.Tests -c Release --no-build --no-restore -p:FoundryPlatform=${{ matrix.platform }} "-p:BaseOutputPath=$env:RUNNER_TEMP/foundry-${{ github.run_id }}/" --logger trx
       - name: Verify and stage
         shell: pwsh
         run: |

@@ -21,11 +21,12 @@ internal sealed class CanvasGridTray : Panel
         Padding = new Padding(1);
         BackgroundColor = FoundryTheme.WithAlpha(FoundryTheme.CanvasBorder, 190);
 
-        _colorPicker = new FoundryColorField(Opaque(color));
+        _colorPicker = new FoundryColorField(Opaque(color), toolTip: "Choose the canvas grid color");
         _opacitySlider = new FoundrySlider(
             0,
             100,
-            (int)Math.Round(Math.Clamp(opacity, 0, 1) * 100));
+            (int)Math.Round(Math.Clamp(opacity, 0, 1) * 100),
+            toolTipFormatter: value => $"{value}% opacity");
         _opacityLabel = FoundryTheme.MutedLabel();
         _opacityLabel.Width = 38;
         _opacityLabel.TextAlignment = TextAlignment.Right;

@@ -9,9 +9,9 @@
 
 ## UI design system
 
-Foundry uses a restrained, shadcn-inspired system adapted to Eto.Forms and Rhino dark/light themes. The authoritative implementation is in `src/RhinoLayoutFoundry.UI`:
+Foundry uses a restrained, shadcn-inspired system adapted to Eto.Forms and Rhino dark/light themes. Reusable controls are implemented and versioned in the sibling `rhino-foundry-ui` repository and consumed through the pinned `RhinoFoundry.UI` packages. `src/RhinoLayoutFoundry.UI` owns Layout-specific composition, branding, paper presentation, and rendering; do not recreate shared controls there:
 
-- `FoundryTheme.cs` owns all colors, spacing, and semantic surfaces. Add or reuse semantic tokens here; do not scatter literal UI colors through dialogs.
+- `RhinoFoundry.UI.FoundryTheme` owns shared colors, spacing, and semantic surfaces. `LayoutPresentationTheme.cs` owns physical-paper and Layout-only tokens. Add a reusable token upstream; do not scatter literal UI colors through dialogs.
 - `FoundryDialogButton.cs` is the standard text action.
 - `FoundryToolbarIconButton.cs` is the standard 32 × 32 icon action.
 - `FoundryToolbarButtonGroup.cs` is the shared capsule for mutually exclusive toolbar modes.

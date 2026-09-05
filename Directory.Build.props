@@ -8,6 +8,7 @@
     <FoundryPlatform Condition="'$(FoundryPlatform)' == '' and $([MSBuild]::IsOSPlatform('OSX'))">MacOS</FoundryPlatform>
     <FoundryPlatform Condition="'$(FoundryPlatform)' == '' and $([MSBuild]::IsOSPlatform('Windows'))">Windows</FoundryPlatform>
     <FoundryPlatform Condition="'$(FoundryPlatform)' == ''">Portable</FoundryPlatform>
+    <NuGetLockFilePath Condition="'$(FoundryPlatform)' == 'MacOS'">$(MSBuildProjectDirectory)/packages.MacOS.lock.json</NuGetLockFilePath>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>

@@ -3,5 +3,6 @@
     <RootNamespace>RhinoLayoutFoundry.Core</RootNamespace>
     <AssemblyName>RhinoLayoutFoundry.Core</AssemblyName>
   </PropertyGroup>
+  <ItemGroup><PackageReference Include="RhinoFoundry.UI.Primitives" /></ItemGroup>
 </Project>
 

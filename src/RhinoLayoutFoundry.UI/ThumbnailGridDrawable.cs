@@ -155,9 +155,9 @@ internal sealed class ThumbnailGridDrawable : Drawable
         var cell = _layout.CellBounds(index);
         var image = PageBounds(cell, sheet);
         var selected = _selection.Contains(new OverviewNodeKey(OverviewNodeKind.Sheet, sheet.PageViewId));
-        graphics.FillRectangle(FoundryTheme.SheetShadow,
+        graphics.FillRectangle(LayoutPresentationTheme.SheetShadow,
             image.X + 4, image.Y + 5, image.Width, image.Height);
-        graphics.FillRectangle(FoundryTheme.SheetPaper, image);
+        graphics.FillRectangle(LayoutPresentationTheme.SheetPaper, image);
         if (_previews.TryGetValue(sheet.PageViewId, out var preview) &&
             preview.Key.ContentVersion == sheet.PreviewContentVersion)
         {
@@ -165,7 +165,7 @@ internal sealed class ThumbnailGridDrawable : Drawable
         }
         else
         {
-            graphics.FillRectangle(FoundryTheme.SheetPaper, image);
+            graphics.FillRectangle(LayoutPresentationTheme.SheetPaper, image);
             foreach (var detail in sheet.Details)
             {
                 var bounds = new RectangleF(
@@ -173,17 +173,17 @@ internal sealed class ThumbnailGridDrawable : Drawable
                     image.Y + (float)(detail.NormalizedBounds.Y * image.Height),
                     (float)(detail.NormalizedBounds.Width * image.Width),
                     (float)(detail.NormalizedBounds.Height * image.Height));
-                graphics.FillRectangle(FoundryTheme.SheetDetailPlaceholder, bounds);
-                graphics.DrawRectangle(FoundryTheme.SheetDetailBorder, bounds);
+                graphics.FillRectangle(LayoutPresentationTheme.SheetDetailPlaceholder, bounds);
+                graphics.DrawRectangle(LayoutPresentationTheme.SheetDetailBorder, bounds);
             }
         }
 
         graphics.DrawRectangle(
-            new Pen(selected ? FoundryTheme.SelectionAccent : FoundryTheme.SheetOutline,
+            new Pen(selected ? FoundryTheme.SelectionAccent : LayoutPresentationTheme.SheetOutline,
                 selected ? 3 : 1),
             image);
         graphics.FillEllipse(
-            sheet.IncludeInPrintAll ? FoundryTheme.SheetPrintIncluded : FoundryTheme.SheetPrintExcluded,
+            sheet.IncludeInPrintAll ? LayoutPresentationTheme.SheetPrintIncluded : LayoutPresentationTheme.SheetPrintExcluded,
             image.Right - 15,
             image.Top + 7,
             8,

@@ -25,7 +25,10 @@
         }
       },
       "rhinolayoutfoundry.core": {
-        "type": "Project"
+        "type": "Project",
+        "dependencies": {
+          "RhinoFoundry.UI.Primitives": "[0.3.0-preview.1, )"
+        }
       },
       "rhinolayoutfoundry.extensibility": {
         "type": "Project",
@@ -37,9 +40,26 @@
         "type": "Project",
         "dependencies": {
           "RhinoCommon": "[8.34.26223.11001, )",
+          "RhinoFoundry.UI": "[0.3.0-preview.1, )",
           "RhinoLayoutFoundry.Core": "[0.1.0, )",
           "RhinoLayoutFoundry.Extensibility": "[0.1.0, )"
         }
+      },
+      "RhinoFoundry.UI": {
+        "type": "CentralTransitive",
+        "requested": "[0.3.0-preview.1, )",
+        "resolved": "0.3.0-preview.1",
+        "contentHash": "4yPAPVKCnjhILxI6RLGj7RGASbjqLuqp5FSSuYTpWiPQFzvHnS7YLj7OpQPkWgw5uW5eEduer130WvW6gbFNWQ==",
+        "dependencies": {
+          "RhinoCommon": "8.34.26223.11001",
+          "RhinoFoundry.UI.Primitives": "0.3.0-preview.1"
+        }
+      },
+      "RhinoFoundry.UI.Primitives": {
+        "type": "CentralTransitive",
+        "requested": "[0.3.0-preview.1, )",
+        "resolved": "0.3.0-preview.1",
+        "contentHash": "Lp8BSejsApPFDMdUQL5DLvhpzUiHpKVUFAbSWM2Tou/Lq50xXaGjD6jHpOZ4GTNzbzuoke/LlY66TKblgko3tA=="
       }
     }
   }

@@ -7,7 +7,7 @@ using RhinoLayoutFoundry.Core.Overview;
 
 namespace RhinoLayoutFoundry.UI;
 
-internal sealed partial class ObserverCanvasDrawable : Drawable
+internal sealed partial class ObserverCanvasDrawable : FoundryCanvas
 {
     internal const string NamedViewDragType = "application/x-layout-foundry-named-view";
     private const double RightPanActivationDistance = 5;
@@ -25,8 +25,6 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
     private const int NamedViewsActionHeight = 30;
     private const int NamedViewsThumbnailColumns = 2;
     private const int NamedViewsThumbnailCardHeight = 92;
-    private const double CameraInputFrameInterval = 1d / 60d;
-    private const double CameraInputSettleInterval = 0.08;
     private const double WheelZoomSensitivity = 0.115;
     private readonly Font _folderFont = SystemFonts.Bold(11);
     private readonly Font _sheetFont = SystemFonts.Bold(10);
@@ -37,8 +35,6 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
     private readonly Dictionary<Guid, float> _assignmentBadgeDesiredWidths = [];
     private readonly UITimer _navigatorDragTimer;
     private readonly UITimer _navigatorHoverTimer;
-    private readonly UITimer _cameraInputFrameTimer;
-    private readonly UITimer _cameraInputSettleTimer;
     private ObserverSnapshot _snapshot = ObserverSnapshot.NoDocument;
     private OverviewFilterProjection _filter = new(false, new HashSet<OverviewNodeKey>(), new HashSet<Guid>());
     private ObserverBoardLayout _layout = ObserverBoardLayout.Empty;
@@ -86,14 +82,11 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
     private string? _dragNamedView;
     private Guid? _hoverDetailId;
     private bool _hasCanvasPastePoint;
-    private ObserverPoint _pendingPanScreen;
-    private ObserverPoint _pendingZoomAnchorScreen;
-    private double _pendingZoomFactor = 1;
-    private bool _cameraInputFrameScheduled;
 
     internal ObserverCanvasDrawable()
         : base(true)
     {
+        UseDefaultWheelZoom = false; // Product overlays retain their wheel routing.
         BackgroundColor = FoundryTheme.CanvasBackground;
         CanFocus = true;
         AllowDrop = true;
@@ -110,12 +103,6 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
         DragOver += OnDragOver;
         DragDrop += OnDragDrop;
         SizeChanged += (_, _) => RefreshPresentation();
-        LoadComplete += (_, _) => AttachNativeTrackpadInput();
-        UnLoad += (_, _) =>
-        {
-            DetachNativeTrackpadInput();
-            StopQueuedCameraInput();
-        };
         _navigatorDragTimer = new UITimer { Interval = 0.07 };
         _navigatorDragTimer.Elapsed += (_, _) =>
         {
@@ -140,14 +127,7 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
             _navigatorDrop = ResolveNavigatorDrop(_navigatorPointer);
             Invalidate();
         };
-        _cameraInputFrameTimer = new UITimer { Interval = CameraInputFrameInterval };
-        _cameraInputFrameTimer.Elapsed += (_, _) => FlushQueuedCameraInput();
-        _cameraInputSettleTimer = new UITimer { Interval = CameraInputSettleInterval };
-        _cameraInputSettleTimer.Elapsed += (_, _) =>
-        {
-            _cameraInputSettleTimer.Stop();
-            ViewChanged?.Invoke(this, EventArgs.Empty);
-        };
+
     }
 
     internal event EventHandler? ViewChanged;
@@ -676,7 +656,7 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
 
         graphics.FillRectangle(Color.FromArgb(0, 0, 0, emphasized ? 45 : 12),
             bounds.X + 4, bounds.Y + 5, bounds.Width, bounds.Height);
-        graphics.FillRectangle(FoundryTheme.CanvasPreviewBackground, bounds);
+        graphics.FillRectangle(LayoutPresentationTheme.CanvasPreviewBackground, bounds);
         if (_previews.TryGetValue(card.Sheet.PageViewId, out var preview) &&
             preview.Key.ContentVersion == card.Sheet.PreviewContentVersion)
         {
@@ -768,8 +748,8 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
             bounds.Height);
         graphics.FillRectangle(
             emphasized
-                ? FoundryTheme.CanvasPreviewBackground
-                : FoundryTheme.WithAlpha(FoundryTheme.CanvasPreviewBackground, 225),
+                ? LayoutPresentationTheme.CanvasPreviewBackground
+                : FoundryTheme.WithAlpha(LayoutPresentationTheme.CanvasPreviewBackground, 225),
             bounds);
         var border = selected || hasSelectedDetail
             ? FoundryTheme.SelectionAccent
@@ -2752,7 +2732,7 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
 
         QueueCameraZoom(
             Math.Exp(delta * WheelZoomSensitivity),
-            Point(eventArgs.Location));
+            new RhinoFoundry.UI.Primitives.FoundryPoint(eventArgs.Location.X, eventArgs.Location.Y));
         eventArgs.Handled = true;
     }
 
@@ -3327,63 +3307,18 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
         ViewChanged?.Invoke(this, EventArgs.Empty);
     }
 
-    private void QueueCameraPan(double screenX, double screenY)
+    protected override void ApplyCameraInput(RhinoFoundry.UI.Primitives.FoundryPoint pan, double zoom, RhinoFoundry.UI.Primitives.FoundryPoint anchor)
     {
-        if (Math.Abs(screenX) < double.Epsilon && Math.Abs(screenY) < double.Epsilon) return;
-        _pendingPanScreen += new ObserverPoint(screenX, screenY);
-        ScheduleCameraInputFrame();
+        CanvasCamera = _camera.ToShared();
+        base.ApplyCameraInput(pan, zoom, anchor);
+        _camera = ObserverCamera.FromShared(CanvasCamera);
     }
 
-    private void QueueCameraZoom(double factor, ObserverPoint anchorScreen)
-    {
-        if (!double.IsFinite(factor) || factor <= 0 || Math.Abs(factor - 1) < double.Epsilon) return;
-        _pendingZoomFactor *= factor;
-        _pendingZoomAnchorScreen = anchorScreen;
-        ScheduleCameraInputFrame();
-    }
+    protected override void OnCameraFrame() => RefreshPresentation();
 
-    private void ScheduleCameraInputFrame()
-    {
-        if (_cameraInputFrameScheduled) return;
-        _cameraInputFrameScheduled = true;
-        _cameraInputFrameTimer.Start();
-    }
+    protected override void OnCameraSettled() => ViewChanged?.Invoke(this, EventArgs.Empty);
 
-    private void FlushQueuedCameraInput()
-    {
-        _cameraInputFrameTimer.Stop();
-        _cameraInputFrameScheduled = false;
-        var pan = _pendingPanScreen;
-        var zoomFactor = _pendingZoomFactor;
-        var zoomAnchor = _pendingZoomAnchorScreen;
-        _pendingPanScreen = new ObserverPoint();
-        _pendingZoomFactor = 1;
-
-        if (Math.Abs(pan.X) < double.Epsilon &&
-            Math.Abs(pan.Y) < double.Epsilon &&
-            Math.Abs(zoomFactor - 1) < double.Epsilon)
-            return;
-
-        if (Math.Abs(pan.X) >= double.Epsilon || Math.Abs(pan.Y) >= double.Epsilon)
-            _camera = _camera.PanScreen(pan.X, pan.Y);
-        if (Math.Abs(zoomFactor - 1) >= double.Epsilon)
-            _camera = _camera.ZoomAt(zoomAnchor, zoomFactor, ViewportSize());
-
-        RefreshPresentation();
-        _cameraInputSettleTimer.Stop();
-        _cameraInputSettleTimer.Start();
-    }
-
-    private void StopQueuedCameraInput()
-    {
-        _cameraInputFrameTimer.Stop();
-        _cameraInputSettleTimer.Stop();
-        _cameraInputFrameScheduled = false;
-        _pendingPanScreen = new ObserverPoint();
-        _pendingZoomFactor = 1;
-    }
-
-    private bool IsCanvasOverlay(PointF point)
+    protected override bool IsCanvasOverlay(PointF point)
     {
         // Match the drawn rows, not the whole left column: the unused area
         // beneath a short or collapsed tree is still pannable canvas.
@@ -3393,10 +3328,6 @@ internal sealed partial class ObserverCanvasDrawable : Drawable
                point.X >= NamedViewsLeft(ViewportSize()) &&
                point.Y >= NamedViewsTop;
     }
-
-    partial void AttachNativeTrackpadInput();
-
-    partial void DetachNativeTrackpadInput();
 
     private void RefreshPresentation()
     {

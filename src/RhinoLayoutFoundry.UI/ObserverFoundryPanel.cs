@@ -696,7 +696,7 @@ public sealed class ObserverFoundryPanel : Panel
         var contentVersions = _snapshot.Sheets.ToDictionary(
             sheet => sheet.PageViewId,
             sheet => sheet.PreviewContentVersion);
-        var backgroundArgb = PreviewBackgroundArgb(FoundryTheme.CanvasPreviewBackground);
+        var backgroundArgb = PreviewBackgroundArgb(LayoutPresentationTheme.CanvasPreviewBackground);
         _thumbnailQueue.RetainPending(key =>
             key.DocumentRuntimeSerialNumber == _snapshot.DocumentRuntimeSerialNumber &&
             retained.Contains(key.SheetPageViewId) &&
@@ -794,7 +794,7 @@ public sealed class ObserverFoundryPanel : Panel
                     sheet is not null &&
                     sheet.PreviewContentVersion == request.Key.ContentVersion &&
                     _snapshot.DocumentRuntimeSerialNumber == request.Key.DocumentRuntimeSerialNumber &&
-                    result.Key.BackgroundArgb == PreviewBackgroundArgb(FoundryTheme.CanvasPreviewBackground))
+                    result.Key.BackgroundArgb == PreviewBackgroundArgb(LayoutPresentationTheme.CanvasPreviewBackground))
                 {
                     _thumbnailCache.Store(result.Key, result.PngBytes!);
                     var retainDecoded = _canvas.VisibleSheets(includeOverscan: true)

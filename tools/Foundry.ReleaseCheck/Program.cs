@@ -45,8 +45,23 @@ try
         if (!deps.RootElement.GetProperty("libraries").EnumerateObject().Any(item => item.Name == $"RhinoLayoutFoundry/{version}"))
             throw new InvalidDataException("The dependency manifest does not match the release version.");
     }
+    var shared = SharedBinaries(platform);
+    using var sharedManifest = JsonDocument.Parse(File.ReadAllText(Path.Combine(repository, "packages", "foundry-ui-manifest.json")));
+    var sharedVersion = Version.Parse(sharedManifest.RootElement.GetProperty("assemblyVersion").GetString()!);
+    foreach (var binary in shared)
+    {
+        var path = Path.Combine(source, binary);
+        if (AssemblyName.GetAssemblyName(path).Version != sharedVersion)
+            throw new InvalidDataException($"Shared UI assembly version mismatch: {binary}.");
+        var expectedHash = sharedManifest.RootElement.GetProperty("files").GetProperty(binary).GetString();
+        var actualHash = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path)));
+        if (!string.Equals(actualHash, expectedHash, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException($"Shared UI package hash mismatch: {binary}.");
+    }
+    if (platform == "Windows" && File.Exists(Path.Combine(source, "RhinoFoundry.UI.MacOS.dll")))
+        throw new InvalidDataException("Windows output contains the Mac adapter; use an isolated platform output.");
     Directory.CreateDirectory(destination);
-    foreach (var file in binaries.Concat(new[] { "RhinoLayoutFoundry.deps.json", "RhinoLayoutFoundry.runtimeconfig.json" }))
+    foreach (var file in binaries.Concat(shared).Concat(new[] { "RhinoLayoutFoundry.deps.json", "RhinoLayoutFoundry.runtimeconfig.json" }))
         File.Copy(Path.Combine(source, file), Path.Combine(destination, file));
     foreach (var file in new[] { "LICENSE", "CHANGELOG.md", "THIRD_PARTY_NOTICES.md" })
         File.Copy(Path.Combine(repository, file), Path.Combine(destination, file));
@@ -76,6 +91,10 @@ catch (Exception exception)
     Console.Error.WriteLine(exception.Message);
     return 1;
 }
+
+static string[] SharedBinaries(string platform) => platform == "MacOS"
+    ? ["RhinoFoundry.UI.Primitives.dll", "RhinoFoundry.UI.dll", "RhinoFoundry.UI.MacOS.dll"]
+    : ["RhinoFoundry.UI.Primitives.dll", "RhinoFoundry.UI.dll"];
 
 static string? PlatformMarker(string path)
 {
@@ -107,6 +126,7 @@ static void VerifyPackage(string repository, string path, string platform)
         "RhinoLayoutFoundry.Extensibility.dll", "RhinoLayoutFoundry.deps.json", "RhinoLayoutFoundry.runtimeconfig.json",
         "README.md", "LICENSE", "CHANGELOG.md", "THIRD_PARTY_NOTICES.md", "RECOVERY.md", "manifest.yml", "SHA256SUMS",
     };
+    expected.UnionWith(SharedBinaries(platform));
     using var zip = ZipFile.OpenRead(path);
     if (zip.Entries.Count != expected.Count || !expected.SetEquals(zip.Entries.Select(entry => entry.FullName)))
         throw new InvalidDataException("Package contains missing, duplicate, or unexpected files.");
@@ -114,6 +134,16 @@ static void VerifyPackage(string repository, string path, string platform)
     {
         using var reader = new StreamReader(zip.GetEntry(name)!.Open());
         return reader.ReadToEnd();
+    }
+    using (var sharedManifest = JsonDocument.Parse(File.ReadAllText(Path.Combine(repository, "packages", "foundry-ui-manifest.json"))))
+    {
+        foreach (var binary in SharedBinaries(platform))
+        {
+            using var stream = zip.GetEntry(binary)!.Open();
+            var expectedHash = sharedManifest.RootElement.GetProperty("files").GetProperty(binary).GetString();
+            if (!string.Equals(Convert.ToHexString(SHA256.HashData(stream)), expectedHash, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException($"Packaged shared UI hash mismatch: {binary}.");
+        }
     }
     var manifest = Read("manifest.yml");
     var yakPlatform = platform == "MacOS" ? "mac" : "win";

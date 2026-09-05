@@ -23,13 +23,13 @@ jobs:
             10.0.103
             8.0.x
           cache: true
-          cache-dependency-path: '**/packages.lock.json'
+          cache-dependency-path: '**/packages*.lock.json'
       - name: Restore locked graph
-        run: dotnet restore RhinoLayoutFoundry.sln --locked-mode
+        run: dotnet restore RhinoLayoutFoundry.sln --locked-mode -p:FoundryPlatform=${{ matrix.platform }}
       - name: Build (hosted Mac verifies portable code only)
         run: dotnet build RhinoLayoutFoundry.sln -c Release --no-restore -p:FoundryPlatform=${{ matrix.platform }} -p:UseSharedCompilation=false
       - name: Test
-        run: dotnet test RhinoLayoutFoundry.sln -c Release --no-build --logger trx
+        run: dotnet test RhinoLayoutFoundry.sln -c Release --no-build --no-restore -p:FoundryPlatform=${{ matrix.platform }} --logger trx
       - name: Check whitespace
         run: git diff --check
       - uses: actions/upload-artifact@v4

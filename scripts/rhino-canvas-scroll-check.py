@@ -44,7 +44,13 @@ def run(label, path):
         return canvas_type.GetField(name, FLAGS)
 
     def call(name, *values):
-        return canvas_type.GetMethod(name, FLAGS | BindingFlags.DeclaredOnly).Invoke(canvas, args(*values))
+        owner = canvas_type
+        while owner is not None:
+            method = owner.GetMethod(name, FLAGS | BindingFlags.DeclaredOnly)
+            if method is not None:
+                return method.Invoke(canvas, args(*values))
+            owner = owner.BaseType
+        raise AssertionError('Missing method: ' + name)
 
     def rows(count):
         values = System.Array.CreateInstance(row_type, count)
@@ -82,14 +88,14 @@ def run(label, path):
     def no_overflow():
         rows(3)
         assert wheel(PointF(120, 50)).Handled
-        assert field('_pendingZoomFactor').GetValue(canvas) == 1, 'Tree scroll fell through to zoom'
+        assert canvas_type.GetProperty('PendingZoomFactor', FLAGS).GetValue(canvas) == 1, 'Tree scroll fell through to zoom'
         assert field('_navigatorScrollRow').GetValue(canvas) == 0
 
     def overflow():
         rows(50)
         assert wheel(PointF(120, 50)).Handled
         assert field('_navigatorScrollRow').GetValue(canvas) == 1, 'Overflowing tree did not scroll'
-        assert field('_pendingZoomFactor').GetValue(canvas) == 1, 'Overflowing tree changed zoom'
+        assert canvas_type.GetProperty('PendingZoomFactor', FLAGS).GetValue(canvas) == 1, 'Overflowing tree changed zoom'
 
     def absent_tree():
         rows(0)
@@ -101,7 +107,7 @@ def run(label, path):
     def ordinary_wheel():
         rows(3)
         assert wheel(PointF(300, 300)).Handled
-        assert field('_pendingZoomFactor').GetValue(canvas) != 1, 'Mouse-wheel canvas zoom regressed'
+        assert canvas_type.GetProperty('PendingZoomFactor', FLAGS).GetValue(canvas) != 1, 'Mouse-wheel canvas zoom regressed'
 
     try:
         check('short tree leaves surrounding canvas pannable', short_tree)
