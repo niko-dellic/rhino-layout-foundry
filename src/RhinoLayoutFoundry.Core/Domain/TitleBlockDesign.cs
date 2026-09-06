@@ -187,7 +187,14 @@ public static class AdaptiveTitleBlockLayoutSolver
         BuiltInTitleBlockKind kind,
         PaperRecipe paper,
         ProjectInformation project,
-        int detailCount)
+        int detailCount) => Solve(kind, paper, project, detailCount, null);
+
+    public static AdaptiveTitleBlockLayout Solve(
+        BuiltInTitleBlockKind kind,
+        PaperRecipe paper,
+        ProjectInformation project,
+        int detailCount,
+        LayoutSpacing? spacing)
     {
         ArgumentNullException.ThrowIfNull(paper);
         ArgumentNullException.ThrowIfNull(project);
@@ -198,7 +205,12 @@ public static class AdaptiveTitleBlockLayoutSolver
         var widthMm = paper.Width / unitsPerMillimeter;
         var heightMm = paper.Height / unitsPerMillimeter;
         var shortMm = Math.Min(widthMm, heightMm);
-        var marginMm = Clamp(shortMm * 0.025, 5, 15);
+        var spacingMm = spacing?.InUnits("Millimeters");
+        if (spacingMm is { IsValid: false })
+            throw new ArgumentException("Margins and gaps must be finite and zero or greater.", nameof(spacing));
+        var marginMm = spacingMm?.TitleBlockEdge ?? Clamp(shortMm * 0.025, 5, 15);
+        if (spacingMm is not null && (widthMm <= marginMm * 2 || heightMm <= marginMm * 2))
+            throw new ArgumentException("The title-block edge margin leaves no room. Reduce it or choose larger paper.");
         var gutterMm = Clamp(shortMm * 0.01, 2.5, 6);
         var bodyMm = Clamp(shortMm * 0.012, 2.5, 4);
         var headingMm = bodyMm * 1.4;
@@ -214,8 +226,28 @@ public static class AdaptiveTitleBlockLayoutSolver
                 includeScale)
             : ComposeBottom(widthMm, heightMm, marginMm, gutterMm, bodyMm, project, options, descriptors,
                 includeScale);
+        if (spacingMm is not null)
+        {
+            var edge = spacingMm.PageEdge;
+            var right = normalizedKind == BuiltInTitleBlockKind.RightSidebar
+                ? Math.Min(widthMm - edge, composition.Block.Left - spacingMm.TitleBlockGap)
+                : widthMm - edge;
+            var bottom = normalizedKind == BuiltInTitleBlockKind.FullWidthBottom
+                ? Math.Max(edge, composition.Block.Top + spacingMm.TitleBlockGap)
+                : edge;
+            var content = new TitleBlockRectangle(edge, bottom, right - edge, heightMm - edge - bottom);
+            if (detailCount > 0 && (content.Width <= 0 || content.Height <= 0))
+                throw new ArgumentException("Margins and title-block clearance leave no room for details. Reduce the spacing or choose larger paper.");
+            composition = composition with { Content = content };
+        }
         var signature = Signature(normalizedKind, widthMm, heightMm, composition.Block, project, options,
             includeScale);
+        if (spacingMm is not null)
+        {
+            var spacingSignature = FormattableString.Invariant(
+                $"{spacingMm.PageEdge:R}|{spacingMm.DetailGap:R}|{spacingMm.TitleBlockGap:R}|{spacingMm.TitleBlockEdge:R}");
+            signature += ":s" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(spacingSignature)))[..16].ToLowerInvariant();
+        }
 
         double U(double value) => value * unitsPerMillimeter;
         TitleBlockRectangle R(TitleBlockRectangle rectangle) => new(
@@ -226,7 +258,7 @@ public static class AdaptiveTitleBlockLayoutSolver
             R(composition.Block),
             R(composition.Content),
             U(marginMm),
-            U(gutterMm),
+            U(spacingMm?.TitleBlockGap ?? gutterMm),
             U(bodyMm),
             U(headingMm),
             compact,
@@ -506,7 +538,7 @@ public static class AdaptiveTitleBlockLayoutSolver
             $"tb{StyleVersion}:{kind}:{pageWidth:0.##}x{pageHeight:0.##}:{block.Width:0.##}x{block.Height:0.##}:{hash}");
     }
 
-    private static double UnitsPerMillimeter(string unitSystem) => unitSystem?.Trim() switch
+    internal static double UnitsPerMillimeter(string unitSystem) => unitSystem?.Trim() switch
     {
         "Millimeters" or "Millimeter" => 1,
         "Centimeters" or "Centimeter" => 0.1,

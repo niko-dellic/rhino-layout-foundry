@@ -20,6 +20,15 @@ internal sealed class LayoutSelectionDrawable : Drawable
     private int _keyboardDetailIndex = -1;
     private PaperRecipe _paper = new(594, 420, "Millimeters");
     private TitleBlockChoice? _titleBlock;
+    private SheetTemplateRecipe? _plannedTemplate;
+    private ProjectInformation? _plannedProject;
+
+    internal void SetPlannedTemplate(SheetTemplateRecipe? template, ProjectInformation project)
+    {
+        _plannedTemplate = template;
+        _plannedProject = project;
+        Invalidate();
+    }
     private Bitmap? _pagePreview;
     private string? _pagePreviewMessage;
     private bool _overlayPagePreviewDetails = true;
@@ -112,7 +121,10 @@ internal sealed class LayoutSelectionDrawable : Drawable
                 _titleBlock ?? new TitleBlockChoice(BuiltInKind: null, Label: "None"),
                 _paper,
                 page,
-                showEmptyMarker: false);
+                showEmptyMarker: false,
+                spacing: _plannedTemplate?.TitleBlock?.Spacing,
+                project: _plannedProject,
+                detailCount: _plannedTemplate?.DetailSlots.Count ?? 1);
             if (!string.IsNullOrWhiteSpace(_pagePreviewMessage))
             {
                 DrawCentered(
@@ -334,6 +346,12 @@ internal sealed class LayoutSelectionDrawable : Drawable
 
     private IReadOnlyList<RectangleF> PreviewDetailBounds(RectangleF page)
     {
+        if (_plannedTemplate is { } template)
+            return template.DetailSlots.Select(detail => new RectangleF(
+                page.X + (float)(detail.Left / template.Paper.Width * page.Width),
+                page.Bottom - (float)(detail.Top / template.Paper.Height * page.Height),
+                (float)((detail.Right - detail.Left) / template.Paper.Width * page.Width),
+                (float)((detail.Top - detail.Bottom) / template.Paper.Height * page.Height))).ToArray();
         var choice = _choices[_selectedIndex];
         var targetContent = DetailContentBounds(page);
         if (_titleBlock?.BuiltInKind is null)

@@ -167,7 +167,13 @@ public sealed record SheetNamingBinding(
     public IReadOnlyDictionary<Guid, string> NamedViewAssignments { get; init; } = new Dictionary<Guid, string>();
 }
 
+[method: JsonConstructor]
 public sealed record TitleBlockRole(
     Guid InstanceObjectId,
     Guid InstanceDefinitionId,
-    [property: JsonRequired] BuiltInTitleBlockKind BuiltInKind);
+    [property: JsonRequired] BuiltInTitleBlockKind BuiltInKind,
+    LayoutSpacing? Spacing = null)
+{
+    public TitleBlockRole(Guid InstanceObjectId, Guid InstanceDefinitionId, BuiltInTitleBlockKind BuiltInKind)
+        : this(InstanceObjectId, InstanceDefinitionId, BuiltInKind, null) { }
+}

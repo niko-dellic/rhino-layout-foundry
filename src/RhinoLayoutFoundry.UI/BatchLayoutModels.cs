@@ -42,7 +42,10 @@ internal sealed record CreationDraft(
     Guid? AppearanceStateId,
     IReadOnlyList<string?> OriginalNamedViewsByDetail,
     IReadOnlyList<Guid?> OriginalDetailDisplayModesByDetail,
-    IReadOnlyList<Guid?> OriginalAppearanceStatesByDetail)
+    IReadOnlyList<Guid?> OriginalAppearanceStatesByDetail,
+    LayoutSpacing? Spacing = null,
+    bool SeparateSpacing = false,
+    double? SharedMargin = null)
 {
     internal LayoutCreationSpec ToSpec() => new(
         Quantity: 1,
@@ -56,7 +59,8 @@ internal sealed record CreationDraft(
         DetailDisplayModesByDetail: DetailDisplayModesByDetail,
         DetailLayerId: DetailLayerId,
         AppearanceStateId: AppearanceStateId,
-        AppearanceStatesByDetail: AppearanceStatesByDetail);
+        AppearanceStatesByDetail: AppearanceStatesByDetail,
+        Spacing: Layout.TemplateId is null ? Spacing : null);
 }
 
 internal enum DetailLayerTargetMode

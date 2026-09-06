@@ -82,6 +82,7 @@ internal sealed class RhinoDocumentSnapshotProvider : IDocumentSnapshotProvider
                     NamingBinding: record?.NamingBinding,
                     Notes: record?.Notes ?? string.Empty)
                 {
+                    TitleBlockSpacing = titleBlock?.Spacing,
                     DetailNamedViews = record?.DetailNamedViews ?? new Dictionary<Guid, string>()
                 };
             })
@@ -251,6 +252,7 @@ internal sealed class RhinoDocumentSnapshotProvider : IDocumentSnapshotProvider
             NamedViewSnapshots = namedViewSnapshots,
             ClippingPlanes = clippingPlanes,
             StandardViewports = standardViewportIds,
+            PageUnitSystem = document.PageUnitSystem.ToString(),
             ActiveViewportDisplayModeId = document.Views.ActiveView?.ActiveViewport.DisplayMode.Id
         };
     }

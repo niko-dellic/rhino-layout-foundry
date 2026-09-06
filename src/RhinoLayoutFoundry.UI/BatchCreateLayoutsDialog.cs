@@ -10,7 +10,7 @@ using RhinoLayoutFoundry.Core.Overview;
 
 namespace RhinoLayoutFoundry.UI;
 
-internal sealed class BatchCreateLayoutsDialog : Dialog
+internal sealed partial class BatchCreateLayoutsDialog : Dialog
 {
     private const int LayoutGroupButtonWidth = 192;
     private readonly DocumentSnapshot _snapshot;
@@ -152,6 +152,15 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
             DataStore = Units,
             SelectedIndex = 0,
         };
+        if (!_isEditMode)
+        {
+            _unitDropDown.SelectedIndex = UnitIndex(snapshot.PageUnitSystem);
+            var initialUnit = Units[_unitDropDown.SelectedIndex];
+            var paperScale = LayoutSpacing.Uniform(1, "Millimeters").InUnits(initialUnit).PageEdge;
+            _widthStepper.Value = 594 * paperScale;
+            _heightStepper.Value = 420 * paperScale;
+            SyncPaperSelectors(CurrentPaper());
+        }
         _layoutPreviewTray = new LayoutPreviewTray(_layoutChoices, selectedIndex: 1);
         _layoutPickerTrigger = new LayoutPickerDrawable(_layoutChoices, selectedIndex: 1);
         _layoutSelectorPreview = new LayoutSelectionDrawable(_layoutChoices, selectedIndex: 1);
@@ -281,6 +290,9 @@ internal sealed class BatchCreateLayoutsDialog : Dialog
                 _appearanceStatePicker.Text = MixedDisplayMode;
         }
 
+        if (!_isEditMode && _drafts.Count > 0) LoadEditors(_drafts[0]);
+        InitializeSpacingEditor();
+
         _destinationDropDown.SelectedIndexChanged += (_, _) => QueueRefreshPreview();
         _indexModeDropDown.SelectedIndexChanged += (_, _) => RefreshPreview();
         _quantityStepper.ValueChanged += (_, _) => ResizeDrafts();
@@ -405,10 +417,14 @@ PreviewCleanup = CleanupPreviewsAsync();
         var upperPaneHeight = defaultUpperPaneHeight;
         var settingsPaneCollapsed = false;
         var upperPaneCollapsed = false;
-        var settingsContent = new FoundryAccordion(
-            new FoundryAccordionItem("Batch", CreateBatchEditor(), isExpanded: true),
-            new FoundryAccordionItem("Page size", CreatePaperEditor(), isExpanded: true),
-            new FoundryAccordionItem("Layout", CreateLayoutEditor(), isExpanded: true));
+        var settingsItems = new List<FoundryAccordionItem>
+        {
+            new("Batch", CreateBatchEditor(), isExpanded: true),
+            new("Page size", CreatePaperEditor(), isExpanded: true),
+            new("Layout", CreateLayoutEditor(), isExpanded: true),
+        };
+        if (!_isEditMode) settingsItems.Add(new("Margins", CreateMarginsEditor(), isExpanded: true));
+        var settingsContent = new FoundryAccordion(settingsItems.ToArray());
         var settingsPane = new FoundryScrollable(settingsContent);
         var previewPane = new Panel
         {
@@ -811,6 +827,18 @@ PreviewCleanup = CleanupPreviewsAsync();
         var selectedDraftIds = SelectedDraftIds().ToHashSet();
         var plan = new BatchCreateSheetsPlanner().Plan(Request(), _snapshot);
         var changes = plan.Changes.OfType<CreateSheetFromTemplateChange>().ToArray();
+        var previewIndex = TargetDraftIndices().FirstOrDefault(-1);
+        _layoutSelectorPreview.SetPlannedTemplate(
+            previewIndex >= 0 && previewIndex < changes.Length ? changes[previewIndex].Template : null,
+            Request().ProjectInfo ?? _snapshot.ProjectInfo);
+        if (!plan.CanApply)
+        {
+            SetStatus(string.Join(" ", plan.Diagnostics.Where(item => item.Severity == DiagnosticSeverity.Error)
+                .Select(item => item.Message)));
+            _createButton.Enabled = false;
+            QueueDraftLayoutPreview();
+            return;
+        }
         var allRows = changes.Select((change, index) => new CreationPreviewRow(
             _drafts[index].DraftId,
             LayoutGroupKey.For(_drafts[index].Layout),
@@ -1196,7 +1224,10 @@ PreviewCleanup = CleanupPreviewsAsync();
             SelectedAppearanceState(_appearanceStatePicker, _appearanceStateByLabel),
             namedViews,
             detailDisplayModes,
-            detailAppearanceStates);
+            detailAppearanceStates,
+            ReadSpacing(CurrentPaper()),
+            _separateSpacing.Checked == true,
+            ReadSharedMargin(CurrentPaper()));
     }
 
     private CreationDraft DraftFromSheet(SheetSnapshot sheet)
@@ -1271,6 +1302,7 @@ PreviewCleanup = CleanupPreviewsAsync();
         RefreshPreview();
         if (!_isEditMode) QueueDraftLayoutPreview();
         if (selected.Count > 0) SelectDrafts(selected);
+        UpdateSpacingAvailability();
     }
 
     private void OnLayoutSelectionChanged(object? sender, EventArgs eventArgs)
@@ -1618,6 +1650,7 @@ PreviewCleanup = CleanupPreviewsAsync();
             return;
         }
 
+        _layoutSelectorPreview.SetPlannedTemplate(changes[targetIndex].Template, Request().ProjectInfo ?? _snapshot.ProjectInfo);
         var draft = _drafts[targetIndex];
         const int previewWidth = 640;
         var previewHeight = Math.Clamp(
@@ -1849,7 +1882,16 @@ PreviewCleanup = CleanupPreviewsAsync();
         _layoutSelectorPreview.SetPaper(paper);
         _titleBlockPreviewTray.SetPaper(paper);
         _titleBlockSelectorPreview.SetPaper(paper);
-        ApplyToTargets(draft => draft with { Paper = paper });
+        ApplyToTargets(draft => draft with
+        {
+            Paper = paper,
+            Spacing = draft.Spacing?.InUnits(paper.UnitSystem),
+            SharedMargin = draft.SharedMargin is { } shared
+                ? LayoutSpacing.Uniform(shared, draft.Paper.UnitSystem).InUnits(paper.UnitSystem).PageEdge
+                : null,
+        });
+        var target = TargetDraftIndices().FirstOrDefault(-1);
+        if (target >= 0) LoadSpacingEditors(_drafts[target]);
         if (!_isEditMode) QueueDraftLayoutPreview();
     }
 
@@ -1953,6 +1995,7 @@ PreviewCleanup = CleanupPreviewsAsync();
         foreach (var index in TargetDraftIndices())
             _drafts[index] = update(_drafts[index]);
         RefreshPreview();
+        UpdateSpacingAvailability();
     }
 
     private Guid[] SelectedDraftIds() => _previewGrid.SelectedRows
@@ -1988,6 +2031,11 @@ PreviewCleanup = CleanupPreviewsAsync();
         var selected = SelectedDraftIndices();
         UpdateSelectionHint();
         if (selected.Length > 0) LoadEditors(_drafts[selected[0]]);
+        else
+        {
+            var first = TargetDraftIndices().FirstOrDefault(-1);
+            if (first >= 0) LoadSpacingEditors(_drafts[first]);
+        }
         if (_isEditMode)
         {
             RefreshPreview(refreshDetailAssignments: false);
@@ -2479,6 +2527,7 @@ PreviewCleanup = CleanupPreviewsAsync();
             _heightStepper.Value = draft.Paper.Height;
             _unitDropDown.SelectedIndex = UnitIndex(draft.Paper.UnitSystem);
             SyncPaperSelectors(draft.Paper);
+            LoadSpacingEditors(draft);
             _layoutPreviewTray.SetPaper(draft.Paper);
             _layoutSelectorPreview.SetPaper(draft.Paper);
             _titleBlockPreviewTray.SetPaper(draft.Paper);

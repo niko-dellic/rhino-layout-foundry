@@ -62,8 +62,22 @@ public static class DocumentStateSerializer
             state.Sheets.Values.Any(sheet => !ValidTimestamps(sheet.CreatedUtc, sheet.LastModifiedUtc)))
             throw new JsonException("Hierarchy timestamps must be complete and cannot place modification before creation.");
         foreach (var sheet in state.Sheets.Values)
+        {
             if (sheet.TitleBlock is { } block && (block.InstanceObjectId == Guid.Empty || block.InstanceDefinitionId == Guid.Empty || !Enum.IsDefined(block.BuiltInKind)))
                 throw new JsonException("A managed title block has an invalid identity or built-in kind.");
+            if (sheet.TitleBlock?.Spacing is { } spacing)
+            {
+                try
+                {
+                    if (!spacing.InUnits("Millimeters").IsValid)
+                        throw new JsonException("Managed title-block spacing must be finite and zero or greater.");
+                }
+                catch (ArgumentException exception)
+                {
+                    throw new JsonException("Managed title-block spacing has unsupported units.", exception);
+                }
+            }
+        }
         if (state.TemplateRegistrations.Any(item => item is null || item.Id == Guid.Empty || item.Source.Id == Guid.Empty || item.Source.Kind is not (HierarchyScopeKind.Sheet or HierarchyScopeKind.Detail)) ||
             state.AppearanceRules.Any(item => item is null || item.LayerRules is null || item.ObjectDisplayRules is null || !ValidScope(item.Scope)) ||
             state.AppearanceStates.Any(item => item is null || item.Id == Guid.Empty || item.Name is null || !parents.ContainsKey(item.FolderId) || item.LayerRules is null || item.ObjectDisplayRules is null) ||

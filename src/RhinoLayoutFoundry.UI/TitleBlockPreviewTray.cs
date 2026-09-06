@@ -105,7 +105,10 @@ internal sealed class TitleBlockPreviewTray : Drawable
         TitleBlockChoice choice,
         PaperRecipe paper,
         RectangleF page,
-        bool showEmptyMarker = true)
+        bool showEmptyMarker = true,
+        LayoutSpacing? spacing = null,
+        ProjectInformation? project = null,
+        int detailCount = 1)
     {
         graphics.FillRectangle(FoundryTheme.WithAlpha(FoundryTheme.CanvasBorder, 55),
             page.X + 2, page.Y + 3, page.Width, page.Height);
@@ -124,7 +127,9 @@ internal sealed class TitleBlockPreviewTray : Drawable
         {
             try
             {
-                var layout = AdaptiveTitleBlockLayoutSolver.Solve(kind, paper);
+                var layout = project is null
+                    ? AdaptiveTitleBlockLayoutSolver.Solve(kind, paper)
+                    : AdaptiveTitleBlockLayoutSolver.Solve(kind, paper, project, detailCount, spacing);
                 float X(double value) => page.X + (float)(value / paper.Width * page.Width);
                 float Y(double value) => page.Bottom - (float)(value / paper.Height * page.Height);
                 float W(double value) => (float)(value / paper.Width * page.Width);

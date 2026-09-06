@@ -31,6 +31,7 @@ public enum BuiltInLayoutKind
     FourDetailsGrid,
 }
 
+[method: System.Text.Json.Serialization.JsonConstructor]
 public sealed record LayoutCreationSpec(
     int Quantity,
     PaperRecipe Paper,
@@ -43,7 +44,19 @@ public sealed record LayoutCreationSpec(
     IReadOnlyList<Guid?>? DetailDisplayModesByDetail = null,
     Guid? DetailLayerId = null,
     Guid? AppearanceStateId = null,
-    IReadOnlyList<Guid?>? AppearanceStatesByDetail = null);
+    IReadOnlyList<Guid?>? AppearanceStatesByDetail = null,
+    LayoutSpacing? Spacing = null)
+{
+    // Retain the constructor used by already-compiled companion plug-ins.
+    public LayoutCreationSpec(int Quantity, PaperRecipe Paper, BuiltInLayoutKind BuiltInLayout,
+        Guid? TemplateId, Guid? DetailDisplayModeId, BuiltInTitleBlockKind? BuiltInTitleBlock,
+        bool UseDedicatedDetailLayer, IReadOnlyList<string?>? NamedViewsByDetail,
+        IReadOnlyList<Guid?>? DetailDisplayModesByDetail, Guid? DetailLayerId,
+        Guid? AppearanceStateId, IReadOnlyList<Guid?>? AppearanceStatesByDetail)
+        : this(Quantity, Paper, BuiltInLayout, TemplateId, DetailDisplayModeId, BuiltInTitleBlock,
+            UseDedicatedDetailLayer, NamedViewsByDetail, DetailDisplayModesByDetail, DetailLayerId,
+            AppearanceStateId, AppearanceStatesByDetail, null) { }
+}
 
 public sealed record BatchCreateSheetsRequest(
     uint DocumentRuntimeSerialNumber,
@@ -202,6 +215,21 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
             return null;
         }
 
+        LayoutSpacing? spacing = null;
+        if (spec.TemplateId is null && spec.Spacing is not null)
+        {
+            try
+            {
+                spacing = spec.Spacing.InUnits(spec.Paper.UnitSystem);
+                if (!spacing.IsValid) throw new ArgumentException("Margins and gaps must be finite and zero or greater.");
+            }
+            catch (ArgumentException exception)
+            {
+                diagnostics.Add(SheetPlanValidation.Error("batch.spacing_invalid", exception.Message));
+                return null;
+            }
+        }
+
         SheetTemplateRecipe source;
         if (spec.TemplateId is { } templateId)
         {
@@ -251,14 +279,27 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
             try
             {
                 adaptiveTitleBlock = AdaptiveTitleBlockLayoutSolver.Solve(
-                    builtInKind, spec.Paper, projectInformation, source.DetailSlots.Count);
+                    builtInKind, spec.Paper, projectInformation, source.DetailSlots.Count, spacing);
                 titleBlock = new TitleBlockTemplateRecipe(
-                    builtInKind);
+                    builtInKind, spacing);
             }
             catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
             {
                 diagnostics.Add(SheetPlanValidation.Error(
                     "title_block.paper_too_small", exception.Message));
+            }
+        }
+
+        if (spacing is not null)
+        {
+            try
+            {
+                source = BuiltInTemplate(spec.BuiltInLayout, spec.Paper, spacing, adaptiveTitleBlock?.Content);
+            }
+            catch (ArgumentException exception)
+            {
+                diagnostics.Add(SheetPlanValidation.Error("batch.spacing_no_room", exception.Message));
+                return null;
             }
         }
 
@@ -318,7 +359,7 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
             }
         }
 
-        if (adaptiveTitleBlock is not null)
+        if (adaptiveTitleBlock is not null && spacing is null)
         {
             var targetContent = adaptiveTitleBlock.Content;
             if (details.Length > 0)
@@ -383,7 +424,8 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
         IReadOnlyDictionary<Guid, string> NamedViewAssignments,
         IReadOnlyDictionary<Guid, Guid> DetailAppearanceStateAssignments);
 
-    private static SheetTemplateRecipe BuiltInTemplate(BuiltInLayoutKind kind, PaperRecipe paper)
+    private static SheetTemplateRecipe BuiltInTemplate(BuiltInLayoutKind kind, PaperRecipe paper,
+        LayoutSpacing? spacing = null, TitleBlockRectangle? content = null)
     {
         var marginX = Math.Min(paper.Width, paper.Height) * 0.025;
         var marginY = marginX;
@@ -393,8 +435,21 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
         var top = paper.Height - marginY;
         var gapX = paper.Width * 0.02;
         var gapY = paper.Height * 0.02;
-        var midX = paper.Width / 2;
-        var midY = paper.Height / 2;
+        if (spacing is not null)
+        {
+            left = content?.Left ?? spacing.PageEdge;
+            right = content?.Right ?? paper.Width - spacing.PageEdge;
+            bottom = content?.Bottom ?? spacing.PageEdge;
+            top = content?.Top ?? paper.Height - spacing.PageEdge;
+            gapX = gapY = spacing.DetailGap;
+            var columns = kind is BuiltInLayoutKind.TwoDetailsVertical or BuiltInLayoutKind.FourDetailsGrid ? 2 : 1;
+            var rows = kind is BuiltInLayoutKind.TwoDetailsHorizontal or BuiltInLayoutKind.FourDetailsGrid ? 2 : 1;
+            if (kind != BuiltInLayoutKind.Blank &&
+                (right - left - (columns - 1) * gapX <= 0 || top - bottom - (rows - 1) * gapY <= 0))
+                throw new ArgumentException("Margins and gaps leave no room for details. Reduce the spacing or choose larger paper.");
+        }
+        var midX = (left + right) / 2;
+        var midY = (bottom + top) / 2;
         DetailSlotRecipe Slot(string name, double x1, double y1, double x2, double y2) =>
             new(Guid.NewGuid(), name, x1, y1, x2, y2, "Top", null, false, null, null);
         IReadOnlyList<DetailSlotRecipe> details = kind switch

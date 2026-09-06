@@ -460,12 +460,12 @@ internal sealed partial class RhinoMutationExecutor
                 var sheetData = sheet.TitleBlockData ?? new SheetTitleBlockData(string.Empty, []);
                 var instanceId = CreateManagedTitleBlock(document, page, paper, managedKind,
                     stateBefore.ProjectInfo, sheetData,
-                    page.GetDetailViews().Select(detail => CaptureDetail(document, detail)).ToArray());
+                    page.GetDetailViews().Select(detail => CaptureDetail(document, detail)).ToArray(), sheet.TitleBlock?.Spacing);
                 createdTitleBlockIds.Add(instanceId);
                 var instance = document.Objects.FindId(instanceId) as InstanceObject
                     ?? throw new InvalidOperationException("Rhino could not resolve the generated title block.");
                 role = new TitleBlockRole(InstanceObjectId: instanceId, InstanceDefinitionId: instance.InstanceDefinition.Id,
-                    BuiltInKind: managedKind);
+                    BuiltInKind: managedKind, Spacing: sheet.TitleBlock?.Spacing);
             }
             newRoles[page.MainViewport.Id] = role;
         }
@@ -502,7 +502,7 @@ internal sealed partial class RhinoMutationExecutor
             var sheetData = record.TitleBlockData ?? new SheetTitleBlockData(string.Empty, []);
             var replacementId = CreateManagedTitleBlock(document, page, paper, kind,
                 stateBefore.ProjectInfo, sheetData,
-                page.GetDetailViews().Select(detail => CaptureDetail(document, detail)).ToArray());
+                page.GetDetailViews().Select(detail => CaptureDetail(document, detail)).ToArray(), record.TitleBlock.Spacing);
             createdTitleBlockIds.Add(replacementId);
             var replacement = document.Objects.FindId(replacementId) as InstanceObject
                 ?? throw new InvalidOperationException("Rhino could not resolve the resized title block.");

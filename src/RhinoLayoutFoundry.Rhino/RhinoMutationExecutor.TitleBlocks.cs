@@ -22,7 +22,7 @@ internal sealed partial class RhinoMutationExecutor
         SheetTitleBlockData sheetData,
         IReadOnlyList<DetailSlotRecipe> details)
     {
-        return CreateManagedTitleBlock(document, page, paper, titleBlock.BuiltInKind, projectInfo, sheetData, details);
+        return CreateManagedTitleBlock(document, page, paper, titleBlock.BuiltInKind, projectInfo, sheetData, details, titleBlock.Spacing);
     }
 
     private OperationResult ApplyProjectInformation(
@@ -60,7 +60,7 @@ internal sealed partial class RhinoMutationExecutor
                 var paper = new PaperRecipe(page.PageWidth, page.PageHeight, document.PageUnitSystem.ToString());
                 var sheetData = pair.Value.TitleBlockData ?? new SheetTitleBlockData(string.Empty, []);
                 var replacementId = CreateManagedTitleBlock(
-                    document, page, paper, kind, change.NewInformation, sheetData, details);
+                    document, page, paper, kind, change.NewInformation, sheetData, details, role.Spacing);
                 createdIds.Add(replacementId);
                 var replacement = document.Objects.FindId(replacementId) as InstanceObject
                     ?? throw new InvalidOperationException("Rhino could not find the refreshed title block.");
@@ -114,11 +114,12 @@ internal sealed partial class RhinoMutationExecutor
         BuiltInTitleBlockKind kind,
         ProjectInformation projectInfo,
         SheetTitleBlockData sheetData,
-        IReadOnlyList<DetailSlotRecipe> details)
+        IReadOnlyList<DetailSlotRecipe> details,
+        LayoutSpacing? spacing = null)
     {
         var recipeUnit = ParseUnitSystem(paper.UnitSystem);
         var pageScale = RhinoMath.UnitScale(recipeUnit, document.PageUnitSystem);
-        var layout = AdaptiveTitleBlockLayoutSolver.Solve(kind, paper, projectInfo, details.Count);
+        var layout = AdaptiveTitleBlockLayoutSolver.Solve(kind, paper, projectInfo, details.Count, spacing);
         var definitionName = $"RLF {layout.Signature.Replace(':', '-')}";
         var definition = document.InstanceDefinitions.Find(definitionName);
         if (definition is null)

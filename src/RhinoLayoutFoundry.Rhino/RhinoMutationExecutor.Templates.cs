@@ -101,7 +101,8 @@ internal sealed partial class RhinoMutationExecutor
                         ? new TitleBlockRole(
                             InstanceObjectId: instanceId,
                             InstanceDefinitionId: placedDefinitionId,
-                            BuiltInKind: block.BuiltInKind)
+                            BuiltInKind: block.BuiltInKind,
+                            Spacing: block.Spacing)
                         : null,
                     TitleBlockData: titleBlockData,
                     NamingBinding: string.IsNullOrWhiteSpace(create.NamingPattern)

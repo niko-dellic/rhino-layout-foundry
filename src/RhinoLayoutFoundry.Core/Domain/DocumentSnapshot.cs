@@ -34,6 +34,7 @@ public sealed record DocumentSnapshot(
     public Guid? DedicatedDetailLayerId { get; init; }
     public ModelBoundsSnapshot? ModelBounds { get; init; }
     public Guid? ActiveViewportDisplayModeId { get; init; }
+    public string PageUnitSystem { get; init; } = "Millimeters";
 }
 
 public sealed record SheetSnapshot(
@@ -55,6 +56,7 @@ public sealed record SheetSnapshot(
     SheetNamingBinding? NamingBinding = null,
     string Notes = "")
 {
+    public LayoutSpacing? TitleBlockSpacing { get; init; }
     public IReadOnlyList<DetailSnapshot> Details => DetailSettings ?? [];
     public IReadOnlyDictionary<Guid, string> DetailNamedViews { get; init; } = new Dictionary<Guid, string>();
 }

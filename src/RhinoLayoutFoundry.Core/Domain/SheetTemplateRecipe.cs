@@ -42,5 +42,10 @@ public sealed record DetailSlotRecipe(
 }
 
 /// <summary>Built-in title-block intent; native definitions are created by the host.</summary>
+[method: System.Text.Json.Serialization.JsonConstructor]
 public sealed record TitleBlockTemplateRecipe(
-    BuiltInTitleBlockKind BuiltInKind);
+    BuiltInTitleBlockKind BuiltInKind,
+    LayoutSpacing? Spacing = null)
+{
+    public TitleBlockTemplateRecipe(BuiltInTitleBlockKind BuiltInKind) : this(BuiltInKind, null) { }
+}
