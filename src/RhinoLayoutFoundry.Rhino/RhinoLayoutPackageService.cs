@@ -235,7 +235,12 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
                 namedViewMap,
                 resolutions,
                 warnings);
-            _stateStore.Set(document, importedState);
+            var stampedState = HierarchyRecordTimestamps.ApplyChanges(
+                _stateStore.BackfillHierarchyDates(document, beforeState),
+                importedState,
+                DateTimeOffset.UtcNow);
+            _stateStore.Set(document,
+                _stateStore.BackfillHierarchyDates(document, stampedState));
             cancellationToken.ThrowIfCancellationRequested();
             if (createRecovery) _checkpoint?.Invoke("metadata");
             document.Modified = true;

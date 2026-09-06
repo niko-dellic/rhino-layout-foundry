@@ -44,6 +44,15 @@ internal sealed class DocumentStateStore
             new(DocumentStateLoadStatus.Loaded, state), null);
     }
 
+    public DocumentState BackfillHierarchyDates(RhinoDoc document, DocumentState state)
+    {
+        var fallback = LegacyHierarchyDates(document);
+        return HierarchyRecordTimestamps.BackfillMissing(
+            state,
+            fallback.CreatedUtc,
+            fallback.LastModifiedUtc);
+    }
+
     internal Action CaptureRestoreAction(RhinoDoc document)
     {
         var original = Find(document);
@@ -62,9 +71,10 @@ internal sealed class DocumentStateStore
         }
         if (!entry.Loaded.CanWrite)
             throw new InvalidOperationException("Foundry cannot safely save an unreadable metadata archive. Save a recovery copy of the original file.");
+        var state = BackfillHierarchyDates(document, entry.Loaded.State);
         var envelope = new ArchivableDictionary(1, "RhinoLayoutFoundry.DocumentState");
         envelope.Set(SchemaVersionKey, DocumentState.CurrentSchemaVersion);
-        envelope.Set(PayloadKey, DocumentStateSerializer.Serialize(entry.Loaded.State));
+        envelope.Set(PayloadKey, DocumentStateSerializer.Serialize(state));
         archive.WriteDictionary(envelope);
     }
 
@@ -86,6 +96,33 @@ internal sealed class DocumentStateStore
         }
         _entries[document.RuntimeSerialNumber] = new(loaded, envelope);
         if (loaded.Diagnostic is { } diagnostic) RhinoApp.WriteLine(diagnostic);
+    }
+
+    private static (DateTimeOffset CreatedUtc, DateTimeOffset LastModifiedUtc) LegacyHierarchyDates(
+        RhinoDoc document)
+    {
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(document.Path))
+            {
+                var file = new FileInfo(document.Path);
+                if (file.Exists)
+                {
+                    file.Refresh();
+                    return (new DateTimeOffset(file.CreationTimeUtc),
+                        new DateTimeOffset(file.LastWriteTimeUtc));
+                }
+            }
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or
+            System.Security.SecurityException or ArgumentException or NotSupportedException)
+        {
+            // A legacy record can still use the time at which Foundry first observed it.
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        return (now, now);
     }
 
     private sealed record Entry(DocumentStateLoadResult Loaded, ArchivableDictionary? OriginalEnvelope);

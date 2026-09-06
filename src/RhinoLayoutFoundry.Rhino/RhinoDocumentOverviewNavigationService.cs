@@ -59,7 +59,7 @@ internal sealed class RhinoDocumentOverviewNavigationService : IDocumentOverview
 
         var document = lookup.Document!;
         var source = lookup.Page!;
-        var beforeState = _stateStore.Get(document);
+        var beforeState = _stateStore.BackfillHierarchyDates(document, _stateStore.Get(document));
         var duplicate = source.Duplicate(duplicatePageGeometry: true);
         if (duplicate is null)
         {
@@ -83,7 +83,10 @@ internal sealed class RhinoDocumentOverviewNavigationService : IDocumentOverview
             PageViewId = duplicate.MainViewport.Id,
             Order = nextOrder,
         };
-        _stateStore.Set(document, _stateStore.Reconcile(document, beforeState with { Sheets = sheets }));
+        var nextState = _stateStore.Reconcile(document, beforeState with { Sheets = sheets });
+        var stamped = HierarchyRecordTimestamps.ApplyChanges(
+            beforeState, nextState, DateTimeOffset.UtcNow);
+        _stateStore.Set(document, _stateStore.BackfillHierarchyDates(document, stamped));
         document.Modified = true;
         _revisionTracker.Bump(document);
         document.Views.ActiveView = duplicate;
@@ -143,6 +146,9 @@ internal sealed class RhinoDocumentOverviewNavigationService : IDocumentOverview
 
         var beforeName = page.PageName;
         var beforeState = _stateStore.Get(document);
+        var trackedBeforeState = _stateStore.BackfillHierarchyDates(
+            document,
+            EnsureSheetRecord(beforeState, sheetPageViewId));
         page.PageName = trimmedName;
         if (!string.Equals(page.PageName, trimmedName, StringComparison.Ordinal))
         {
@@ -151,12 +157,18 @@ internal sealed class RhinoDocumentOverviewNavigationService : IDocumentOverview
 
         try
         {
-            if (beforeState.Sheets.TryGetValue(sheetPageViewId, out var record) && record.NamingBinding is not null)
+            var sheets = trackedBeforeState.Sheets.ToDictionary(pair => pair.Key, pair => pair.Value);
+            if (sheets.TryGetValue(sheetPageViewId, out var record) && record.NamingBinding is not null)
             {
-                var sheets = beforeState.Sheets.ToDictionary(pair => pair.Key, pair => pair.Value);
                 sheets[sheetPageViewId] = record with { NamingBinding = null };
-                _stateStore.Set(document, beforeState with { Sheets = sheets });
             }
+            var nextState = trackedBeforeState with { Sheets = sheets };
+            var stamped = HierarchyRecordTimestamps.ApplyChanges(
+                trackedBeforeState,
+                nextState,
+                DateTimeOffset.UtcNow,
+                touchedSheetIds: new HashSet<Guid> { sheetPageViewId });
+            _stateStore.Set(document, _stateStore.BackfillHierarchyDates(document, stamped));
         }
         catch (Exception exception)
         {
@@ -170,6 +182,19 @@ internal sealed class RhinoDocumentOverviewNavigationService : IDocumentOverview
         _revisionTracker.Bump(document);
         page.Redraw();
         return new OverviewNavigationResult(true);
+    }
+
+    private static DocumentState EnsureSheetRecord(DocumentState state, Guid pageViewId)
+    {
+        if (state.Sheets.ContainsKey(pageViewId)) return state;
+        var sheets = state.Sheets.ToDictionary(pair => pair.Key, pair => pair.Value);
+        sheets[pageViewId] = new SheetRecord(
+            PageViewId: pageViewId,
+            FolderId: state.RootFolderId,
+            Order: sheets.Count,
+            Metadata: new Dictionary<string, string>(StringComparer.Ordinal),
+            TitleBlock: null);
+        return state with { Sheets = sheets };
     }
 
     public OverviewNavigationResult RunSheetCommand(Guid sheetPageViewId, LayoutSheetCommand command)

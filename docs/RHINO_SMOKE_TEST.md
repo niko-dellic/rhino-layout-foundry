@@ -1,15 +1,16 @@
 # Native smoke checks for the current candidate
 
-Use fresh schema-16 fixtures and package-6 archives. Record the platform, Rhino version, candidate hash, and pass/fail evidence. Historical fixture compatibility is outside acceptance. The release gate is TESTING_AND_RELEASE.md.
+Use fresh schema-17 fixtures and package-6 archives. Retain one schema-16 document to verify the supported timestamp migration. Record the platform, Rhino version, candidate hash, and pass/fail evidence. Other historical fixture compatibility is outside acceptance. The release gate is TESTING_AND_RELEASE.md.
 
 ## Creation, templates, and title blocks
 
 1. Create a fresh model containing model geometry, named views, two layouts with different page sizes, details, annotations, and an ordinary page-space block.
 2. Open LayoutFoundry. Register a sheet and a detail through the shared template checkbox. Confirm folders have no template role. Change the source page/detail and reopen creation; confirm its template follows the edit. Delete a source and confirm it disappears from choices.
-3. Create Blank, Single Detail, both Two Detail arrangements, Four Detail Grid, and a live source template. Set quantity, destination, naming pattern, paper, per-detail named views/display modes/appearance states. Confirm the review table and resulting layouts agree.
+3. Create Blank, Single Detail, both Two Detail arrangements, Four Detail Grid, and a live source template. Set quantity, destination, naming pattern, paper, per-detail named views/display modes/appearance states. Before opening the per-detail editor, set the active model viewport to a distinctive perspective camera; wait for the named-view gallery to finish loading and confirm the active view, camera, projection, and display mode do not change. Confirm the review table and resulting layouts agree.
 4. Test None, Right, and Bottom title blocks. Update project fields, per-sheet numbers and revisions. Confirm only Foundry-generated blocks are managed. Ordinary block instances must remain ordinary page objects.
 5. Test equivalent metric/imperial paper and scales, named-view count validation, unavailable sources, and stale drafts. Confirm cancellation/failed creation cleans temporary resources and respects the declared Undo policy.
 6. Save, close, reopen, and Save As. Confirm current hierarchy, registration, appearance, naming bindings, project data, revisions, and Canvas placements survive.
+7. Confirm Created and Last modified are populated for folders and sheets. Create one of each, record their matching initial times, then rename or edit each and confirm only Last modified advances. Open the schema-16 fixture without editing and confirm its rows show the 3DM file-date fallback; perform one intentional Foundry edit, save/reopen, and confirm schema-17 JSON now contains `CreatedUtc` and `LastModifiedUtc` key/value pairs.
 
 ## UI and gestures
 

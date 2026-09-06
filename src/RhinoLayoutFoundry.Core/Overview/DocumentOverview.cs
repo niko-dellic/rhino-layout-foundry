@@ -34,7 +34,9 @@ public sealed record FolderOverview(
     int Order,
     ViewportAppearanceSummary? Appearance = null,
     AppearanceStateBindingOverview? AppearanceState = null,
-    string Notes = "");
+    string Notes = "",
+    DateTimeOffset? CreatedUtc = null,
+    DateTimeOffset? LastModifiedUtc = null);
 
 public sealed record SheetOverview(
     Guid PageViewId,
@@ -50,7 +52,9 @@ public sealed record SheetOverview(
     bool IsTemplate = false,
     ViewportAppearanceSummary? Appearance = null,
     AppearanceStateBindingOverview? AppearanceState = null,
-    string Notes = "")
+    string Notes = "",
+    DateTimeOffset? CreatedUtc = null,
+    DateTimeOffset? LastModifiedUtc = null)
 {
     public int DetailCount => Details.Count;
 

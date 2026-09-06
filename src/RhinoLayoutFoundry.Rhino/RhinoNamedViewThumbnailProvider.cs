@@ -70,30 +70,25 @@ internal sealed class RhinoNamedViewThumbnailProvider : INamedViewThumbnailProvi
         if (namedViewIndex < 0)
             return Failure(request, "The named view no longer exists.");
 
-        // Use an existing standard view as Rhino's display pipeline requires a
-        // live RhinoView. Capture through the same ViewCaptureSettings pipeline
-        // as sheet thumbnails so display modes and viewport appearance overrides
-        // are evaluated by Rhino rather than approximated by the Foundry UI.
+        // A standalone RhinoViewport is supported by Rhino's image-creation
+        // pipeline and keeps gallery rendering isolated from the user's camera.
+        // Do not restore a named view into a live model viewport here: Rhino can
+        // paint that intermediate projection while this asynchronous gallery is
+        // loading, even if the original projection is restored afterward.
         var fallbackDisplayModeId = document.Views.ActiveView?.ActiveViewport.DisplayMode.Id;
-        var view = document.Views.GetStandardRhinoViews().FirstOrDefault();
-        if (view is null)
-            return Failure(request, "No standard Rhino viewport is available for preview capture.");
-        using var previous = new ViewInfo(view.ActiveViewport);
-        var previousDisplayModeId = view.ActiveViewport.DisplayMode.Id;
+        var requestedSize = new System.Drawing.Size(request.Key.Width, request.Key.Height);
+        using var previewViewport = new RhinoViewport
+        {
+            Size = requestedSize,
+        };
         var layerBefore = new Dictionary<Guid, Layer>();
         var objectBefore = new Dictionary<Guid, ObjectAttributes>();
         DisplayModeDescription? requestedDisplayMode = null;
         using var session = new RhinoPreviewSession(document);
         session.Restore("Dispose requested display mode", () => requestedDisplayMode?.Dispose());
-        session.Restore("Restore viewport display mode", () =>
-        {
-            using var mode = DisplayModeDescription.GetDisplayMode(previousDisplayModeId);
-            if (mode is not null) view.ActiveViewport.DisplayMode = mode;
-        });
-        session.Restore("Restore viewport camera", () => view.ActiveViewport.SetViewProjection(previous.Viewport, false));
         session.Restore("Restore named-view appearance", () =>
             RhinoPreviewSession.RestoreAppearance(document, layerBefore, objectBefore));
-        if (!document.NamedViews.RestoreWithAspectRatio(namedViewIndex, view.ActiveViewport))
+        if (!document.NamedViews.RestoreWithAspectRatio(namedViewIndex, previewViewport))
             return Failure(request, "Rhino could not restore the named view for preview capture.");
         var effectiveDisplayModeId = request.Key.DisplayModeId ?? fallbackDisplayModeId;
         if (effectiveDisplayModeId is { } displayModeId)
@@ -101,19 +96,19 @@ internal sealed class RhinoNamedViewThumbnailProvider : INamedViewThumbnailProvi
             requestedDisplayMode = DisplayModeDescription.GetDisplayMode(displayModeId);
             if (requestedDisplayMode is null)
                 return Failure(request, "The requested display mode is unavailable.");
-            view.ActiveViewport.DisplayMode = requestedDisplayMode;
+            previewViewport.DisplayMode = requestedDisplayMode;
         }
 
         ApplyAppearance(
             document,
-            view.ActiveViewport.Id,
+            previewViewport.Id,
             request.Appearance,
             layerBefore,
             objectBefore);
 
-        var requestedSize = new System.Drawing.Size(request.Key.Width, request.Key.Height);
-        using var captureSettings = new ViewCaptureSettings(view, requestedSize, 96)
+        using var captureSettings = new ViewCaptureSettings
         {
+            Document = document,
             DrawBackground = false,
             DrawBackgroundBitmap = false,
             DrawWallpaper = false,
@@ -124,6 +119,7 @@ internal sealed class RhinoNamedViewThumbnailProvider : INamedViewThumbnailProvi
             UsePrintWidths = false,
             ApplyDisplayModeThicknessScales = true,
         };
+        captureSettings.SetViewport(previewViewport);
         captureSettings.SetLayout(
             requestedSize,
             new System.Drawing.Rectangle(System.Drawing.Point.Empty, requestedSize));

@@ -15,7 +15,7 @@ internal enum SelectionInspectorContent
 
 internal sealed class SelectionInspectorPanel : Panel
 {
-    internal const int OverlayWidth = 344;
+    internal const int DefaultOverlayWidth = 420;
     private const string Mixed = "Mixed";
     private const string CustomPaperPreset = "Custom";
     private const int NamedViewThumbnailMinimum = 64;
@@ -27,7 +27,7 @@ internal sealed class SelectionInspectorPanel : Panel
     private readonly TextBox _name = new();
     private readonly TextArea _notes = new() { Height = 72, Wrap = true };
     private readonly FoundryDialogButton _saveNotes = new("Save notes", FoundryDialogButtonStyle.Secondary, 100);
-    private readonly Label _notesMixed = FoundryTheme.MutedLabel("Mixed notes — saving replaces all selected notes.");
+    private readonly Label _notesMixed = Hint("Mixed notes — saving replaces all selected notes.");
     private readonly Label _selectionError = ErrorLabel();
     private readonly Panel _selectionSection;
     private readonly FoundryCheckBox _print = new("Include in Print all");
@@ -35,7 +35,7 @@ internal sealed class SelectionInspectorPanel : Panel
     private readonly NumericStepper _paperWidth = DimensionStepper();
     private readonly NumericStepper _paperHeight = DimensionStepper();
     private readonly DropDown _paperUnit = new();
-    private readonly Label _paperMixed = FoundryTheme.MutedLabel("Mixed — enter a complete size to apply to all affected layouts.");
+    private readonly Label _paperMixed = Hint("Mixed — enter a complete size to apply to all affected layouts.");
     private readonly FilteredPicker _titleBlock = new([], "Search title blocks");
     private readonly FoundryTextSegmentedControl _titleBlockMode = new(["None", "Right", "Bottom"], 0, 72);
     private readonly FoundryCheckBox _templateRegistration = new("Use as layout template");
@@ -45,6 +45,7 @@ internal sealed class SelectionInspectorPanel : Panel
     private readonly FoundryDialogButton _revisionAction = new("Save", FoundryDialogButtonStyle.Secondary, 92);
     private readonly Label _layoutError = ErrorLabel();
     private readonly Panel _layoutSection;
+    private readonly StackLayout _paperDimensions;
     private readonly FilteredPicker _displayMode = new([], "Search display modes");
     private readonly Label _detailError = ErrorLabel();
     private readonly Panel _detailSection;
@@ -113,7 +114,7 @@ internal sealed class SelectionInspectorPanel : Panel
 
     internal SelectionInspectorPanel(SelectionInspectorContent contentMode = SelectionInspectorContent.All)
     {
-        Width = contentMode == SelectionInspectorContent.All ? OverlayWidth : 720;
+        Width = contentMode == SelectionInspectorContent.All ? DefaultOverlayWidth : 720;
         BackgroundColor = FoundryTheme.CanvasOverlayBackground;
         Padding = new Padding(FoundryTheme.Space3);
 
@@ -138,8 +139,8 @@ internal sealed class SelectionInspectorPanel : Panel
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Items =
             {
-_templateRegistration,
-                FoundryTheme.MutedLabel("Register this hierarchy item as a live capability source."),
+                _templateRegistration,
+                Hint("Register this hierarchy item as a live capability source."),
                 _templateError,
             },
         });
@@ -151,6 +152,18 @@ _templateRegistration,
         _selectionSummary.Wrap = WrapMode.Word;
         _paperMixed.Wrap = WrapMode.Word;
         _revisions.ToolTip = "One row per line: Code | Date | Description | Issued by | Checked by";
+        _paperDimensions = new StackLayout
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = FoundryTheme.Space1,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            VerticalContentAlignment = VerticalAlignment.Top,
+            Items =
+            {
+                new StackLayoutItem(Field("Width", InspectorField(_paperWidth)), true),
+                new StackLayoutItem(Field("Height", InspectorField(_paperHeight)), true),
+            },
+        };
         _layoutSection = Section("Layouts", new StackLayout
         {
             Spacing = FoundryTheme.Space2,
@@ -160,18 +173,7 @@ _templateRegistration,
                 _print,
                 Field("Paper preset", InspectorField(_paperPreset)),
                 _paperMixed,
-                new StackLayout
-                {
-                    Orientation = Orientation.Horizontal,
-                    Spacing = FoundryTheme.Space1,
-                    HorizontalContentAlignment = HorizontalAlignment.Stretch,
-                    VerticalContentAlignment = VerticalAlignment.Top,
-                    Items =
-                    {
-                        new StackLayoutItem(Field("Width", InspectorField(_paperWidth)), true),
-                        new StackLayoutItem(Field("Height", InspectorField(_paperHeight)), true),
-                    },
-                },
+                _paperDimensions,
                 Field("Units", InspectorField(_paperUnit)),
                 Field("Title block", _titleBlockMode),
                 _layoutError,
@@ -203,7 +205,7 @@ _templateRegistration,
                     Items = { _assignAppearanceState, _inheritAppearanceState },
                 },
                 _editAppearanceOverrides,
-                FoundryTheme.MutedLabel("The assigned state is the basis; local rules override it without detaching."),
+                Hint("The assigned state is the basis; local rules override it without detaching."),
                 _appearanceError,
             },
         });
@@ -252,7 +254,7 @@ _templateRegistration,
                     Items = { _layersInherit, _layersOn, _layersOff },
                 },
                 _clearLayerOverrides,
-                FoundryTheme.MutedLabel("Folder and layout rules apply to descendant detail viewports. Child overrides are preserved."),
+                Hint("Folder and layout rules apply to descendant detail viewports. Child overrides are preserved."),
                 _layersError,
             },
         });
@@ -300,7 +302,7 @@ _templateRegistration,
                 _addLayerRule,
                 _objectRules,
                 _removeObjectRule,
-                FoundryTheme.MutedLabel("Exact objects override layer selectors. Missing imported object IDs remain visible as unresolved rules."),
+                Hint("Exact objects override layer selectors. Missing imported object IDs remain visible as unresolved rules."),
                 _objectsError,
             },
         });
@@ -396,13 +398,9 @@ _templateRegistration,
                 _namedViewSection,
             },
         };
-        Content = new Scrollable
-        {
-            Border = BorderType.None,
-            ExpandContentWidth = true,
-            ExpandContentHeight = false,
-            Content = content,
-        };
+        Content = new FoundryScrollable(content);
+        SizeChanged += (_, _) => UpdateResponsiveLayout();
+        UpdateResponsiveLayout();
 
         if (contentMode != SelectionInspectorContent.All)
         {
@@ -1143,7 +1141,7 @@ _templateRegistration.Checked != true ? "Template registration cleared." : "Temp
     {
         var availableWidth = _namedViewThumbnailBrowser.ClientSize.Width > 1
             ? _namedViewThumbnailBrowser.ClientSize.Width
-            : OverlayWidth - FoundryTheme.Space3 * 2 - FoundryTheme.Space1;
+            : DefaultOverlayWidth - FoundryTheme.Space3 * 2 - FoundryTheme.Space1;
         _namedViewThumbnailGrid.SetLayout(
             availableWidth,
             _namedViewThumbnailSize.Value,
@@ -1222,6 +1220,22 @@ _templateRegistration.Checked != true ? "Template registration cleared." : "Temp
         Wrap = WrapMode.Word,
         Visible = false,
     };
+
+    private static Label Hint(string text)
+    {
+        var label = FoundryTheme.MutedLabel(text);
+        label.Wrap = WrapMode.Word;
+        return label;
+    }
+
+    private void UpdateResponsiveLayout()
+    {
+        var orientation = ClientSize.Width > 1 && ClientSize.Width < 390
+            ? Orientation.Vertical
+            : Orientation.Horizontal;
+        if (_paperDimensions.Orientation == orientation) return;
+        _paperDimensions.Orientation = orientation;
+    }
 
     private static void ShowError(Label label, string text)
     {

@@ -24,6 +24,31 @@ internal sealed partial class RhinoMutationExecutor(
 
     internal OperationResult Apply(RhinoDoc document, OperationPlan plan)
     {
+        var before = _stateStore.BackfillHierarchyDates(
+            document,
+            WithCurrentPageRecords(document, _stateStore.Get(document)));
+        var result = ApplyCore(document, plan);
+        if (!result.Succeeded) return result;
+
+        var after = _stateStore.BackfillHierarchyDates(
+            document,
+            WithCurrentPageRecords(document, _stateStore.Get(document)));
+        var (folderIds, sheetIds) = TimestampTargets(document, plan, after);
+        var stamped = HierarchyRecordTimestamps.ApplyChanges(
+            before,
+            after,
+            DateTimeOffset.UtcNow,
+            folderIds,
+            sheetIds);
+        _stateStore.Set(document, stamped);
+        _overviewChanged(new OverviewInvalidation(
+            document.RuntimeSerialNumber,
+            OverviewInvalidationKind.Metadata));
+        return result;
+    }
+
+    private OperationResult ApplyCore(RhinoDoc document, OperationPlan plan)
+    {
         return plan.Changes switch
         {
             [CreateNamedViewChange createNamedView] =>
@@ -61,6 +86,119 @@ internal sealed partial class RhinoMutationExecutor(
             _ => Failure("operation.unsupported_plan", "The operation plan is not supported by this build."),
         };
     }
+
+    private static (IReadOnlySet<Guid> FolderIds, IReadOnlySet<Guid> SheetIds) TimestampTargets(
+        RhinoDoc document,
+        OperationPlan plan,
+        DocumentState after)
+    {
+        var folderIds = new HashSet<Guid>();
+        var sheetIds = new HashSet<Guid>();
+        var detailParents = document.Views.GetPageViews()
+            .SelectMany(page => page.GetDetailViews()
+                .Select(detail => (detail.Viewport.Id, PageId: page.MainViewport.Id)))
+            .ToDictionary(pair => pair.Id, pair => pair.PageId);
+
+        void AddScope(HierarchyScope scope)
+        {
+            switch (scope.Kind)
+            {
+                case HierarchyScopeKind.Folder:
+                    folderIds.Add(scope.Id);
+                    break;
+                case HierarchyScopeKind.Sheet:
+                    sheetIds.Add(scope.Id);
+                    break;
+                case HierarchyScopeKind.Detail when detailParents.TryGetValue(scope.Id, out var pageId):
+                    sheetIds.Add(pageId);
+                    break;
+            }
+        }
+
+        foreach (var change in plan.Changes)
+        {
+            switch (change)
+            {
+                case RenameSheetChange rename:
+                    sheetIds.Add(rename.PageViewId);
+                    break;
+                case UpdateLinkedSheetNamesChange linked:
+                    sheetIds.UnionWith(linked.NewNames.Keys);
+                    break;
+                case RenameFolderChange rename:
+                    folderIds.Add(rename.FolderId);
+                    break;
+                case MoveFolderChange move:
+                    folderIds.Add(move.FolderId);
+                    break;
+                case MoveSheetChange move:
+                    sheetIds.Add(move.PageViewId);
+                    break;
+                case ReorganizeHierarchyChange reorganize:
+                    folderIds.UnionWith(reorganize.NewFolders.Select(item => item.FolderId));
+                    sheetIds.UnionWith(reorganize.NewSheets.Select(item => item.PageViewId));
+                    break;
+                case BatchUpdateSheetsChange batch:
+                    sheetIds.UnionWith(batch.SheetPageViewIds);
+                    break;
+                case UpdateDetailDisplayModesChange details:
+                    foreach (var id in details.DetailViewportIds)
+                        if (detailParents.TryGetValue(id, out var pageId)) sheetIds.Add(pageId);
+                    break;
+                case AssignNamedViewToDetailsChange details:
+                    foreach (var id in details.DetailViewportIds)
+                        if (detailParents.TryGetValue(id, out var pageId)) sheetIds.Add(pageId);
+                    break;
+                case SetPrintInclusionChange print:
+                    sheetIds.UnionWith(print.ExpectedValues.Keys);
+                    break;
+                case UpdateHierarchyNotesChange notes:
+                    folderIds.UnionWith(notes.NewFolderNotes.Keys);
+                    sheetIds.UnionWith(notes.NewSheetNotes.Keys);
+                    break;
+                case ReorderSheetsChange reorder:
+                    sheetIds.UnionWith(reorder.NewOrders.Keys);
+                    break;
+                case SetObserverCanvasStateChange canvas:
+                    folderIds.UnionWith(ChangedPlacementIds(
+                        canvas.ExpectedState.FolderOrigins,
+                        canvas.NewState.FolderOrigins));
+                    sheetIds.UnionWith(ChangedPlacementIds(
+                        canvas.ExpectedState.SheetPlacements,
+                        canvas.NewState.SheetPlacements));
+                    break;
+                case SetHierarchyViewportRulesChange rules:
+                    AddScope(rules.Scope);
+                    break;
+                case SetLayoutTemplateRegistrationChange registration:
+                    AddScope(registration.Source);
+                    break;
+                case SetAppearanceStateAssignmentChange assignment:
+                    AddScope(assignment.Target);
+                    break;
+                case SetAppearanceStateResourceChange resource:
+                    var owner = resource.NewState?.FolderId ?? resource.ExpectedState?.FolderId;
+                    if (owner is { } folderId) folderIds.Add(folderId);
+                    break;
+                case UpdateProjectInformationChange:
+                    sheetIds.UnionWith(after.Sheets.Keys);
+                    break;
+            }
+        }
+
+        // New records are stamped by ApplyChanges; deleted records need no audit entry.
+        folderIds.IntersectWith(after.Folders.Select(folder => folder.Id));
+        sheetIds.IntersectWith(after.Sheets.Keys);
+        return (folderIds, sheetIds);
+    }
+
+    private static IEnumerable<Guid> ChangedPlacementIds(
+        IReadOnlyDictionary<Guid, ObserverPointRecord> before,
+        IReadOnlyDictionary<Guid, ObserverPointRecord> after) =>
+        before.Keys.Concat(after.Keys).Distinct().Where(id =>
+            !before.TryGetValue(id, out var prior) ||
+            !after.TryGetValue(id, out var next) ||
+            prior != next);
 
     private static bool IsDocumentStateChange(OperationChange change)
     {

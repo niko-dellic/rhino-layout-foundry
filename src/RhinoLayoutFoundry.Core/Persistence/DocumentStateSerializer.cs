@@ -58,6 +58,9 @@ public static class DocumentStateSerializer
         }
         if (state.Sheets.Any(pair => pair.Key == Guid.Empty || pair.Key != pair.Value.PageViewId || !parents.ContainsKey(pair.Value.FolderId) || pair.Value.Metadata is null || pair.Value.DetailNamedViews is null || pair.Value.NamingBinding is { NamedViewAssignments: null } || pair.Value.TitleBlockData is { Revisions: null }))
             throw new JsonException("A sheet has invalid identity, parent, or required collections.");
+        if (state.Folders.Any(folder => !ValidTimestamps(folder.CreatedUtc, folder.LastModifiedUtc)) ||
+            state.Sheets.Values.Any(sheet => !ValidTimestamps(sheet.CreatedUtc, sheet.LastModifiedUtc)))
+            throw new JsonException("Hierarchy timestamps must be complete and cannot place modification before creation.");
         foreach (var sheet in state.Sheets.Values)
             if (sheet.TitleBlock is { } block && (block.InstanceObjectId == Guid.Empty || block.InstanceDefinitionId == Guid.Empty || !Enum.IsDefined(block.BuiltInKind)))
                 throw new JsonException("A managed title block has an invalid identity or built-in kind.");
@@ -77,6 +80,10 @@ public static class DocumentStateSerializer
     }
 
     private static bool ValidScope(HierarchyScope scope) => scope.Id != Guid.Empty && Enum.IsDefined(scope.Kind);
+
+    private static bool ValidTimestamps(DateTimeOffset? created, DateTimeOffset? modified) =>
+        created is null && modified is null ||
+        created is not null && modified is not null && modified >= created;
 
     private static void ValidateRules(IReadOnlyList<LayerVisibilityRule> layers, IReadOnlyList<ObjectDisplayRule> objects)
     {

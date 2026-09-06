@@ -2,6 +2,7 @@
 
 ## Unreleased — v1 hardening
 
+- Make the Canvas Inspector wider and resizable, constrain its scroll content to the pane, wrap help text, and stack paper dimensions when the pane is narrow.
 - Keep Mac table cells transparent so native full-row selection remains visible throughout dragging in the hierarchy, appearance editor, and creation review.
 
 - Resolve current native detail objects between sheet display-mode and named-view commits; preserve explicit sheet/detail display-mode precedence.
@@ -9,7 +10,8 @@
 - Share table density, typography, selection, and populated-row striping across the hierarchy, appearance editor, and layout review.
 - Let AppKit recognize row drags without a competing distance threshold; preserve multi-row drag selection and reserve property cells for editing.
 
-- Breaking pre-release cleanup: document schema 16 and package format 6 only; no migrations or historical compatibility.
+- Persist per-folder and per-sheet creation/modification dates in document schema 17; migrate schema 16 with recoverable 3DM file-date baselines.
+- Breaking pre-release cleanup: document schema 17 and package format 6; historical compatibility is limited to the schema-16 document migration.
 - Templates now use live sheet/detail registration only. Removed stored recipes, capture UI, folder roles, capability links, tags, and unused display-rule machinery.
 - Title blocks are None/Right/Bottom with project information and per-sheet revisions; ordinary block/page geometry remains transportable.
 - Creation uses one specification collection and per-detail named views in UI and experimental automation. Removed obsolete preview session flags and the Observer command alias.

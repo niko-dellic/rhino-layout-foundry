@@ -8,7 +8,7 @@ Foundry shows a persistent diagnostic and blocks its mutation entry points. Rhin
 
 Use a compatible Foundry version to edit newer metadata. Schema 11 was an intentionally unsupported pre-release format. Do not delete metadata to silence a warning. If the underlying archive cannot be read at all, Foundry refuses to write replacement empty metadata; preserve the original 3DM and recover into a separate copy using Rhino's native tools.
 
-Foundry accepts document schema 16 and package format 6 only. Historical formats are unsupported. There are no converters, compatibility aliases, or migration paths. The generic protected-state behavior preserves recoverable unknown metadata without interpreting it. Use fresh documents and packages for this candidate.
+Foundry writes document schema 17 and accepts package format 6. Schema 16 document metadata migrates in memory to schema 17; all other historical formats are unsupported. The generic protected-state behavior preserves recoverable unknown metadata without interpreting it. Use fresh documents and packages for this candidate.
 
 ## Failed or canceled package import
 

@@ -25,7 +25,7 @@ Foundry calls a Rhino page layout a **sheet**; a **detail** is its model-space v
 
 Some Rhino layout operations are not natively undoable. Foundry uses validation, compensating rollback, and recovery packages where applicable; read each operation's warning. Do not assume one Undo will reverse layout creation, deletion, rename, or package replacement. Platform-specific Undo verification remains a release gate.
 
-Unsupported or malformed Foundry metadata is protected from Foundry edits. Recoverable archive envelopes are preserved on save. Only document schema **16** and package format **6** are accepted. Historical formats are unsupported; there are no migrations or conversion tools. See [Recovery](docs/RECOVERY.md).
+Unsupported or malformed Foundry metadata is protected from Foundry edits. Recoverable archive envelopes are preserved on save. Document schema **17** and package format **6** are current. Schema 16 document metadata migrates to schema 17 in memory; other historical formats remain unsupported. See [Recovery](docs/RECOVERY.md).
 
 Live previews temporarily create Rhino page content. Canceling a preview can leave an unsaved-change indicator: Foundry deliberately does not clear that flag after deferred native events, because doing so could hide a real edit.
 
@@ -77,7 +77,7 @@ Historical milestone and architecture notes live in `docs/history` and are not c
 
 ## Shared UI development dependency
 
-Layout Foundry requires the exact `0.3.0-preview.1` shared UI package set. `RhinoLayoutFoundry.Core` references `RhinoFoundry.UI.Primitives`; `RhinoLayoutFoundry.UI` references `RhinoFoundry.UI`; Mac builds add `RhinoFoundry.UI.MacOS`. The three versions are pinned together in [Directory.Packages.props](Directory.Packages.props). Bootstrap packages and their hash manifest are committed under `packages/`, and [NuGet.Config](NuGet.Config) registers that directory as the first restore source.
+Layout Foundry requires the exact `0.3.0-preview.4` shared UI package set. `RhinoLayoutFoundry.Core` references `RhinoFoundry.UI.Primitives`; `RhinoLayoutFoundry.UI` references `RhinoFoundry.UI`; Mac builds add `RhinoFoundry.UI.MacOS`. The three versions are pinned together in [Directory.Packages.props](Directory.Packages.props). Bootstrap packages and their hash manifest are committed under `packages/`, and [NuGet.Config](NuGet.Config) registers that directory as the first restore source.
 
 A normal Layout checkout does not need a source checkout of `rhino-foundry-ui`. Clone the [Rhino Foundry UI repository](https://github.com/niko-dellic/rhino-foundry-ui) as a sibling only when implementing or debugging a shared component. Consumers must continue to reference the packed artifacts so testing uses the same bytes that will ship. Follow the UI library's [consumer guide](https://github.com/niko-dellic/rhino-foundry-ui/blob/main/docs/USAGE.md) and [component implementation guide](https://github.com/niko-dellic/rhino-foundry-ui/blob/main/docs/IMPLEMENTING_COMPONENTS.md).
 

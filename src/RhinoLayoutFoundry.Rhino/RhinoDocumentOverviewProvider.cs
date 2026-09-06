@@ -102,7 +102,9 @@ internal sealed class RhinoDocumentOverviewProvider : IDocumentOverviewProvider
                         folderChain.Append(new HierarchyScope(HierarchyScopeKind.Sheet, pageId)),
                         new HierarchyScope(HierarchyScopeKind.Sheet, pageId),
                         assignments, appearanceStates),
-                    Notes: record?.Notes ?? string.Empty);
+                    Notes: record?.Notes ?? string.Empty,
+                    CreatedUtc: record?.CreatedUtc,
+                    LastModifiedUtc: record?.LastModifiedUtc);
                 return sheet with
                 {
                     Diagnostics = OverviewDiagnostics.ForSheet(
@@ -131,7 +133,9 @@ internal sealed class RhinoDocumentOverviewProvider : IDocumentOverviewProvider
                     AppearanceState: Binding(ScopeChain(folder.Id, state.Folders),
                         new HierarchyScope(HierarchyScopeKind.Folder, folder.Id),
                         assignments, appearanceStates),
-                            Notes: folder.Notes ?? string.Empty);
+                    Notes: folder.Notes ?? string.Empty,
+                    CreatedUtc: folder.CreatedUtc,
+                    LastModifiedUtc: folder.LastModifiedUtc);
             })
             .ToArray();
 

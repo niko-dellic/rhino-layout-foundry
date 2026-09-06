@@ -17,6 +17,7 @@ public sealed class ObserverFoundryPanel : Panel
     private readonly FoundryToolbarIconButton _navigatorButton;
     private readonly FoundryToolbarIconButton _namedViewsButton;
     private readonly SelectionInspectorPanel _inspector;
+    private readonly FoundryPaneResizeHandle _inspectorResizeHandle;
     private readonly FoundryToolbarIconButton _nestedPackingButton;
     private readonly FoundryToolbarIconButton _compactPackingButton;
     private readonly FoundryToolbarIconButton _appearanceCardsButton;
@@ -48,8 +49,11 @@ public sealed class ObserverFoundryPanel : Panel
     private uint? _pendingInitialFitDocumentSerial;
     private long _previewContentSequence;
     private long _namedViewPreviewContentVersion;
+    private int _inspectorPaneWidth = SelectionInspectorPanel.DefaultOverlayWidth;
 
     private const int MinimumInitialFitViewportDimension = 96;
+    private const int MinimumInspectorPaneWidth = 300;
+    private const int MaximumInspectorPaneWidth = 680;
 
     internal event EventHandler? ExitFullscreenRequested;
 
@@ -169,6 +173,28 @@ public sealed class ObserverFoundryPanel : Panel
         _canvasOverlay.Add(_gridAppearanceTray, 0, 36);
         _inspector = new SelectionInspectorPanel { Visible = false };
         _canvasOverlay.Add(_inspector, 0, 38);
+        _inspectorResizeHandle = new FoundryPaneResizeHandle(
+            FoundryPaneResizeAxis.Horizontal,
+            "Inspector")
+        {
+            Visible = false,
+        };
+        _inspectorResizeHandle.ResizeRequested += (_, eventArgs) =>
+        {
+            // The Inspector is the trailing pane, so moving its left edge to the
+            // left increases its width and reports a negative handle delta.
+            _inspectorPaneWidth = Math.Clamp(
+                _inspectorPaneWidth - eventArgs.Delta,
+                MinimumInspectorPaneWidth,
+                MaximumInspectorPaneWidth);
+            UpdateCanvasOverlayLayout();
+        };
+        _inspectorResizeHandle.CollapseToggleRequested += (_, _) =>
+        {
+            _namedViewsButton.Checked = false;
+            ApplySidebarVisibility();
+        };
+        _canvasOverlay.Add(_inspectorResizeHandle, 0, 38);
         _inspector.OperationCompleted += (_, eventArgs) =>
         {
             _status.Text = ResultMessage(eventArgs.Result, eventArgs.SuccessMessage);
@@ -329,6 +355,7 @@ public sealed class ObserverFoundryPanel : Panel
         _canvas.SetNavigatorVisible(_navigatorButton.Checked);
         _canvas.SetNamedViewsVisible(false);
         _inspector.Visible = _namedViewsButton.Checked;
+        _inspectorResizeHandle.Visible = _namedViewsButton.Checked;
         UpdateCanvasOverlayLayout();
     }
 
@@ -395,12 +422,19 @@ public sealed class ObserverFoundryPanel : Panel
         _canvas.Size = clientSize;
         _canvasToolbar.Size = new Size(clientSize.Width, 28);
         _canvasOverlay.Move(_canvasToolbar, 0, 0);
-        _inspector.Size = new Size(
-            Math.Min(SelectionInspectorPanel.OverlayWidth, Math.Max(0, clientSize.Width)),
-            Math.Max(0, clientSize.Height - 38));
+        var resizeHandleWidth = _inspectorResizeHandle.Width;
+        var availableInspectorWidth = Math.Max(0, clientSize.Width - resizeHandleWidth);
+        var inspectorWidth = Math.Min(_inspectorPaneWidth, availableInspectorWidth);
+        var inspectorHeight = Math.Max(0, clientSize.Height - 38);
+        _inspector.Size = new Size(inspectorWidth, inspectorHeight);
         _canvasOverlay.Move(
             _inspector,
-            Math.Max(0, clientSize.Width - _inspector.Width),
+            Math.Max(0, clientSize.Width - inspectorWidth),
+            38);
+        _inspectorResizeHandle.Size = new Size(resizeHandleWidth, inspectorHeight);
+        _canvasOverlay.Move(
+            _inspectorResizeHandle,
+            Math.Max(0, clientSize.Width - inspectorWidth - resizeHandleWidth),
             38);
         var trayX = Math.Clamp(
             _gridAppearanceButton.Location.X,

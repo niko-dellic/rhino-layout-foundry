@@ -1,6 +1,6 @@
 # Pre-release cleanup validation — 2026-09-04
 
-This is a breaking development candidate, not a published release. Current-format validation uses schema 16 and package 6. Earlier validation is retained in history/V1_HARDENING_VALIDATION_2026-09-03.md and does not certify these binaries.
+This is a breaking development candidate, not a published release. Current-format validation uses schema 17 and package 6, with schema-16 document migration coverage. Earlier validation is retained in history/V1_HARDENING_VALIDATION_2026-09-03.md and does not certify these binaries.
 
 For the subsequent edit/table fixes and currently installed development bundle, see [EDIT_TABLE_VALIDATION.md](EDIT_TABLE_VALIDATION.md). The hashes below describe the earlier cleanup candidate.
 

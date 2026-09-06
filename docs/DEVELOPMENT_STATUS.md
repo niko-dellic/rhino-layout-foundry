@@ -13,7 +13,7 @@ Foundry is preparing for public v1 on Windows and macOS. Package version remains
 
 ## Pre-release cleanup
 
-Schema 16/package 6 only; live sheet/detail registrations; built-in title blocks; canonical per-detail creation inputs. Stored recipes, capability links, tags, old display rules, custom title-block sources, migrations, and the Observer command alias are removed.
+Schema 17/package 6; schema-16 document migration; live sheet/detail registrations; built-in title blocks; canonical per-detail creation inputs. Stored recipes, capability links, tags, old display rules, custom title-block sources, and the Observer command alias are removed.
 
 ## Evidence and outstanding gates
 

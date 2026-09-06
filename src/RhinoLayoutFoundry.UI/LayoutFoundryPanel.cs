@@ -49,7 +49,7 @@ public sealed partial class LayoutFoundryPanel : Panel
     private readonly GridColumn _appearanceStateColumn;
     private readonly GridColumn _notesColumn;
     private readonly GridColumn _statusColumn;
-    private readonly TextBoxCell _paperCell;
+    private readonly CustomCell _paperCell;
     private readonly CustomCell _displayModeCell;
     private readonly CustomCell _appearanceStateCell;
     private readonly Panel _contentHost;
@@ -114,6 +114,9 @@ public sealed partial class LayoutFoundryPanel : Panel
     private IReadOnlyList<OverviewNodeKey> _dragSourceKeys = [];
     private NavigatorDropResolution? _treeDrop;
     private IReadOnlyList<OverviewNodeKey> _propertyInteractionTargets = [];
+    private IReadOnlyList<OverviewNodeKey> _hierarchyPaperTargets = [];
+    private OverviewNodeKey? _hierarchyPaperEditingKey;
+    private PaperSizeCellEditor? _activeHierarchyPaperEditor;
     private IReadOnlyList<OverviewNodeKey> _hierarchyDisplayModeTargets = [];
     private Dictionary<string, Guid> _hierarchyDisplayModes = new(StringComparer.OrdinalIgnoreCase);
     private OverviewNodeKey? _hierarchyDisplayModeEditingKey;
@@ -258,10 +261,7 @@ public sealed partial class LayoutFoundryPanel : Panel
         _fullscreenButton = new FoundryToolbarIconButton(
             FoundryViewIcons.Fullscreen(),
             "Expand the current view to a maximized workspace");
-        _paperCell = new TextBoxCell
-        {
-            Binding = Binding.Property<HierarchyTreeItem, string>(item => item.PaperCellText),
-        };
+        _paperCell = CreatePaperSizeCell();
         _displayModeCell = CreateDisplayModeCell();
         _appearanceStateCell = CreateAppearanceStateCell();
         (_treeGrid, _layoutsColumn, _printColumn, _templateColumn, _paperColumn, _detailsColumn,
@@ -479,7 +479,7 @@ public sealed partial class LayoutFoundryPanel : Panel
         {
             HeaderText = "Paper size",
             DataCell = _paperCell,
-            Width = 178,
+            Width = 220,
             Editable = false,
             Sortable = true,
         };
@@ -597,6 +597,75 @@ public sealed partial class LayoutFoundryPanel : Panel
             nameof(HierarchyTreeItem.DisplayText))
         {
             VerticalAlignment = VerticalAlignment.Center,
+        };
+    }
+
+    private CustomCell CreatePaperSizeCell()
+    {
+        return new CustomCell
+        {
+            GetIdentifier = eventArgs => eventArgs.Item is HierarchyTreeItem item &&
+                                         _hierarchyPaperEditingKey == item.Node.Key
+                ? "foundry-paper-size-editor"
+                : "foundry-paper-size-label",
+            CreateCell = eventArgs =>
+            {
+                if (eventArgs.Item is HierarchyTreeItem item &&
+                    _hierarchyPaperEditingKey == item.Node.Key)
+                {
+                    var sheet = FirstTargetSheet(item.Node.Key);
+                    var editor = new PaperSizeCellEditor(
+                        PaperSizePickerChoices,
+                        PaperPresetLabel(sheet),
+                        PaperOrientationFor(sheet));
+                    editor.ChoiceCommitted += async (_, _) =>
+                    {
+                        if (ReferenceEquals(_activeHierarchyPaperEditor, editor))
+                            await CommitHierarchyPaperChoiceAsync(item.Node.Key);
+                    };
+                    editor.OrientationCommitted += async (_, _) =>
+                    {
+                        if (ReferenceEquals(_activeHierarchyPaperEditor, editor))
+                            await CommitHierarchyPaperOrientationAsync(item.Node.Key);
+                    };
+                    editor.DismissRequested += (_, _) =>
+                    {
+                        if (ReferenceEquals(_activeHierarchyPaperEditor, editor))
+                            CloseHierarchyPaperEditor();
+                    };
+                    return editor;
+                }
+
+                return new Label
+                {
+                    Font = FoundryTheme.HierarchyTableFont,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    TextAlignment = TextAlignment.Left,
+                };
+            },
+            ConfigureCell = (eventArgs, control) =>
+            {
+                if (eventArgs.Item is not HierarchyTreeItem item)
+                    return;
+
+                if (control is Label label)
+                {
+                    label.Text = item.PaperCellText;
+                    label.TextColor = eventArgs.CellTextColor;
+                    return;
+                }
+
+                if (control is not PaperSizeCellEditor editor ||
+                    _hierarchyPaperEditingKey != item.Node.Key)
+                {
+                    return;
+                }
+
+                var sheet = FirstTargetSheet(item.Node.Key);
+                editor.SetValue(PaperPresetLabel(sheet), PaperOrientationFor(sheet));
+                editor.Enabled = item.HasSheetTargets;
+                _activeHierarchyPaperEditor = editor;
+            },
         };
     }
 
@@ -1126,6 +1195,7 @@ public sealed partial class LayoutFoundryPanel : Panel
 
     private void LayoutPanelOverlay()
     {
+        CloseHierarchyPaperEditor();
         CloseHierarchyDisplayModePicker();
         CloseHierarchyAppearanceStatePicker();
         var size = _panelOverlayHost.ClientSize;
@@ -1731,6 +1801,7 @@ public sealed partial class LayoutFoundryPanel : Panel
             return;
         }
 
+        CloseHierarchyPaperEditor();
         CloseHierarchyDisplayModePicker();
         var kind = item.Node.Key.Kind switch
         {
@@ -1874,6 +1945,7 @@ public sealed partial class LayoutFoundryPanel : Panel
     private void OnPanelUnloaded(object? sender, EventArgs eventArgs)
     {
         _fullscreenWindow?.Close();
+        CloseHierarchyPaperEditor();
         CloseHierarchyDisplayModePicker();
         _layoutTemplateOverlay.Dismiss(commit: false);
 
@@ -2321,10 +2393,9 @@ public sealed partial class LayoutFoundryPanel : Panel
                 return;
             }
 
-            ShowPaperSizeMenu(
+            BeginPaperSizeEdit(
                 PropertyInteractionTargets(item.Node.Key),
-                item.Node.Key,
-                eventArgs.Location);
+                item);
             return;
         }
 
@@ -2415,29 +2486,88 @@ public sealed partial class LayoutFoundryPanel : Panel
         RefreshOverview();
     }
 
-    private void ShowPaperSizeMenu(
+    private void BeginPaperSizeEdit(
         IReadOnlyList<OverviewNodeKey> targets,
-        OverviewNodeKey source,
-        PointF location)
+        HierarchyTreeItem item)
     {
-        var custom = new ButtonMenuItem { Text = "Custom…" };
-        custom.Click += (_, _) => Application.Instance.AsyncInvoke(
-            async () => await SetCustomPaperSizeAsync(targets, source));
-        var menuItems = new List<MenuItem>
+        _hierarchyPaperTargets = targets.Distinct().ToArray();
+        _hierarchyPaperEditingKey = item.Node.Key;
+        _activeHierarchyPaperEditor = null;
+        _treeGrid.ReloadItem(item, reloadChildren: false);
+
+        Application.Instance.AsyncInvoke(() =>
         {
-            custom,
-            new SeparatorMenuItem(),
-        };
-        foreach (var choice in PaperSizeChoices)
+            if (_hierarchyPaperEditingKey == item.Node.Key &&
+                _activeHierarchyPaperEditor is { } editor)
+            {
+                editor.OpenChoices();
+            }
+        });
+    }
+
+    private async Task CommitHierarchyPaperChoiceAsync(OverviewNodeKey source)
+    {
+        var editor = _activeHierarchyPaperEditor;
+        var targets = _hierarchyPaperTargets.ToArray();
+        if (editor is null || targets.Length == 0)
+            return;
+
+        var selected = editor.SelectedChoice;
+        var orientation = editor.Orientation;
+        if (string.Equals(selected, CustomPaperSizeChoice, StringComparison.OrdinalIgnoreCase))
         {
-            var capturedChoice = choice;
-            var menuItem = new ButtonMenuItem { Text = choice.Label };
-            menuItem.Click += (_, _) => Application.Instance.AsyncInvoke(
-                async () => await SetPaperSizeAsync(targets, capturedChoice));
-            menuItems.Add(menuItem);
+            CloseHierarchyPaperEditor();
+            await SetCustomPaperSizeAsync(targets, source);
+            return;
         }
 
-        new ContextMenu(menuItems).Show(_treeGrid, location);
+        var preset = PaperSizePresets.FirstOrDefault(choice =>
+            string.Equals(choice.Label, selected, StringComparison.OrdinalIgnoreCase));
+        if (preset is null)
+            return;
+
+        CloseHierarchyPaperEditor();
+        await SetPaperSizeAsync(targets, OrientedPaperChoice(preset, orientation));
+    }
+
+    private async Task CommitHierarchyPaperOrientationAsync(OverviewNodeKey source)
+    {
+        var editor = _activeHierarchyPaperEditor;
+        var targets = _hierarchyPaperTargets.ToArray();
+        var sheet = FirstTargetSheet(source);
+        if (editor is null || sheet is null || targets.Length == 0)
+            return;
+
+        var landscape = editor.Orientation == PaperOrientation.Landscape;
+        var width = landscape
+            ? Math.Max(sheet.PageWidth, sheet.PageHeight)
+            : Math.Min(sheet.PageWidth, sheet.PageHeight);
+        var height = landscape
+            ? Math.Min(sheet.PageWidth, sheet.PageHeight)
+            : Math.Max(sheet.PageWidth, sheet.PageHeight);
+        var label = PaperLabelForDimensions(width, height, sheet.PageUnitSystem);
+        CloseHierarchyPaperEditor();
+        await SetPaperSizeAsync(targets, new PaperSizeChoice(
+            label,
+            width,
+            height,
+            sheet.PageUnitSystem));
+    }
+
+    private void CloseHierarchyPaperEditor()
+    {
+        var editingKey = _hierarchyPaperEditingKey;
+        var editor = _activeHierarchyPaperEditor;
+        _hierarchyPaperEditingKey = null;
+        _activeHierarchyPaperEditor = null;
+        editor?.CloseChoices();
+        _hierarchyPaperTargets = [];
+        if (editingKey is not { } key)
+            return;
+
+        var item = Flatten(_renderedTreeItems).FirstOrDefault(candidate => candidate.Node.Key == key);
+        if (item is not null)
+            _treeGrid.ReloadItem(item, reloadChildren: false);
     }
 
     private void BeginDisplayModeEdit(
@@ -2918,6 +3048,11 @@ public sealed partial class LayoutFoundryPanel : Panel
         var cell = _treeGrid.GetCellAt(eventArgs.Location);
         var item = cell.Item as HierarchyTreeItem;
         var column = cell.Column;
+        if (_hierarchyPaperEditingKey is { } paperEditingKey &&
+            (item?.Node.Key != paperEditingKey || !ReferenceEquals(column, _paperColumn)))
+        {
+            CloseHierarchyPaperEditor();
+        }
         if (_hierarchyDisplayModeEditingKey is { } editingKey &&
             (item?.Node.Key != editingKey || !ReferenceEquals(column, _displayModeColumn)))
         {
@@ -2966,10 +3101,9 @@ public sealed partial class LayoutFoundryPanel : Panel
                         if (!item.HasSheetTargets)
                             _statusLabel.Text = "Paper size applies to folders and layouts, not individual details.";
                         else
-                            ShowPaperSizeMenu(
+                            BeginPaperSizeEdit(
                                 PropertyInteractionTargets(item.Node.Key),
-                                item.Node.Key,
-                                eventArgs.Location);
+                                item);
                     }
                     else if (ReferenceEquals(column, _displayModeColumn))
                     {
@@ -3799,13 +3933,53 @@ public sealed partial class LayoutFoundryPanel : Panel
 
     private static string PaperLabel(SheetOverview sheet)
     {
-        var preset = PaperSizeChoices.FirstOrDefault(choice =>
-            string.Equals(choice.UnitSystem, sheet.PageUnitSystem, StringComparison.OrdinalIgnoreCase) &&
-            Math.Abs(choice.Width - sheet.PageWidth) < 0.01 &&
-            Math.Abs(choice.Height - sheet.PageHeight) < 0.01);
-        return preset?.Label ??
-               $"{sheet.PageWidth:0.###} × {sheet.PageHeight:0.###} {UnitAbbreviation(sheet.PageUnitSystem)}";
+        return PaperLabelForDimensions(sheet.PageWidth, sheet.PageHeight, sheet.PageUnitSystem);
     }
+
+    private static string PaperLabelForDimensions(double width, double height, string unitSystem)
+    {
+        var preset = MatchingPaperPreset(width, height, unitSystem);
+        if (preset is null)
+            return $"{width:0.###} × {height:0.###} {UnitAbbreviation(unitSystem)}";
+
+        var orientation = width > height ? "L" : "P";
+        return $"{preset.Name} {orientation} · {width:0.###} × {height:0.###} {UnitAbbreviation(unitSystem)}";
+    }
+
+    private static PaperSizePreset? MatchingPaperPreset(double width, double height, string unitSystem) =>
+        PaperSizePresets.FirstOrDefault(choice =>
+            string.Equals(choice.UnitSystem, unitSystem, StringComparison.OrdinalIgnoreCase) &&
+            ((NearlyEqualPaperDimension(choice.Width, width) &&
+              NearlyEqualPaperDimension(choice.Height, height)) ||
+             (NearlyEqualPaperDimension(choice.Width, height) &&
+              NearlyEqualPaperDimension(choice.Height, width))));
+
+    private static string PaperPresetLabel(SheetOverview? sheet) => sheet is null
+        ? CustomPaperSizeChoice
+        : MatchingPaperPreset(sheet.PageWidth, sheet.PageHeight, sheet.PageUnitSystem)?.Label ??
+          CustomPaperSizeChoice;
+
+    private static PaperOrientation PaperOrientationFor(SheetOverview? sheet) =>
+        sheet is not null && sheet.PageWidth > sheet.PageHeight
+            ? PaperOrientation.Landscape
+            : PaperOrientation.Portrait;
+
+    private static PaperSizeChoice OrientedPaperChoice(
+        PaperSizePreset preset,
+        PaperOrientation orientation)
+    {
+        var landscape = orientation == PaperOrientation.Landscape;
+        var width = landscape ? Math.Max(preset.Width, preset.Height) : Math.Min(preset.Width, preset.Height);
+        var height = landscape ? Math.Min(preset.Width, preset.Height) : Math.Max(preset.Width, preset.Height);
+        return new PaperSizeChoice(
+            PaperLabelForDimensions(width, height, preset.UnitSystem),
+            width,
+            height,
+            preset.UnitSystem);
+    }
+
+    private static bool NearlyEqualPaperDimension(double left, double right) =>
+        Math.Abs(left - right) < 0.01;
 
     private static string UnitAbbreviation(string unitSystem) => unitSystem switch
     {
@@ -3817,29 +3991,32 @@ public sealed partial class LayoutFoundryPanel : Panel
         _ => unitSystem,
     };
 
-    private static readonly PaperSizeChoice[] PaperSizeChoices =
+    private const string CustomPaperSizeChoice = "Custom…";
+
+    private static readonly PaperSizePreset[] PaperSizePresets =
     [
-        new("A0 P · 841 × 1189 mm", 841, 1189, "Millimeters"),
-        new("A0 L · 1189 × 841 mm", 1189, 841, "Millimeters"),
-        new("A1 P · 594 × 841 mm", 594, 841, "Millimeters"),
-        new("A1 L · 841 × 594 mm", 841, 594, "Millimeters"),
-        new("A2 P · 420 × 594 mm", 420, 594, "Millimeters"),
-        new("A2 L · 594 × 420 mm", 594, 420, "Millimeters"),
-        new("A3 P · 297 × 420 mm", 297, 420, "Millimeters"),
-        new("A3 L · 420 × 297 mm", 420, 297, "Millimeters"),
-        new("A4 P · 210 × 297 mm", 210, 297, "Millimeters"),
-        new("A4 L · 297 × 210 mm", 297, 210, "Millimeters"),
-        new("ANSI A P · 8.5 × 11 in", 8.5, 11, "Inches"),
-        new("ANSI A L · 11 × 8.5 in", 11, 8.5, "Inches"),
-        new("ANSI B P · 11 × 17 in", 11, 17, "Inches"),
-        new("ANSI B L · 17 × 11 in", 17, 11, "Inches"),
-        new("ANSI C P · 17 × 22 in", 17, 22, "Inches"),
-        new("ANSI C L · 22 × 17 in", 22, 17, "Inches"),
-        new("ANSI D P · 22 × 34 in", 22, 34, "Inches"),
-        new("ANSI D L · 34 × 22 in", 34, 22, "Inches"),
+        new("A0", "A0 · 841 × 1189 mm", 841, 1189, "Millimeters"),
+        new("A1", "A1 · 594 × 841 mm", 594, 841, "Millimeters"),
+        new("A2", "A2 · 420 × 594 mm", 420, 594, "Millimeters"),
+        new("A3", "A3 · 297 × 420 mm", 297, 420, "Millimeters"),
+        new("A4", "A4 · 210 × 297 mm", 210, 297, "Millimeters"),
+        new("ANSI A", "ANSI A · 8.5 × 11 in", 8.5, 11, "Inches"),
+        new("ANSI B", "ANSI B · 11 × 17 in", 11, 17, "Inches"),
+        new("ANSI C", "ANSI C · 17 × 22 in", 17, 22, "Inches"),
+        new("ANSI D", "ANSI D · 22 × 34 in", 22, 34, "Inches"),
     ];
 
+    private static readonly string[] PaperSizePickerChoices =
+        [.. PaperSizePresets.Select(choice => choice.Label), CustomPaperSizeChoice];
+
     private sealed record PaperSizeChoice(string Label, double Width, double Height, string UnitSystem);
+
+    private sealed record PaperSizePreset(
+        string Name,
+        string Label,
+        double Width,
+        double Height,
+        string UnitSystem);
 
     private sealed class HierarchyTreeItem : TreeGridItem
     {
@@ -4001,11 +4178,15 @@ false) ? "Layout" : "—";
 
         public string CreatedText => Node.IsDocumentRoot
             ? FormatFileDate(_fileDates?.CreatedUtc)
-            : "—";
+            : FormatFileDate(Node.Key.Kind is OverviewNodeKind.Folder or OverviewNodeKind.Sheet
+                ? Node.Folder?.CreatedUtc ?? Node.Sheet?.CreatedUtc ?? _fileDates?.CreatedUtc
+                : null);
 
         public string LastModifiedText => Node.IsDocumentRoot
             ? FormatFileDate(_fileDates?.LastModifiedUtc)
-            : "—";
+            : FormatFileDate(Node.Key.Kind is OverviewNodeKind.Folder or OverviewNodeKind.Sheet
+                ? Node.Folder?.LastModifiedUtc ?? Node.Sheet?.LastModifiedUtc ?? _fileDates?.LastModifiedUtc
+                : null);
 
         private static string FormatFileDate(DateTimeOffset? value) => value is { } timestamp
             ? timestamp.ToLocalTime().ToString("g")

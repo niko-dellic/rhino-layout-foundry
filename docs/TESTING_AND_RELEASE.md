@@ -56,7 +56,7 @@ Run on disposable copies or newly created test documents. Preserve source fixtur
 
 | Area | Required scenarios and success condition |
 | --- | --- |
-| Metadata | Empty/current state save/reopen and Save As; supported schema 16; future version; malformed JSON; missing/null collections; envelope/payload mismatch. Opening/reading does not change state. Protected metadata remains preserved on save and Foundry rejects changes. |
+| Metadata | Empty/current state save/reopen and Save As; schema 16 to 17 timestamp migration; future version; malformed JSON; missing/null collections; envelope/payload mismatch. Opening/reading does not change the Rhino document. Protected metadata remains preserved on save and Foundry rejects changes. |
 | Preview ownership | Inject failure after page acquisition, after a detail, and during appearance/title-block work. No temporary pages/definitions remain; original appearance and Undo-recording state survive. A cleanup failure does not prevent other restoration and is reported. |
 | Preview lifecycle | Cancel/close while rendering; make a real edit immediately afterward; run several idle turns. The real edit remains unsaved in the host (native Edited/save prompt on Mac; Modified plus save prompt on Windows). Switch/close documents and confirm stale images are not presented. |
 | Import | Merge and Replace, including an empty destination. Inject failure after each dependency family, first/last page, page-space objects, replacement cutover, and metadata update. Cancel at safe boundaries. Compare named views, layer states, definitions, materials, line/hatch/dimension styles, pages, and metadata to before-state. Verify recovery diagnostics and usable recovery package. |
@@ -88,7 +88,7 @@ After approval, publish immutable GitHub/Yak artifacts and verify Package Manage
 
 ## Current-format cleanup acceptance
 
-Use fresh fixtures created by this candidate. Schema 16/package 6 are required; historical-project compatibility is outside acceptance.
+Use fresh fixtures created by this candidate. Schema 17/package 6 are required, plus one schema-16 document migration fixture; other historical-project compatibility is outside acceptance.
 
 - [ ] Register/unregister live sheets and details; change the source, reopen creation, and confirm the preview follows it. Delete a source and confirm it disappears. Folders expose no template checkbox.
 - [ ] Create None/Right/Bottom blocks, edit project fields, append per-sheet revisions, and save/reopen. Ordinary block instances must remain ordinary page geometry through package round trips.

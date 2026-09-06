@@ -15,7 +15,7 @@ public sealed record DocumentState(
     [property: System.Text.Json.Serialization.JsonRequired] IReadOnlyDictionary<Guid, SheetRecord> Sheets,
     [property: System.Text.Json.Serialization.JsonRequired] IReadOnlyDictionary<string, string> Metadata)
 {
-    public const int CurrentSchemaVersion = 16;
+    public const int CurrentSchemaVersion = 17;
 
     [JsonRequired]
     public ObserverCanvasState Canvas { get; init; } = ObserverCanvasState.Empty;
@@ -137,7 +137,9 @@ public sealed record FolderRecord(
     Guid? ParentId,
     string Name,
     int Order,
-    string Notes = "");
+    string Notes = "",
+    DateTimeOffset? CreatedUtc = null,
+    DateTimeOffset? LastModifiedUtc = null);
 
 public sealed record SheetRecord(
     Guid PageViewId,
@@ -148,7 +150,9 @@ public sealed record SheetRecord(
     bool IncludeInPrintAll = true,
     SheetTitleBlockData? TitleBlockData = null,
     SheetNamingBinding? NamingBinding = null,
-    string Notes = "")
+    string Notes = "",
+    DateTimeOffset? CreatedUtc = null,
+    DateTimeOffset? LastModifiedUtc = null)
 {
     [JsonRequired]
     public IReadOnlyDictionary<Guid, string> DetailNamedViews { get; init; } = new Dictionary<Guid, string>();

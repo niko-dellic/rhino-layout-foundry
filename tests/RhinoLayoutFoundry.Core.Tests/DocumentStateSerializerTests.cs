@@ -14,9 +14,12 @@ public sealed class DocumentStateSerializerTests
         var sheetId = Guid.NewGuid();
         var detailId = Guid.NewGuid();
         var appearanceId = Guid.NewGuid();
+        var created = new DateTimeOffset(2026, 9, 5, 8, 30, 0, TimeSpan.Zero);
+        var modified = created.AddHours(2);
         var scope = new HierarchyScope(HierarchyScopeKind.Sheet, sheetId);
         state = state with
         {
+            Folders = [state.Folders[0] with { CreatedUtc = created, LastModifiedUtc = modified }],
             Sheets = new Dictionary<Guid, SheetRecord>
             {
                 [sheetId] = new(
@@ -27,7 +30,7 @@ state.RootFolderId,
 new TitleBlockRole(InstanceObjectId: Guid.NewGuid(),
     InstanceDefinitionId: Guid.NewGuid(),
     BuiltInKind: BuiltInTitleBlockKind.RightSidebar),
-    TitleBlockData: new SheetTitleBlockData("A-01", [new("P1", "2026-09-04", "Issue", "ND", "QA")]), NamingBinding: new SheetNamingBinding("{folder}-{index}", 1, "Unorganized-1"))
+    TitleBlockData: new SheetTitleBlockData("A-01", [new("P1", "2026-09-04", "Issue", "ND", "QA")]), NamingBinding: new SheetNamingBinding("{folder}-{index}", 1, "Unorganized-1"), CreatedUtc: created, LastModifiedUtc: modified)
                 {
                     DetailNamedViews = new Dictionary<Guid, string>
                     {
@@ -51,11 +54,16 @@ scope, appearanceId)],
         };
         var payload = DocumentStateSerializer.Serialize(state);
         var restored = DocumentStateSerializer.Deserialize(payload);
-        Assert.Equal(16, restored.SchemaVersion);
+        Assert.Equal(17, restored.SchemaVersion);
         Assert.Equal(payload, DocumentStateSerializer.Serialize(restored));
         Assert.Equal("Plan", restored.Sheets[sheetId].DetailNamedViews[detailId]);
         Assert.Equal(BuiltInTitleBlockKind.RightSidebar, restored.Sheets[sheetId].TitleBlock!.BuiltInKind);
         Assert.Single(restored.Sheets[sheetId].TitleBlockData!.Revisions);
+        Assert.Equal(created, restored.Sheets[sheetId].CreatedUtc);
+        Assert.Equal(modified, restored.Sheets[sheetId].LastModifiedUtc);
+        var json = JsonNode.Parse(payload)!.AsObject();
+        Assert.NotNull(json[nameof(DocumentState.Folders)]![0]![nameof(FolderRecord.CreatedUtc)]);
+        Assert.NotNull(json[nameof(DocumentState.Sheets)]![sheetId.ToString()]![nameof(SheetRecord.LastModifiedUtc)]);
         Assert.DoesNotContain("Tags", payload);
         Assert.DoesNotContain("Templates", payload);
         Assert.False(JsonNode.Parse(payload)!.AsObject().ContainsKey("DisplayRules"));
@@ -76,9 +84,9 @@ scope, appearanceId)],
     {
         var json = JsonNode.Parse(DocumentStateSerializer.Serialize(DocumentState.Empty()))!.AsObject();
         json.Remove(property);
-        Assert.Equal(DocumentStateLoadStatus.Invalid, DocumentStateLoadResult.Read(16, json.ToJsonString()).Status);
+        Assert.Equal(DocumentStateLoadStatus.Invalid, DocumentStateLoadResult.Read(DocumentState.CurrentSchemaVersion, json.ToJsonString()).Status);
         json[property] = null;
-        var loaded = DocumentStateLoadResult.Read(16, json.ToJsonString());
+        var loaded = DocumentStateLoadResult.Read(DocumentState.CurrentSchemaVersion, json.ToJsonString());
         Assert.Equal(DocumentStateLoadStatus.Invalid, loaded.Status);
         Assert.False(loaded.CanWrite);
     }
@@ -92,15 +100,15 @@ scope, appearanceId)],
     {
         var json = JsonNode.Parse(DocumentStateSerializer.Serialize(DocumentState.Empty()))!.AsObject();
         json[parent]!.AsObject().Remove(property);
-        Assert.Equal(DocumentStateLoadStatus.Invalid, DocumentStateLoadResult.Read(16, json.ToJsonString()).Status);
+        Assert.Equal(DocumentStateLoadStatus.Invalid, DocumentStateLoadResult.Read(DocumentState.CurrentSchemaVersion, json.ToJsonString()).Status);
         json[parent]![property] = null;
-        Assert.Equal(DocumentStateLoadStatus.Invalid, DocumentStateLoadResult.Read(16, json.ToJsonString()).Status);
+        Assert.Equal(DocumentStateLoadStatus.Invalid, DocumentStateLoadResult.Read(DocumentState.CurrentSchemaVersion, json.ToJsonString()).Status);
     }
 
     [Theory]
     [InlineData(1)]
     [InlineData(15)]
-    [InlineData(17)]
+    [InlineData(18)]
     public void OtherSchemasAreUnsupportedWithoutConversion(int version)
     {
         var payload = $$"""{"SchemaVersion":{{version}}}""";
@@ -114,7 +122,7 @@ scope, appearanceId)],
     {
         var json = JsonNode.Parse(DocumentStateSerializer.Serialize(DocumentState.Empty()))!;
         json["Templates"] = new JsonArray();
-        Assert.Equal(DocumentStateLoadStatus.Invalid, DocumentStateLoadResult.Read(16, json.ToJsonString()).Status);
+        Assert.Equal(DocumentStateLoadStatus.Invalid, DocumentStateLoadResult.Read(DocumentState.CurrentSchemaVersion, json.ToJsonString()).Status);
     }
 
     [Theory]
