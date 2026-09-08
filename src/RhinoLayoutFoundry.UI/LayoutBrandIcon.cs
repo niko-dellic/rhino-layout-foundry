@@ -5,6 +5,13 @@ internal static class LayoutBrandIcon
     private const int IconSize = 16;
     private const int BrandMarkSize = 20;
     private static readonly float[] IconScales = [1f, 2f, 3f];
+    internal static Icon BackToLayouts() => NewIcon(graphics =>
+    {
+        using var pen = new Pen(FoundryTheme.PrimaryText, 1.5f);
+        graphics.DrawLine(pen, 3, 8, 14, 8);
+        graphics.DrawLine(pen, 3, 8, 8, 3);
+        graphics.DrawLine(pen, 3, 8, 8, 13);
+    });
     internal static Icon BrandMark() => NewIcon(graphics =>
     {
         var color = FoundryTheme.PrimaryText;

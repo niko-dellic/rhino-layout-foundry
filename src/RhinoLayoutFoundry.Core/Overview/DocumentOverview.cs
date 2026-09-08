@@ -21,7 +21,10 @@ public sealed record DocumentOverview(
 
     public IReadOnlyList<OverviewIssue> Issues => Diagnostics ?? [];
     public IReadOnlyList<AppearanceStateOverview> AppearanceStates { get; init; } = [];
+    public IReadOnlyList<ConversationOverview> Conversations { get; init; } = [];
 }
+
+public sealed record ConversationOverview(Guid Id, Guid FolderId, string Name, DateTimeOffset UpdatedAt);
 
 public sealed record DocumentFileDates(
     DateTimeOffset CreatedUtc,

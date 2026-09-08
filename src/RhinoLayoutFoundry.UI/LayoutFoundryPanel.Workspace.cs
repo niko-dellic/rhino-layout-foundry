@@ -34,7 +34,7 @@ public partial class LayoutFoundryPanel
         if (ReferenceEquals(_extensionContent, content)) { SetWorkspaceVisible(true); return; }
         if (_extensionWorkspace.Content is StackLayout previous) previous.Items.Clear();
         _extensionContent = content;
-        var back = new FoundryToolbarIconButton(FoundryViewIcons.ListView(), "Back to layouts");
+        var back = new FoundryToolbarIconButton(LayoutBrandIcon.BackToLayouts(), "Back to layouts");
         back.Click += (_, _) => SetWorkspaceVisible(false);
         _extensionWorkspace.Content = new StackLayout
         {
@@ -55,7 +55,9 @@ public partial class LayoutFoundryPanel
                             Orientation = Orientation.Horizontal,
                             Spacing = FoundryTheme.Space2,
                             VerticalContentAlignment = VerticalAlignment.Center,
-                            Items = { back, toolbarActions, new StackLayoutItem(null, true) },
+                            Items = { back,
+                                new Panel { Width = 1, Height = 20, BackgroundColor = FoundryTheme.CanvasBorder },
+                                toolbarActions, new StackLayoutItem(null, true) },
                         },
                     },
                 },

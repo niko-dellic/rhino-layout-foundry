@@ -8,6 +8,7 @@ public enum OverviewNodeKind
     Sheet,
     Detail,
     AppearanceState,
+    Conversation,
 }
 
 public enum OverviewFilterKind
@@ -100,6 +101,8 @@ public static class OverviewTreeBuilder
                 group => group.OrderBy(state => state.Order)
                     .ThenBy(state => state.Name, StringComparer.OrdinalIgnoreCase)
                     .ToArray());
+        var conversations = overview.Conversations.GroupBy(item => folders.ContainsKey(item.FolderId) ? item.FolderId : rootId)
+            .ToDictionary(group => group.Key, group => group.OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase).ToArray());
 
         var rootFolder = folders[rootId];
         var rootNotesMatch = filter.Query is not null && Matches(rootFolder.Notes, filter.Query);
@@ -108,6 +111,7 @@ public static class OverviewTreeBuilder
             childFolders,
             sheetsByFolder,
             statesByFolder,
+            conversations,
             filter,
             new HashSet<Guid> { rootId },
             includeAllTextMatches: rootNotesMatch);
@@ -143,6 +147,7 @@ public static class OverviewTreeBuilder
         IReadOnlyDictionary<Guid, FolderOverview[]> childFolders,
         IReadOnlyDictionary<Guid, SheetOverview[]> sheetsByFolder,
         IReadOnlyDictionary<Guid, AppearanceStateOverview[]> statesByFolder,
+        IReadOnlyDictionary<Guid, ConversationOverview[]> conversations,
         OverviewTreeFilter filter,
         HashSet<Guid> ancestors,
         bool includeAllTextMatches)
@@ -157,6 +162,7 @@ public static class OverviewTreeBuilder
                     childFolders,
                     sheetsByFolder,
                     statesByFolder,
+                    conversations,
                     filter,
                     ancestors,
                     includeAllTextMatches);
@@ -181,6 +187,11 @@ public static class OverviewTreeBuilder
             }
         }
 
+        if (filter.Kind == OverviewFilterKind.All && conversations.TryGetValue(folderId, out var chats))
+            foreach (var chat in chats.Where(chat => includeAllTextMatches || Matches(chat.Name, filter.Query)))
+                children.Add(new OverviewTreeNode(new OverviewNodeKey(OverviewNodeKind.Conversation, chat.Id),
+                    chat.Name, "Conversation", []));
+
         if (sheetsByFolder.TryGetValue(folderId, out var sheets))
         {
             foreach (var sheet in sheets)
@@ -201,6 +212,7 @@ public static class OverviewTreeBuilder
         IReadOnlyDictionary<Guid, FolderOverview[]> childFolders,
         IReadOnlyDictionary<Guid, SheetOverview[]> sheetsByFolder,
         IReadOnlyDictionary<Guid, AppearanceStateOverview[]> statesByFolder,
+        IReadOnlyDictionary<Guid, ConversationOverview[]> conversations,
         OverviewTreeFilter filter,
         HashSet<Guid> ancestors,
         bool includeAllTextMatches)
@@ -218,6 +230,7 @@ public static class OverviewTreeBuilder
             childFolders,
             sheetsByFolder,
             statesByFolder,
+            conversations,
             filter,
             ancestors,
             folderMatchesText);
