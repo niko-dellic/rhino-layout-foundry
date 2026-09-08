@@ -68,7 +68,13 @@ public sealed record DetailSnapshot(
     Guid DisplayModeId,
     string DisplayModeName,
     Guid? LayerId = null,
-    DetailPageBounds? PageBounds = null);
+    DetailPageBounds? PageBounds = null)
+{
+    public double? ScaleDenominator { get; init; }
+    public Point3Coordinates? CameraLocation { get; init; }
+    public Point3Coordinates? CameraTarget { get; init; }
+    public bool? IsParallelProjection { get; init; }
+}
 
 public sealed record DetailPageBounds(
     double Left,

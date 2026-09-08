@@ -13,12 +13,12 @@
       },
       "RhinoFoundry.UI": {
         "type": "Direct",
-        "requested": "[0.3.0-preview.4, )",
-        "resolved": "0.3.0-preview.4",
-        "contentHash": "Uzg56Y5e96YR40BpHhdy8oDUJnTi7hobUZw9SHq0fCA60PRXKrodAyQt/KGrTAPxZlxRZI5xs/9Ew1nUD1MzXA==",
+        "requested": "[0.3.0-preview.7, )",
+        "resolved": "0.3.0-preview.7",
+        "contentHash": "jUnNLLbZ7ZbxZK5tJe7bif9S1R1+WvEeefK4+IdZBUPvuJqpyARNQLIvl4lx16MLealn8GQZaaAHNMRF3bxSpg==",
         "dependencies": {
           "RhinoCommon": "8.34.26223.11001",
-          "RhinoFoundry.UI.Primitives": "0.3.0-preview.4"
+          "RhinoFoundry.UI.Primitives": "0.3.0-preview.7"
         }
       },
       "Microsoft.Win32.SystemEvents": {
@@ -37,7 +37,7 @@
       "rhinolayoutfoundry.core": {
         "type": "Project",
         "dependencies": {
-          "RhinoFoundry.UI.Primitives": "[0.3.0-preview.4, )"
+          "RhinoFoundry.UI.Primitives": "[0.3.0-preview.7, )"
         }
       },
       "rhinolayoutfoundry.extensibility": {
@@ -48,9 +48,9 @@
       },
       "RhinoFoundry.UI.Primitives": {
         "type": "CentralTransitive",
-        "requested": "[0.3.0-preview.4, )",
-        "resolved": "0.3.0-preview.4",
-        "contentHash": "zELIMaz255GUEIkqYbDUBJxKWMfFVXv4vRoprzxpPko2w4P1Fg0yuFm7IIsxtAa2LOimJDvHRyr31rFhPKSxFg=="
+        "requested": "[0.3.0-preview.7, )",
+        "resolved": "0.3.0-preview.7",
+        "contentHash": "mnEjl1YCMndsWWHBkzOaqHRfz1Prbn5M4th6K3QEIFyH6otJk4OCZg1mpzBcGk88YKjqCyu/UpHpg784xPRrZg=="
       }
     }
   }

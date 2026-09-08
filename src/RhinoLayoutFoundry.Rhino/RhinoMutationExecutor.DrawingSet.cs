@@ -32,6 +32,8 @@ internal sealed partial class RhinoMutationExecutor
             return Failure("drawing_set.units_required", "Set standard model and page units before creating scaled drawings.");
         if (!before.Folders.Any(f => f.Id == spec.DestinationFolderId))
             return Failure("drawing_set.folder_missing", "The destination folder no longer exists.");
+        if (spec.NewDestinationFolderName is { } folderName && before.Folders.Any(f => f.ParentId == spec.DestinationFolderId && string.Equals(f.Name, folderName.Trim(), StringComparison.OrdinalIgnoreCase)))
+            return Failure("drawing_set.folder_conflict", "The proposed destination folder already exists. Re-inspect before continuing.");
         var names = document.Views.GetPageViews().Select(p => p.PageName).ToHashSet(StringComparer.OrdinalIgnoreCase);
         if (spec.Sheets.Any(s => !names.Add(s.Name.Trim())))
             return Failure("drawing_set.name_conflict", "A proposed sheet name already exists.");
@@ -59,7 +61,15 @@ internal sealed partial class RhinoMutationExecutor
                 if (presentationLayerIndex < 0) throw new InvalidOperationException("Could not create the drawing presentation layer.");
             }
             var sheets = before.Sheets.ToDictionary(p => p.Key, p => p.Value);
-            var order = sheets.Values.Where(s => s.FolderId == spec.DestinationFolderId)
+            var folders = before.Folders.ToList();
+            var destinationId = spec.DestinationFolderId;
+            if (spec.NewDestinationFolderName is { } newName)
+            {
+                destinationId = Guid.NewGuid();
+                folders.Add(new FolderRecord(destinationId, spec.DestinationFolderId, newName.Trim(),
+                    folders.Where(f => f.ParentId == spec.DestinationFolderId).Select(f => f.Order).DefaultIfEmpty(-1).Max() + 1));
+            }
+            var order = sheets.Values.Where(s => s.FolderId == destinationId)
                 .Select(s => s.Order).DefaultIfEmpty(-1).Max() + 1;
             foreach (var sheet in spec.Sheets)
             {
@@ -142,11 +152,14 @@ internal sealed partial class RhinoMutationExecutor
                             throw new InvalidOperationException("Native clipping scope verification failed.");
                     }
                 }
-                sheets.Add(page.MainViewport.Id, new SheetRecord(page.MainViewport.Id, spec.DestinationFolderId,
+                sheets.Add(page.MainViewport.Id, new SheetRecord(page.MainViewport.Id, destinationId,
                     order++, new Dictionary<string, string>
                     {
                         ["RhinoLayoutFoundry.DrawingSet.ProposalId"] = spec.ProposalId.ToString("D"),
                         ["RhinoLayoutFoundry.DrawingSet.SheetKey"] = sheet.Key,
+                        // Intended content, not a claim that subsequent user edits are up to date.
+                        // Keep generated provenance separate from user-owned sheet notes.
+                        ["RhinoLayoutFoundry.DrawingSet.IntendedContent"] = JsonSerializer.Serialize(sheet),
                     }, null) { DetailNamedViews = assignments });
             }
             var metadata = before.Metadata.ToDictionary(p => p.Key, p => p.Value);
@@ -154,7 +167,7 @@ internal sealed partial class RhinoMutationExecutor
             { digest = change.Digest, resources, clipping_plane_ids = clips, named_views = namedViews,
                 annotation_ids = annotations, presentation_layer_id = presentationLayerIndex < 0 ? Guid.Empty : document.Layers[presentationLayerIndex].Id,
                 hidden_layer_scopes = hiddenScopes.Select(s => new { layer_id = s.LayerId, viewport_id = s.ViewportId }) }));
-            _stateStore.Set(document, before with { Sheets = sheets, Metadata = metadata });
+            _stateStore.Set(document, before with { Sheets = sheets, Metadata = metadata, Folders = folders });
             document.Modified = true;
             _revisionTracker.Bump(document);
             _overviewChanged(OverviewInvalidation.All);

@@ -6,6 +6,24 @@ namespace RhinoLayoutFoundry.Core.Tests;
 
 public sealed class DrawingSetSpecificationTests
 {
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("one/two")]
+    [InlineData("one\\two")]
+    public void NewDestinationRejectsInvalidNames(string name) =>
+        Assert.Contains(Validate(Proposal() with { NewDestinationFolderName = name }).Issues, i => i.Code == "folder.invalid_name");
+
+    [Fact]
+    public void NewDestinationIsValidatedWithoutCreatingFolder()
+    {
+        var snapshot = TestSnapshots.Create();
+        var count = snapshot.Folders.Count;
+        var spec = Proposal() with { NewDestinationFolderName = "AI drawing set" };
+        Assert.True(DrawingSetSpecificationValidator.Validate(spec, snapshot).IsValid);
+        Assert.Equal(count, snapshot.Folders.Count);
+        Assert.NotEqual(DrawingSetPlanner.Digest(spec), DrawingSetPlanner.Digest(spec with { NewDestinationFolderName = "Other" }));
+    }
     private static DrawingSetSpecification Proposal()
     {
         var doc = TestSnapshots.Create();

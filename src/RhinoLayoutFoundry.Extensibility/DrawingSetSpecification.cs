@@ -10,7 +10,10 @@ namespace RhinoLayoutFoundry.Extensibility;
 /// Logical keys are local to the proposal, not Rhino object IDs.</summary>
 public sealed record DrawingSetSpecification(
     int SchemaVersion, Guid ProposalId, uint DocumentRuntimeSerialNumber, long SourceRevision,
-    Guid DestinationFolderId, IReadOnlyList<DrawingSheetSpecification> Sheets);
+    Guid DestinationFolderId, IReadOnlyList<DrawingSheetSpecification> Sheets)
+{
+    public string? NewDestinationFolderName { get; init; }
+}
 
 public sealed record DrawingSheetSpecification(string Key, string Name, double WidthMm,
     double HeightMm, IReadOnlyList<DrawingViewSpecification> Views);
@@ -73,6 +76,13 @@ public static class DrawingSetSpecificationValidator
             Error("source_revision", "document.stale", "The document changed; refresh the proposal before approval.");
         if (spec.DestinationFolderId != snapshot.RootFolderId && !snapshot.Folders.ContainsKey(spec.DestinationFolderId))
             Error("destination_folder_id", "folder.missing", "Choose an existing Layout Foundry folder.");
+        if (spec.NewDestinationFolderName is { } newFolder)
+        {
+            if (string.IsNullOrWhiteSpace(newFolder) || newFolder.Trim().Length > 120 || newFolder.Any(c => char.IsControl(c) || c is '/' or '\\'))
+                Error("new_destination_folder_name", "folder.invalid_name", "Use a folder name of 1–120 characters without slashes or control characters.");
+            if (snapshot.Folders.Values.Any(f => f.ParentId == spec.DestinationFolderId && string.Equals(f.Name, newFolder.Trim(), StringComparison.OrdinalIgnoreCase)))
+                Error("new_destination_folder_name", "folder.name_conflict", "That destination folder already exists. Select it instead.");
+        }
         if (spec.Sheets is null || spec.Sheets.Count is < 1 or > MaximumSheets)
         {
             Error("sheets", "sheets.count", $"Provide between 1 and {MaximumSheets} sheets.");

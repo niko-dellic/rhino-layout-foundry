@@ -55,7 +55,14 @@ internal sealed class RhinoDocumentSnapshotProvider : IDocumentSnapshotProvider
                         detail.Viewport.DisplayMode.Id,
                         detail.Viewport.DisplayMode.LocalName,
                         document.Layers[detail.Attributes.LayerIndex]?.Id,
-                        PageBounds(detail)))
+                        PageBounds(detail))
+                    {
+                        ScaleDenominator = detail.Viewport.IsParallelProjection && detail.DetailGeometry.PageToModelRatio > 0
+                            ? RhinoMath.UnitScale(document.ModelUnitSystem, document.PageUnitSystem) / detail.DetailGeometry.PageToModelRatio : null,
+                        CameraLocation = new Point3Coordinates(detail.Viewport.CameraLocation.X, detail.Viewport.CameraLocation.Y, detail.Viewport.CameraLocation.Z),
+                        CameraTarget = new Point3Coordinates(detail.Viewport.CameraTarget.X, detail.Viewport.CameraTarget.Y, detail.Viewport.CameraTarget.Z),
+                        IsParallelProjection = detail.Viewport.IsParallelProjection,
+                    })
                     .ToArray();
                 var titleBlock = record?.TitleBlock;
                 var titleBlockName = titleBlock is null

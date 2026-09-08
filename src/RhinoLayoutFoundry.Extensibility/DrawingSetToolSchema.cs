@@ -22,6 +22,7 @@ public static class DrawingSetToolSchema
         var root = Object(("schema_version", new JsonObject { ["type"] = "integer", ["enum"] = new JsonArray(2) }),
             ("proposal_id", Text()), ("document_runtime_serial_number", new JsonObject { ["type"] = "integer" }),
             ("source_revision", new JsonObject { ["type"] = "integer" }), ("destination_folder_id", Text()),
+            ("new_destination_folder_name", new JsonObject { ["type"] = new JsonArray("string", "null") }),
             ("sheets", Array(sheet, DrawingSetSpecificationValidator.MaximumSheets)));
         return JsonSerializer.SerializeToElement(root);
     }

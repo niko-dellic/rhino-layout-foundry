@@ -57,6 +57,8 @@ internal sealed class RhinoFoundryAutomationHost : IFoundryAutomationHost
         var snapshot = _snapshotProvider.Capture();
         switch (request.Kind)
         {
+            case AutomationCaptureKind.Model:
+                return await RhinoModelInspectionCapture.CaptureAsync(snapshot.DocumentRuntimeSerialNumber, request, cancellationToken);
             case AutomationCaptureKind.Layout when request.SheetPageViewId is { } sheetId:
             {
                 if (!snapshot.Sheets.ContainsKey(sheetId))

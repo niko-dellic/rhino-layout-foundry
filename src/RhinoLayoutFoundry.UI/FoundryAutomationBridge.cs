@@ -18,7 +18,14 @@ internal static class FoundryAutomationBridge
 
     internal static IReadOnlyDictionary<string, object?> CreateInvocationContext()
     {
-        var dispatch = new Func<string, CancellationToken, Task<string>>(DispatchAsync);
+        var serial = FoundryAutomation.Current?.CaptureSnapshot().DocumentRuntimeSerialNumber;
+        async Task<string> BoundDispatch(string request, CancellationToken cancellation)
+        {
+            if (serial is null || FoundryAutomation.Current?.CaptureSnapshot().DocumentRuntimeSerialNumber != serial)
+                throw new InvalidOperationException("This drawing task belongs to another document. Return to that document to continue.");
+            return await DispatchAsync(request, cancellation);
+        }
+        var dispatch = new Func<string, CancellationToken, Task<string>>(BoundDispatch);
         return new Dictionary<string, object?>(StringComparer.Ordinal)
         {
             [DispatchKey] = dispatch,
@@ -48,6 +55,7 @@ internal static class FoundryAutomationBridge
                     DrawingSetSpecificationValidator.Parse(arguments), host.CaptureSnapshot())),
                 "capture_layout" => await CaptureAsync(host, arguments, true, cancellationToken),
                 "capture_named_view" => await CaptureAsync(host, arguments, false, cancellationToken),
+                "capture_model" => await CaptureModelAsync(host, cancellationToken),
                 "stage_create_named_view" => Stage(host, NamedViewPlan(host, arguments, String(root, "session_id"))),
                 "stage_create_clipping_plane" => Stage(host, ClippingPlanePlan(host, arguments, String(root, "session_id"))),
                 "stage_create_layouts" => Stage(host, LayoutPlan(host, arguments)),
@@ -102,6 +110,9 @@ internal static class FoundryAutomationBridge
                     id = sheet.PageViewId,
                     folder_id = sheet.FolderId,
                     sheet.Name,
+                    notes = sheet.Notes,
+                    ai_provenance = sheet.Metadata.Where(p => p.Key.StartsWith("RhinoLayoutFoundry.DrawingSet.", StringComparison.Ordinal))
+                        .ToDictionary(p => p.Key, p => p.Value),
                     paper = new { width = sheet.PageWidth, height = sheet.PageHeight, units = sheet.PageUnitSystem },
                     details = sheet.Details.Select(detail => new
                     {
@@ -109,6 +120,11 @@ internal static class FoundryAutomationBridge
                         detail.Name,
                         display_mode = detail.DisplayModeName,
                         page_bounds = detail.PageBounds,
+                        scale_denominator = detail.ScaleDenominator,
+                        camera_location = detail.CameraLocation,
+                        camera_target = detail.CameraTarget,
+                        parallel_projection = detail.IsParallelProjection,
+                        named_view = sheet.DetailNamedViews.GetValueOrDefault(detail.DetailViewportId),
                     }),
                 }),
                 templates = snapshot.Templates.Select(template => new
@@ -159,6 +175,13 @@ internal static class FoundryAutomationBridge
             content_base64 = result.Content is null ? null : Convert.ToBase64String(result.Content),
             result.Message,
         });
+    }
+
+    private static async Task<string> CaptureModelAsync(IFoundryAutomationHost host, CancellationToken token)
+    {
+        var result = await host.CaptureAsync(new AutomationCaptureRequest(AutomationCaptureKind.Model, null, null, 1200, 900), token);
+        return Json(new { succeeded = result.Succeeded, media_type = result.MediaType,
+            content_base64 = result.Content is null ? null : Convert.ToBase64String(result.Content), result.Message });
     }
 
     private static OperationPlan NamedViewPlan(

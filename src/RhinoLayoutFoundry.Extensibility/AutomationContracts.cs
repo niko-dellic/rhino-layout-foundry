@@ -27,6 +27,7 @@ public enum AutomationCaptureKind
 {
     Layout,
     NamedView,
+    Model,
 }
 
 public sealed record AutomationCaptureRequest(

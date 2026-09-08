@@ -314,7 +314,6 @@ public sealed partial class LayoutFoundryPanel : Panel
                 },
                 _documentWarning,
                 new StackLayoutItem(_viewHost, expand: true),
-                CreateBottomBar(),
             },
         };
         _deleteConfirmationOverlay = new DeleteConfirmationOverlay();
@@ -341,7 +340,7 @@ public sealed partial class LayoutFoundryPanel : Panel
         _panelOverlayHost.Add(_layoutTemplateOverlay, 0, 0);
         _panelOverlayHost.Add(_deleteConfirmationOverlay, 0, 0);
         _panelOverlayHost.SizeChanged += (_, _) => LayoutPanelOverlay();
-        Content = _panelOverlayHost;
+        Content = CreateWorkspaceHost(_panelOverlayHost);
         UpdateViewModeButtons(FoundryPanelViewMode.List);
 
         _treeGrid.SelectedItemChanged += OnSelectionChanged;
@@ -919,6 +918,7 @@ public sealed partial class LayoutFoundryPanel : Panel
 
     private void SetViewMode(FoundryPanelViewMode mode)
     {
+        if (_workspaceHost.Content == _extensionWorkspace) SetWorkspaceVisible(false);
         _viewMode = mode;
         var next = mode switch
         {
@@ -990,11 +990,15 @@ public sealed partial class LayoutFoundryPanel : Panel
         });
     }
 
-    public bool TryInvokeCreateAction(string actionId) =>
-        FoundryCreateMenuActions.TryInvoke(
-            actionId,
-            this,
-            FoundryAutomationBridge.CreateInvocationContext());
+    public bool TryInvokeCreateAction(string actionId)
+    {
+        var context = new Dictionary<string, object?>(FoundryAutomationBridge.CreateInvocationContext())
+        {
+            ["showWorkspace"] = new Action<string, Control>(ShowExtensionWorkspace),
+            ["showWorkspaceWithToolbar"] = new Action<string, Control, Control>(ShowExtensionWorkspaceWithToolbar),
+        };
+        return FoundryCreateMenuActions.TryInvoke(actionId, this, context);
+    }
 
     private async Task InvokeCreateMenuItemSafelyAsync(CreateResourceKind kind)
     {
@@ -1117,7 +1121,7 @@ public sealed partial class LayoutFoundryPanel : Panel
             BackgroundColor = FoundryTheme.PanelBackground,
             MinimumSize = new Size(720, 480),
             WindowState = WindowState.Maximized,
-            Content = _panelOverlayHost,
+            Content = _workspaceRoot,
         };
         _fullscreenWindow = window;
         _fullscreenButton.Image = FoundryViewIcons.ExitFullscreen();
@@ -1143,7 +1147,7 @@ public sealed partial class LayoutFoundryPanel : Panel
         _fullscreenWindow = null;
         _fullscreenButton.Image = FoundryViewIcons.Fullscreen();
         _observerView.SetFullscreenState(false);
-        Content = _panelOverlayHost;
+        Content = _workspaceRoot;
         UpdateViewModeButtons(_viewMode);
     }
 
