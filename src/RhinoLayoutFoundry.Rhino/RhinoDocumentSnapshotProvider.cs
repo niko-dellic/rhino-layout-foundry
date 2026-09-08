@@ -234,6 +234,7 @@ internal sealed class RhinoDocumentSnapshotProvider : IDocumentSnapshotProvider
         {
             Templates = templates.ToArray(),
             Metadata = state.Metadata,
+            ModelUnitSystem = document.ModelUnitSystem.ToString(),
             NamedViews = document.NamedViews.Select(view => view.Name).ToHashSet(StringComparer.OrdinalIgnoreCase),
             DisplayModes = displayModeNames,
             Canvas = state.Canvas,
@@ -261,7 +262,7 @@ internal sealed class RhinoDocumentSnapshotProvider : IDocumentSnapshotProvider
     {
         var bounds = BoundingBox.Empty;
         foreach (var item in document.Objects.Where(item =>
-                     item is not DetailViewObject && item.Attributes.Space == ActiveSpace.ModelSpace))
+                     item is not DetailViewObject && item is not ClippingPlaneObject && item.Attributes.Space == ActiveSpace.ModelSpace))
         {
             var objectBounds = item.Geometry?.GetBoundingBox(true) ?? BoundingBox.Empty;
             if (objectBounds.IsValid) bounds.Union(objectBounds);

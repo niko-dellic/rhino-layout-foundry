@@ -7,6 +7,20 @@ namespace RhinoLayoutFoundry.Core.Tests;
 public sealed class AutomationPlanRegistryTests
 {
     [Fact]
+    public async Task DetailFramingUsesTheSameSingleUseApprovalGate()
+    {
+        var context = new Context();
+        var registry = new AutomationPlanRegistry(context, context);
+        var envelope = registry.StagePlan(Plan() with
+        { Changes = [new ConfigureDetailChange(Guid.NewGuid(), 100, new(0,0,0), "Floor plan")] });
+        Assert.Equal(0, context.Applied);
+        var approval = registry.ApprovePlan(envelope.PlanId);
+        Assert.True((await registry.ApplyApprovedPlanAsync(approval, CancellationToken.None)).Succeeded);
+        Assert.IsType<ConfigureDetailChange>(context.LastPlan!.Changes[0]);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => registry.ApplyApprovedPlanAsync(approval, CancellationToken.None));
+    }
+
+    [Fact]
     public async Task ApprovalIsSingleUseAndCannotBeForged()
     {
         var context = new Context();

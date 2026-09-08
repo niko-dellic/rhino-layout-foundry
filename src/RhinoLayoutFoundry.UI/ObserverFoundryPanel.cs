@@ -195,6 +195,9 @@ public sealed class ObserverFoundryPanel : Panel
             ApplySidebarVisibility();
         };
         _canvasOverlay.Add(_inspectorResizeHandle, 0, 38);
+        _canvas.IsNativeOverlay = point =>
+            new Control[] { _inspector, _inspectorResizeHandle, _canvasToolbar, _gridAppearanceTray }
+                .Any(control => control.Visible && new RectangleF(control.Location, control.Size).Contains(point));
         _inspector.OperationCompleted += (_, eventArgs) =>
         {
             _status.Text = ResultMessage(eventArgs.Result, eventArgs.SuccessMessage);

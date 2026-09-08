@@ -8,6 +8,20 @@ namespace RhinoLayoutFoundry.Core.Tests;
 public sealed class AutomationLayoutRequestTests
 {
     [Fact]
+    public void StrictSchemaNullTemplateCreatesUntemplatedLayout()
+    {
+        var snapshot = TestSnapshots.Create();
+        using var json = JsonDocument.Parse($$"""
+            {"destination_folder_id":"{{snapshot.RootFolderId}}","naming_pattern":"Demo-{index}",
+             "layouts":[{"quantity":1,"page_width":420,"page_height":297,"page_units":"Millimeters",
+             "layout_kind":"single_detail","template_id":null}]}
+            """);
+        var plan = new BatchCreateSheetsPlanner().Plan(AutomationLayoutRequest.Parse(json.RootElement, snapshot), snapshot);
+        Assert.True(plan.CanApply);
+        Assert.Single(plan.Changes);
+    }
+
+    [Fact]
     public void BridgeStagesCanonicalPerDetailRequest()
     {
         var snapshot = TestSnapshots.Create() with

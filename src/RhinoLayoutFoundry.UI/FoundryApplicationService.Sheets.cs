@@ -206,10 +206,13 @@ internal sealed partial class FoundryApplicationService
     public async Task<OperationResult> UpdateHierarchyNotesAsync(
         IReadOnlyList<OverviewNodeKey> targets,
         string notes,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        uint? expectedDocumentSerial = null)
     {
         return await RunOperationAsync(async snapshot =>
         {
+            if (expectedDocumentSerial is { } serial && snapshot.DocumentRuntimeSerialNumber != serial)
+                return UnavailableResult("Notes were not saved because the active document changed.");
             var request = new UpdateHierarchyNotesRequest(
                 snapshot.DocumentRuntimeSerialNumber,
                 snapshot.Revision,

@@ -423,7 +423,8 @@ internal sealed class ThumbnailFoundryPanel : Panel
                 width,
                 height,
                 sheet.PreviewContentVersion,
-                bucket);
+                bucket,
+                BackgroundArgb: 0xffffffff);
             if (_thumbnailCache.TryGet(key, out var bytes))
             {
                 _grid.SetPreview(key, new Bitmap(bytes));

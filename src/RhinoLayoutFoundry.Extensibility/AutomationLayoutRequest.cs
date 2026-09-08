@@ -36,7 +36,7 @@ public static class AutomationLayoutRequest
                 var value => throw new JsonException($"Unknown title_block '{value}'."),
             };
             IReadOnlyList<string?>? views = item.TryGetProperty("named_views_by_detail", out var viewItems) ? viewItems.EnumerateArray().Select(value => value.ValueKind == JsonValueKind.Null ? null : value.GetString()?.Trim()).ToArray() : null;
-            return new LayoutCreationSpec(item.GetProperty("quantity").GetInt32(), new PaperRecipe(item.GetProperty("page_width").GetDouble(), item.GetProperty("page_height").GetDouble(), item.GetProperty("page_units").GetString()!), layout, item.TryGetProperty("template_id", out var template) ? template.GetGuid() : null, BuiltInTitleBlock: titleBlock, NamedViewsByDetail: views);
+            return new LayoutCreationSpec(item.GetProperty("quantity").GetInt32(), new PaperRecipe(item.GetProperty("page_width").GetDouble(), item.GetProperty("page_height").GetDouble(), item.GetProperty("page_units").GetString()!), layout, item.TryGetProperty("template_id", out var template) && template.ValueKind != JsonValueKind.Null ? template.GetGuid() : null, BuiltInTitleBlock: titleBlock, NamedViewsByDetail: views);
         }).ToArray();
         return new BatchCreateSheetsRequest(snapshot.DocumentRuntimeSerialNumber, snapshot.Revision, arguments.GetProperty("destination_folder_id").GetGuid(), specs, arguments.GetProperty("naming_pattern").GetString()!, 1, 1);
     }

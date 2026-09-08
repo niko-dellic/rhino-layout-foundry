@@ -2694,6 +2694,7 @@ internal sealed partial class ObserverCanvasDrawable : FoundryCanvas
 
     private void OnMouseWheel(object? sender, MouseEventArgs eventArgs)
     {
+        if (IsNativeOverlay?.Invoke(eventArgs.Location) == true) return;
         var delta = eventArgs.Delta.Height;
         if (Math.Abs(delta) < float.Epsilon) return;
         if (TryNavigatorRowAt(eventArgs.Location, out _))
@@ -3318,8 +3319,11 @@ internal sealed partial class ObserverCanvasDrawable : FoundryCanvas
 
     protected override void OnCameraSettled() => ViewChanged?.Invoke(this, EventArgs.Empty);
 
+    internal Func<PointF, bool>? IsNativeOverlay { get; set; }
+
     protected override bool IsCanvasOverlay(PointF point)
     {
+        if (IsNativeOverlay?.Invoke(point) == true) return true;
         // Match the drawn rows, not the whole left column: the unused area
         // beneath a short or collapsed tree is still pannable canvas.
         if (TryNavigatorRowAt(point, out _))

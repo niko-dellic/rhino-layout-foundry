@@ -105,7 +105,7 @@ internal sealed class RhinoDocumentThumbnailProvider : IDocumentThumbnailProvide
             DrawAxis = false,
             RasterMode = true,
             OutputColor = ViewCaptureSettings.ColorMode.PrintColor,
-            UsePrintWidths = false,
+            UsePrintWidths = true,
         };
         captureSettings.SetLayout(
             requestedSize,
@@ -139,8 +139,15 @@ internal sealed class RhinoDocumentThumbnailProvider : IDocumentThumbnailProvide
         if (initializeFrameBuffer is not null)
             DisplayPipeline.InitFrameBuffer += initializeFrameBuffer;
 
+        var previousPaper = global::Rhino.ApplicationSettings.AppearanceSettings.PageviewPaperColor;
+
         try
         {
+            // On macOS the native page pipeline can paint the application paper
+            // colour after InitFrameBuffer. The caller holds the capture gate;
+            // restore the preference before returning, including on failures.
+            if (requestedBackground is { } paper)
+                global::Rhino.ApplicationSettings.AppearanceSettings.PageviewPaperColor = paper;
             // Rhino initializes a separate framebuffer for page and detail
             // display pipelines. Supplying the Foundry preview fill here keeps
             // both surfaces consistent without changing the user's Rhino
@@ -149,8 +156,16 @@ internal sealed class RhinoDocumentThumbnailProvider : IDocumentThumbnailProvide
         }
         finally
         {
-            if (initializeFrameBuffer is not null)
-                DisplayPipeline.InitFrameBuffer -= initializeFrameBuffer;
+            try
+            {
+                if (requestedBackground is not null)
+                    global::Rhino.ApplicationSettings.AppearanceSettings.PageviewPaperColor = previousPaper;
+            }
+            finally
+            {
+                if (initializeFrameBuffer is not null)
+                    DisplayPipeline.InitFrameBuffer -= initializeFrameBuffer;
+            }
         }
     }
 }

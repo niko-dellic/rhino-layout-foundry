@@ -35,6 +35,7 @@ public sealed record DocumentSnapshot(
     public ModelBoundsSnapshot? ModelBounds { get; init; }
     public Guid? ActiveViewportDisplayModeId { get; init; }
     public string PageUnitSystem { get; init; } = "Millimeters";
+    public string ModelUnitSystem { get; init; } = "None";
 }
 
 public sealed record SheetSnapshot(

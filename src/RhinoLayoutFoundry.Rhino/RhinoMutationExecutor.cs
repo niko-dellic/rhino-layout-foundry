@@ -51,6 +51,9 @@ internal sealed partial class RhinoMutationExecutor(
     {
         return plan.Changes switch
         {
+            [RhinoLayoutFoundry.Extensibility.CreateDrawingSetChange drawingSet] => ApplyDrawingSet(document, plan, drawingSet),
+            [ConfigureDetailChange configureDetail] => ApplyConfigureDetail(document, plan, configureDetail),
+            [FlipClippingPlaneChange flip] => ApplyFlipClippingPlane(document, plan, flip),
             [CreateNamedViewChange createNamedView] =>
                 ApplyCreateNamedView(document, plan, createNamedView),
             [CreateClippingPlaneChange createClippingPlane] =>
@@ -148,6 +151,9 @@ internal sealed partial class RhinoMutationExecutor(
                 case AssignNamedViewToDetailsChange details:
                     foreach (var id in details.DetailViewportIds)
                         if (detailParents.TryGetValue(id, out var pageId)) sheetIds.Add(pageId);
+                    break;
+                case ConfigureDetailChange detail:
+                    if (detailParents.TryGetValue(detail.DetailViewportId, out var detailPageId)) sheetIds.Add(detailPageId);
                     break;
                 case SetPrintInclusionChange print:
                     sheetIds.UnionWith(print.ExpectedValues.Keys);

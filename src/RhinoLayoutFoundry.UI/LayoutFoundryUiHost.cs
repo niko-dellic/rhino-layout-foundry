@@ -311,8 +311,9 @@ public static class LayoutFoundryUiHost
     public static Task<OperationResult> UpdateHierarchyNotesAsync(
         IReadOnlyList<OverviewNodeKey> targets,
         string notes,
-        CancellationToken cancellationToken = default) =>
-        Service.UpdateHierarchyNotesAsync(targets, notes, cancellationToken);
+        CancellationToken cancellationToken = default,
+        uint? expectedDocumentSerial = null) =>
+        Service.UpdateHierarchyNotesAsync(targets, notes, cancellationToken, expectedDocumentSerial);
 
     public static Task<OperationResult> AssignNamedViewAsync(
         IReadOnlyList<Guid> detailViewportIds,

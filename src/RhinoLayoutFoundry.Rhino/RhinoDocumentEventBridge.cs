@@ -122,6 +122,10 @@ internal sealed class RhinoDocumentEventBridge : IDisposable
 
     private void OnDocumentSaved(object? sender, DocumentSaveEventArgs eventArgs)
     {
+        // Export/checkpoint and autosave copies do not change the live document's
+        // identity. Their delayed completion must not invalidate a reviewed plan.
+        if (!string.Equals(eventArgs.FileName, eventArgs.Document.Path, StringComparison.Ordinal))
+            return;
         Track(
             eventArgs.Document,
             OverviewInvalidationKind.DocumentIdentity |

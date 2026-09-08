@@ -26,11 +26,14 @@ internal sealed class SelectionInspectorPanel : Panel
     private readonly Label _selectionSummary = FoundryTheme.MutedLabel();
     private readonly TextBox _name = new();
     private readonly TextArea _notes = new() { Height = 72, Wrap = true };
-    private readonly FoundryDialogButton _saveNotes = new("Save notes", FoundryDialogButtonStyle.Secondary, 100);
-    private readonly Label _notesMixed = Hint("Mixed notes — saving replaces all selected notes.");
+    private readonly UITimer _notesTimer = new() { Interval = 0.4 };
+    private (uint Serial, OverviewNodeKey[] Targets, string Text)? _pendingNotes;
+    private readonly Panel _notesSection;
+    private readonly Label _notesError = ErrorLabel();
+    private readonly Label _notesMixed = Hint("Mixed notes — typing replaces all selected notes.");
     private readonly Label _selectionError = ErrorLabel();
     private readonly Panel _selectionSection;
-    private readonly FoundryCheckBox _print = new("Include in Print all");
+    private readonly FoundryCheckBox _print = new("Enabled");
     private readonly DropDown _paperPreset = new();
     private readonly NumericStepper _paperWidth = DimensionStepper();
     private readonly NumericStepper _paperHeight = DimensionStepper();
@@ -125,12 +128,21 @@ internal sealed class SelectionInspectorPanel : Panel
             Items =
             {
                 _selectionSummary,
+                new Panel
+                {
+                    Padding = new Padding(0, FoundryTheme.Space2, 0, FoundryTheme.Space2),
+                    Content = new Panel { Height = 1, BackgroundColor = FoundryTheme.CanvasBorder },
+                },
                 Field("Name", InspectorField(_name)),
-                Field("Notes", new FoundryFormField(_notes)),
-                _notesMixed,
-                _saveNotes,
                 _selectionError,
             },
+        });
+
+        _notesSection = Section("Notes", new StackLayout
+        {
+            Spacing = FoundryTheme.Space2,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            Items = { new FoundryFormField(_notes), _notesMixed, _notesError },
         });
 
         _templateSection = Section("Template registration", new StackLayout
@@ -319,7 +331,7 @@ internal sealed class SelectionInspectorPanel : Panel
             NamedViewThumbnailMinimum,
             NamedViewThumbnailMaximum,
             NamedViewThumbnailDefault,
-            width: 220,
+            width: 80,
             toolTipFormatter: value => $"Named-view tile width: {value} px");
         _namedViewThumbnailSizeValue = FoundryTheme.MutedLabel();
         _namedViewThumbnailSizeValue.Width = 46;
@@ -327,7 +339,7 @@ internal sealed class SelectionInspectorPanel : Panel
         _namedViewThumbnailSizeRow = new Panel
         {
             Visible = false,
-            Content = Field("Thumbnail size", new StackLayout
+            Content = new StackLayout
             {
                 Orientation = Orientation.Horizontal,
                 Spacing = FoundryTheme.Space2,
@@ -338,7 +350,7 @@ internal sealed class SelectionInspectorPanel : Panel
                     new StackLayoutItem(_namedViewThumbnailSize, true),
                     _namedViewThumbnailSizeValue,
                 },
-            }),
+            },
         };
         UpdateNamedViewThumbnailSizeLabel();
         _namedViews = new GridView
@@ -374,8 +386,13 @@ internal sealed class SelectionInspectorPanel : Panel
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Items =
             {
-                _namedViewModeGroup,
-                _namedViewThumbnailSizeRow,
+                new StackLayout
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = FoundryTheme.Space2,
+                    VerticalContentAlignment = VerticalAlignment.Center,
+                    Items = { _namedViewModeGroup, new StackLayoutItem(_namedViewThumbnailSizeRow, true) },
+                },
                 _namedViews,
                 _namedViewThumbnailBrowser,
                 _assignNamedView,
@@ -386,15 +403,16 @@ internal sealed class SelectionInspectorPanel : Panel
         var content = new StackLayout
         {
             Padding = new Padding(0, 0, FoundryTheme.Space1, FoundryTheme.Space4),
-            Spacing = FoundryTheme.Space4,
+            Spacing = FoundryTheme.Space2,
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Items =
             {
                 _selectionSection,
-                _templateSection,
                 _layoutSection,
                 _detailSection,
                 _appearanceSection,
+                _templateSection,
+                _notesSection,
                 _namedViewSection,
             },
         };
@@ -405,6 +423,7 @@ internal sealed class SelectionInspectorPanel : Panel
         if (contentMode != SelectionInspectorContent.All)
         {
             _selectionSection.Visible = false;
+            _notesSection.Visible = false;
             _templateSection.Visible = false;
             _layoutSection.Visible = false;
             _detailSection.Visible = false;
@@ -419,7 +438,16 @@ internal sealed class SelectionInspectorPanel : Panel
             eventArgs.Handled = true;
         };
         _name.LostFocus += (_, _) => _ = CommitRenameAsync();
-        _saveNotes.Click += (_, _) => _ = CommitNotesAsync();
+        _notes.TextChanged += (_, _) =>
+        {
+            if (_updating || _snapshot is null || _model is null) return;
+            _pendingNotes = (_snapshot.DocumentRuntimeSerialNumber, _model.EditableNotesTargets.ToArray(), _notes.Text);
+            _notesTimer.Stop();
+            _notesTimer.Start();
+        };
+        _notesTimer.Elapsed += (_, _) => _ = CommitNotesAsync();
+        _notes.LostFocus += (_, _) => _ = CommitNotesAsync();
+        UnLoad += (_, _) => _ = CommitNotesAsync();
         _print.CheckedChanged += (_, _) =>
         {
             if (!_updating) _ = CommitPrintAsync();
@@ -534,10 +562,20 @@ internal sealed class SelectionInspectorPanel : Panel
 
     internal void SetContext(DocumentSnapshot? snapshot, IEnumerable<OverviewNodeKey> selection)
     {
+        var nextSelection = selection?.Distinct().ToArray() ?? [];
+        var sameContext = _snapshot?.DocumentRuntimeSerialNumber == snapshot?.DocumentRuntimeSerialNumber &&
+            _selection.SequenceEqual(nextSelection);
+        if (!sameContext && _notesTimer.Started) _ = CommitNotesAsync();
         _snapshot = snapshot;
-        _selection = selection?.Distinct().ToArray() ?? [];
+        _selection = nextSelection;
         _model = snapshot is null ? null : SelectionInspectorModel.Create(snapshot, _selection);
         Populate();
+        if (!sameContext)
+        {
+            _updating = true;
+            _notes.Text = _model?.NotesValue ?? string.Empty;
+            _updating = false;
+        }
     }
 
     private void Populate()
@@ -553,10 +591,10 @@ internal sealed class SelectionInspectorPanel : Panel
               $"Affects {model.AffectedLayoutCount} layouts and {model.AffectedDetailCount} details";
         _name.Text = model?.RenameValue ?? string.Empty;
         _name.Enabled = model?.RenameTarget is not null;
-        _notes.Text = model?.NotesValue ?? string.Empty;
+        if (!_notesTimer.Started && !_busySections.Contains(_notesSection))
+            _notes.Text = model?.NotesValue ?? string.Empty;
         _notesMixed.Visible = model?.NotesIsMixed == true;
         _notes.Enabled = model?.EditableNotesTargets.Count > 0;
-        _saveNotes.Enabled = model?.EditableNotesTargets.Count > 0;
         _selectionSection.Enabled = enabled;
 
         _layoutSection.Enabled = model?.AffectedLayoutCount > 0;
@@ -659,17 +697,29 @@ internal sealed class SelectionInspectorPanel : Panel
 
     private async Task CommitNotesAsync()
     {
-        if (_updating || _model is null || _model.EditableNotesTargets.Count == 0) return;
-        if (!_model.NotesIsMixed && string.Equals(_model.NotesValue, _notes.Text, StringComparison.Ordinal))
+        if (_busySections.Contains(_notesSection))
+        {
+            _notesTimer.Start();
             return;
-        var count = _model.EditableNotesTargets.Count;
+        }
+        _notesTimer.Stop();
+        if (_updating || _pendingNotes is not { } pending) return;
+        _pendingNotes = null;
+        var count = pending.Targets.Length;
+        if (count == 0) return;
         await RunAsync(
-            _selectionSection,
-            _selectionError,
+            _notesSection,
+            _notesError,
             () => LayoutFoundryUiHost.UpdateHierarchyNotesAsync(
-                _model.EditableNotesTargets,
-                _notes.Text),
+                pending.Targets,
+                pending.Text, expectedDocumentSerial: pending.Serial),
             count == 1 ? "Notes updated." : $"Notes updated on {count} items.");
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) _notesTimer.Dispose();
+        base.Dispose(disposing);
     }
 
     private async Task CommitPrintAsync()
@@ -1072,7 +1122,7 @@ _templateRegistration.Checked != true ? "Template registration cleared." : "Temp
         string success)
     {
         if (!_busySections.Add(section)) return;
-        section.Enabled = false;
+        if (section != _notesSection) section.Enabled = false;
         ShowError(errorLabel, string.Empty);
         OperationResult result;
         try
@@ -1089,7 +1139,7 @@ _templateRegistration.Checked != true ? "Template registration cleared." : "Temp
         }
         finally
         {
-            section.Enabled = true;
+            if (section != _notesSection) section.Enabled = true;
             _busySections.Remove(section);
         }
 
@@ -1171,7 +1221,7 @@ _templateRegistration.Checked != true ? "Template registration cleared." : "Temp
         BackgroundColor = FoundryTheme.CanvasOverlayBackground,
         Content = new StackLayout
         {
-            Spacing = FoundryTheme.Space2,
+            Spacing = FoundryTheme.Space1,
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Items =
             {
@@ -1183,7 +1233,6 @@ _templateRegistration.Checked != true ? "Template registration cleared." : "Temp
                     TextAlignment = TextAlignment.Left,
                 },
                 content,
-                new Panel { Height = 1, BackgroundColor = FoundryTheme.CanvasBorder },
             },
         },
     };

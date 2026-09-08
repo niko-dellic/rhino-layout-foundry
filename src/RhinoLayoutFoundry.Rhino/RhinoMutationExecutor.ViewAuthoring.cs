@@ -13,6 +13,91 @@ namespace RhinoLayoutFoundry.Rhino;
 
 internal sealed partial class RhinoMutationExecutor
 {
+    private OperationResult ApplyFlipClippingPlane(RhinoDoc document, OperationPlan plan, FlipClippingPlaneChange change)
+    {
+        if (document.Objects.FindId(change.ObjectId) is not ClippingPlaneObject clip ||
+            string.IsNullOrWhiteSpace(clip.Attributes.GetUserString("RhinoLayoutFoundry.Automation.SessionId")))
+            return Failure("clipping_plane.not_owned", "The automation clipping plane no longer exists.");
+        var plane = clip.ClippingPlaneGeometry.Plane;
+        var viewportIds = clip.ClippingPlaneGeometry.ViewportIds();
+        var rotation = Transform.Rotation(Math.PI, plane.XAxis, plane.Origin);
+        var undo = document.BeginUndoRecord(plan.UndoDescription);
+        if (undo == 0) return Failure("operation.undo_unavailable", "Could not start undo record.");
+        try
+        {
+            // Surface replacement converts a clipping plane to a Brep in Rhino.
+            // Native object transformation preserves its special type and viewport links.
+            if (document.Objects.Transform(change.ObjectId, rotation, true) != change.ObjectId)
+                throw new InvalidOperationException("Rhino rejected the clipping direction change.");
+            if (document.Objects.FindId(change.ObjectId) is not ClippingPlaneObject updated ||
+                !updated.ClippingPlaneGeometry.ViewportIds().Order().SequenceEqual(viewportIds.Order()))
+                throw new InvalidOperationException("Clipping object identity or viewport assignments changed.");
+            document.Modified = true;
+            _revisionTracker.Bump(document);
+            document.Views.Redraw();
+            _overviewChanged(OverviewInvalidation.All);
+            return SuccessWithEntity(plan, "clipping_plane.flipped", "Flipped the requested clipping plane; viewport assignments are unchanged.", change.ObjectId);
+        }
+        catch (Exception exception)
+        {
+            return Failure("clipping_plane.flip_failed", exception.Message);
+        }
+        finally { document.EndUndoRecord(undo); }
+    }
+
+    private OperationResult ApplyConfigureDetail(RhinoDoc document, OperationPlan plan, ConfigureDetailChange change)
+    {
+        var detail = document.Views.GetPageViews().SelectMany(p => p.GetDetailViews())
+            .FirstOrDefault(d => d.Viewport.Id == change.DetailViewportId);
+        if (detail is null) return Failure("detail.missing", "The target detail no longer exists.");
+        using var before = new ViewportInfo(detail.Viewport);
+        var ratio = detail.DetailGeometry.PageToModelRatio;
+        var locked = detail.DetailGeometry.IsProjectionLocked;
+        var name = detail.Attributes.Name;
+        var undo = document.BeginUndoRecord(plan.UndoDescription);
+        if (undo == 0) return Failure("operation.undo_unavailable", "Could not start undo record.");
+        try
+        {
+            detail.DetailGeometry.IsProjectionLocked = false;
+            if (!detail.Viewport.ChangeToParallelProjection(true))
+                throw new InvalidOperationException("Rhino rejected parallel projection.");
+            var target = Point(change.Target);
+            var delta = target - detail.Viewport.CameraTarget;
+            detail.Viewport.SetCameraLocations(target, detail.Viewport.CameraLocation + delta);
+            detail.Viewport.DisplayMode = DisplayModeDescription.FindByName("Pen")
+                ?? throw new InvalidOperationException("No monochrome drawing display mode is available.");
+            if (!detail.CommitViewportChanges() ||
+                !detail.DetailGeometry.SetScale(change.ScaleDenominator * RhinoMath.UnitScale(UnitSystem.Millimeters, document.ModelUnitSystem), document.ModelUnitSystem,
+                    RhinoMath.UnitScale(UnitSystem.Millimeters, document.PageUnitSystem), document.PageUnitSystem))
+                throw new InvalidOperationException("Rhino rejected the detail frame or scale.");
+            detail.Attributes.Name = change.Name;
+            detail.DetailGeometry.IsProjectionLocked = true;
+            if (!detail.CommitChanges()) throw new InvalidOperationException("Could not commit detail settings.");
+            // Geometry commits replace the detail object; apply presentation to the fresh viewport.
+            var committed = document.Views.GetPageViews().SelectMany(p => p.GetDetailViews())
+                .First(d => d.Viewport.Id == change.DetailViewportId);
+            committed.Viewport.DisplayMode = DisplayModeDescription.FindByName("Pen");
+            if (!committed.CommitViewportChanges()) throw new InvalidOperationException("Could not commit monochrome presentation.");
+            document.Modified = true;
+            _revisionTracker.Bump(document);
+            document.Views.Redraw();
+            _overviewChanged(OverviewInvalidation.All);
+            return SuccessWithEntity(plan, "detail.configured", "Applied parallel framing, scale and monochrome presentation.");
+        }
+        catch (Exception exception)
+        {
+            detail.DetailGeometry.IsProjectionLocked = false;
+            detail.Viewport.SetViewProjection(before, true);
+            detail.CommitViewportChanges();
+            detail.DetailGeometry.SetScale(1, document.ModelUnitSystem, ratio, document.PageUnitSystem);
+            detail.Attributes.Name = name;
+            detail.DetailGeometry.IsProjectionLocked = locked;
+            detail.CommitChanges();
+            return Failure("detail.configure_failed", exception.Message);
+        }
+        finally { document.EndUndoRecord(undo); }
+    }
+
     private OperationResult ApplyCreateNamedView(
         RhinoDoc document,
         OperationPlan plan,
@@ -31,17 +116,13 @@ internal sealed partial class RhinoMutationExecutor
         var created = false;
         try
         {
-            using var view = new ViewInfo(sourceView.ActiveViewport) { Name = definition.Name };
-            var viewport = view.Viewport;
-            viewport.UnlockCamera();
+            using var viewport = new RhinoViewport();
+            using var seed = new ViewportInfo(sourceView.ActiveViewport);
+            viewport.SetViewProjection(seed, true);
             var location = Point(definition.CameraLocation);
             var target = Point(definition.CameraTarget);
-            var direction = target - location;
-            if (!viewport.SetCameraLocation(location) ||
-                !viewport.SetCameraDirection(direction) ||
-                !viewport.SetCameraUp(Vector(definition.CameraUp)))
-                throw new InvalidOperationException("Rhino rejected the proposed camera frame.");
-            viewport.TargetPoint = target;
+            viewport.SetCameraLocations(target, location);
+            viewport.CameraUp = Vector(definition.CameraUp);
             var projectionChanged = definition.Projection switch
             {
                 FoundryViewProjection.Parallel => viewport.ChangeToParallelProjection(true),
@@ -51,7 +132,10 @@ internal sealed partial class RhinoMutationExecutor
             };
             if (!projectionChanged)
                 throw new InvalidOperationException("Rhino rejected the proposed projection.");
-            if (document.NamedViews.Add(view) < 0)
+            // ViewInfo.Viewport returns a detached copy. Build the saved ViewInfo
+            // only after configuring the standalone viewport.
+            using var stored = new ViewInfo(viewport) { Name = definition.Name };
+            if (document.NamedViews.Add(stored) < 0)
                 throw new InvalidOperationException("Rhino did not create the named view.");
             created = true;
             document.Modified = true;

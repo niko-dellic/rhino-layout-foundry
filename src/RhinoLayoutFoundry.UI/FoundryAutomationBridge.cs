@@ -42,12 +42,18 @@ internal static class FoundryAutomationBridge
             return operation switch
             {
                 "inspect_document" => InspectJson(host),
+                "stage_drawing_set" => Stage(host, DrawingSetPlanner.Plan(
+                    DrawingSetSpecificationValidator.Parse(arguments), host.CaptureSnapshot())),
+                "validate_drawing_set" => Json(DrawingSetSpecificationValidator.Validate(
+                    DrawingSetSpecificationValidator.Parse(arguments), host.CaptureSnapshot())),
                 "capture_layout" => await CaptureAsync(host, arguments, true, cancellationToken),
                 "capture_named_view" => await CaptureAsync(host, arguments, false, cancellationToken),
                 "stage_create_named_view" => Stage(host, NamedViewPlan(host, arguments, String(root, "session_id"))),
                 "stage_create_clipping_plane" => Stage(host, ClippingPlanePlan(host, arguments, String(root, "session_id"))),
                 "stage_create_layouts" => Stage(host, LayoutPlan(host, arguments)),
                 "stage_assign_named_view" => Stage(host, AssignmentPlan(host, arguments)),
+                "stage_configure_detail" => Stage(host, DetailPlan(host, arguments)),
+                "stage_flip_clipping_plane" => Stage(host, FlipClipPlan(host, arguments)),
                 "apply_plan" => await ApplyAsync(host, GuidValue(arguments, "plan_id"), cancellationToken),
                 "abandon_plan" => Abandon(host, GuidValue(arguments, "plan_id")),
                 _ => Json(new { error = "Unsupported Foundry bridge operation." }),
@@ -79,6 +85,10 @@ internal static class FoundryAutomationBridge
                 revision = snapshot.Revision,
                 root_folder_id = snapshot.RootFolderId,
                 model_bounds = snapshot.ModelBounds,
+                model_units = snapshot.ModelUnitSystem,
+                automation_features = new[] { "drawing_set_v1", "drawing_set_v2", "drawing_captions", "per_view_hidden_layers", "single_approval_batch", "proposal_receipts" },
+                drawing_set_receipts = snapshot.Metadata.Where(p => p.Key.StartsWith("RhinoLayoutFoundry.DrawingSet.", StringComparison.Ordinal))
+                    .ToDictionary(p => p.Key, p => p.Value),
                 standard_viewport_ids = snapshot.StandardViewports,
                 folders = snapshot.Folders.Values.Select(folder => new
                 {
@@ -98,6 +108,7 @@ internal static class FoundryAutomationBridge
                         id = detail.DetailViewportId,
                         detail.Name,
                         display_mode = detail.DisplayModeName,
+                        page_bounds = detail.PageBounds,
                     }),
                 }),
                 templates = snapshot.Templates.Select(template => new
@@ -138,7 +149,8 @@ internal static class FoundryAutomationBridge
             layout ? GuidValue(arguments, "sheet_page_view_id") : null,
             layout ? null : String(arguments, "named_view_name"),
             Int32(arguments, "width"),
-            Int32(arguments, "height"));
+            Int32(arguments, "height"),
+            BackgroundArgb: layout ? 0xffffffff : 0xfff5f5f5);
         var result = await host.CaptureAsync(request, cancellationToken);
         return Json(new
         {
@@ -193,6 +205,24 @@ internal static class FoundryAutomationBridge
     {
         var snapshot = host.CaptureSnapshot();
         return new BatchCreateSheetsPlanner().Plan(AutomationLayoutRequest.Parse(arguments, snapshot), snapshot);
+    }
+
+    private static OperationPlan FlipClipPlan(IFoundryAutomationHost host, JsonElement arguments)
+    {
+        var snapshot = host.CaptureSnapshot();
+        return new FlipClippingPlanePlanner().Plan(new FlipClippingPlaneRequest(
+            snapshot.DocumentRuntimeSerialNumber, snapshot.Revision, GuidValue(arguments, "object_id")), snapshot);
+    }
+
+    private static OperationPlan DetailPlan(IFoundryAutomationHost host, JsonElement arguments)
+    {
+        var snapshot = host.CaptureSnapshot();
+        var target = arguments.GetProperty("target");
+        return new ConfigureDetailPlanner().Plan(new ConfigureDetailRequest(
+            snapshot.DocumentRuntimeSerialNumber, snapshot.Revision, GuidValue(arguments, "detail_viewport_id"),
+            arguments.GetProperty("scale_denominator").GetDouble(),
+            new Point3Coordinates(target.GetProperty("x").GetDouble(), target.GetProperty("y").GetDouble(), target.GetProperty("z").GetDouble()),
+            String(arguments, "name")), snapshot);
     }
 
     private static OperationPlan AssignmentPlan(IFoundryAutomationHost host, JsonElement arguments)
