@@ -8,9 +8,9 @@ internal sealed class RenameFolderDialog : Dialog
     private readonly TextBox _nameTextBox;
     private readonly FoundryDialogButton _renameButton;
 
-    internal RenameFolderDialog(string currentName)
+    internal RenameFolderDialog(string currentName, string kind = "folder")
     {
-        Title = "Rename folder";
+        Title = "Rename " + kind;
         MinimumSize = new Size(360, 150);
         Resizable = false;
         Padding = new Padding(FoundryTheme.Space4);
@@ -51,7 +51,7 @@ internal sealed class RenameFolderDialog : Dialog
             {
                 new Label
                 {
-                    Text = "Rename folder",
+                    Text = Title,
                     Font = SystemFonts.Bold(15),
                     TextColor = FoundryTheme.PrimaryText,
                 },

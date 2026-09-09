@@ -128,6 +128,10 @@ public sealed partial class LayoutFoundryPanel : Panel
     private CellInteractionGuard? _cellInteractionGuard;
     private CellInteractionGuard? _selectionPreservingPropertyInteraction;
     private InlineDraft? _inlineDraft;
+    private OverviewNodeKey? _lastNameClick;
+    private long _lastNameClickTime;
+    private int _nameClickGeneration;
+    private bool _nameWasSelectedOnMouseDown;
     private Guid? _contextDestinationFolderId;
     private Guid? _contextPrintFolderId;
     private Form? _fullscreenWindow;
@@ -352,9 +356,11 @@ public sealed partial class LayoutFoundryPanel : Panel
                 return;
             }
 
-            if (eventArgs.Item is HierarchyTreeItem item &&
-                ReferenceEquals(eventArgs.GridColumn, _layoutsColumn) &&
-                IsInlineRenameTarget(item))
+            _nameClickGeneration++;
+            _lastNameClick = null;
+            if (eventArgs.Item is not HierarchyTreeItem item) return;
+            _treeGrid.SelectedItem = item;
+            if (item.Node.Key.Kind == OverviewNodeKind.Folder && IsInlineRenameTarget(item))
             {
                 BeginInlineNameRename(item);
                 return;
@@ -990,12 +996,15 @@ public sealed partial class LayoutFoundryPanel : Panel
         });
     }
 
-    public bool TryInvokeCreateAction(string actionId)
+    public bool TryInvokeCreateAction(string actionId) => TryInvokeCreateAction(actionId, null);
+
+    private bool TryInvokeCreateAction(string actionId, Guid? conversationId)
     {
         var context = new Dictionary<string, object?>(FoundryAutomationBridge.CreateInvocationContext())
         {
             ["showWorkspace"] = new Action<string, Control>(ShowExtensionWorkspace),
             ["showWorkspaceWithToolbar"] = new Action<string, Control, Control>(ShowExtensionWorkspaceWithToolbar),
+            ["conversationId"] = conversationId?.ToString("N"),
         };
         return FoundryCreateMenuActions.TryInvoke(actionId, this, context);
     }
@@ -1292,6 +1301,7 @@ public sealed partial class LayoutFoundryPanel : Panel
 
     private void CreateHierarchyContextMenu()
     {
+        _renameConversationMenu.Click += (_, _) => RenameConversation();
         _setCurrentMenuItem = new ButtonMenuItem { Text = "Set Current" };
         _newFolderMenuItem = new ButtonMenuItem { Text = "New Folder" };
         _newPageMenuItem = new ButtonMenuItem { Text = "New Layout…" };
@@ -1324,6 +1334,8 @@ public sealed partial class LayoutFoundryPanel : Panel
         _renameFolderMenuItem.Click += async (_, _) => await RenameSelectedFolderAsync();
 
         var contextMenu = new ContextMenu(
+            _renameConversationMenu,
+            _moveConversationMenu,
             _setCurrentMenuItem,
             new SeparatorMenuItem(),
             _newFolderMenuItem,
@@ -1344,7 +1356,7 @@ public sealed partial class LayoutFoundryPanel : Panel
             _propertiesPageMenuItem,
             new SeparatorMenuItem(),
             _renameFolderMenuItem);
-        contextMenu.Opening += (_, _) => UpdateContextMenuActions();
+        contextMenu.Opening += (_, _) => { UpdateContextMenuActions(); UpdateConversationMenu(); };
         _treeGrid.ContextMenu = contextMenu;
     }
 
@@ -1450,6 +1462,8 @@ public sealed partial class LayoutFoundryPanel : Panel
 
     private void OnTreeKeyDown(object? sender, KeyEventArgs eventArgs)
     {
+        _nameClickGeneration++;
+        _lastNameClick = null;
         if (_inlineDraft is null && HierarchyClipboard.IsCopyShortcut(eventArgs))
         {
             CopySelection();
@@ -1489,7 +1503,7 @@ public sealed partial class LayoutFoundryPanel : Panel
                         _treeGrid.ReloadItem(item, reloadChildren: false);
                     }
 
-                    _statusLabel.Text = "Rename cancelled.";
+                    _statusLabel.Text = string.Empty;
                 }
                 else
                 {
@@ -1516,6 +1530,11 @@ public sealed partial class LayoutFoundryPanel : Panel
 
     private void NavigateSelected()
     {
+        if (SelectedItems() is [var conversation] && conversation.Node.Key.Kind == OverviewNodeKind.Conversation)
+        {
+            TryInvokeCreateAction("rhino-layout-foundry.ai", conversation.Node.Key.Id);
+            return;
+        }
         var targets = SelectedItems()
             .Select(item => item.Node.NavigationTarget)
             .Where(target => target is not null)
@@ -1585,6 +1604,7 @@ public sealed partial class LayoutFoundryPanel : Panel
 
     private async Task DuplicateSelectionAsync()
     {
+        if (TryCopyConversations()) { PasteConversations(); return; }
         var keys = SelectedKeys();
         if (keys.Any(IsDocumentRootKey))
         {
@@ -1606,11 +1626,13 @@ public sealed partial class LayoutFoundryPanel : Panel
 
     private void CopySelection()
     {
+        if (TryCopyConversations()) return;
         _statusLabel.Text = HierarchyClipboard.CopyCurrentSelection().Message;
     }
 
     private async Task PasteSelectionAsync()
     {
+        if (PasteConversations()) return;
         var result = await HierarchyClipboard.PasteAsync();
         _statusLabel.Text = result.Message;
         if (result.Succeeded) RefreshOverview();
@@ -1623,6 +1645,21 @@ public sealed partial class LayoutFoundryPanel : Panel
 
     private void RequestDeleteSelection(IReadOnlyList<OverviewNodeKey> requestedSelection)
     {
+        if (requestedSelection.Any(key => key.Kind == OverviewNodeKind.Conversation))
+        {
+            if (requestedSelection.Any(key => key.Kind != OverviewNodeKind.Conversation))
+            { _statusLabel.Text = "Delete conversations separately from other items."; return; }
+            if (_pendingDeleteSelection is not null || _pendingConversationDeletion is not null || _deleteInProgress) return;
+            ConversationAction((provider, serial) =>
+            {
+                var ids = requestedSelection.Select(key => key.Id).Distinct().ToArray();
+                _pendingConversationDeletion = new(serial, ids, ids.Select(id => provider.Read(serial, id)).ToArray());
+                _panelShell.Enabled = false;
+                _deleteConfirmationOverlay.ShowConfirmation(ids.Length == 1 ? "conversation" : $"{ids.Length} conversations", ids.Length == 1,
+                    "Conversation history will be permanently removed. Drawing sheets are not deleted.", "This can’t be undone. Export first to keep a separate copy.");
+            });
+            return;
+        }
         if (_pendingDeleteSelection is not null || _deleteInProgress)
             return;
 
@@ -1707,6 +1744,31 @@ public sealed partial class LayoutFoundryPanel : Panel
 
     private async Task ConfirmDeleteSelectionAsync()
     {
+        if (_pendingConversationDeletion is { } conversations)
+        {
+            if (_deleteInProgress) return;
+            try
+            {
+                _deleteInProgress = true;
+                var currentDocument = LayoutFoundryUiHost.CaptureSnapshot();
+                var provider = FoundryConversationItems.Current;
+                if (provider is null || currentDocument?.DocumentRuntimeSerialNumber != conversations.Serial ||
+                    conversations.Ids.Where((id, index) => provider.Read(conversations.Serial, id) != conversations.Payloads[index]).Any())
+                    throw new InvalidOperationException("The conversation or document changed. Review it before deleting.");
+                foreach (var id in conversations.Ids) provider.Delete(conversations.Serial, id);
+                ClearSelection();
+                _statusLabel.Text = "Conversation history deleted; drawing sheets are unchanged.";
+            }
+            catch (Exception error) { _statusLabel.Text = error.Message; }
+            finally
+            {
+                _deleteInProgress = false;
+                _pendingConversationDeletion = null;
+                DismissDeleteOverlay();
+                RefreshOverview();
+            }
+            return;
+        }
         if (_pendingDeleteSelection is not { } pending || _deleteInProgress)
             return;
 
@@ -1771,10 +1833,11 @@ public sealed partial class LayoutFoundryPanel : Panel
 
     private void CancelDeleteConfirmation()
     {
-        if (_pendingDeleteSelection is null || _deleteInProgress)
+        if ((_pendingDeleteSelection is null && _pendingConversationDeletion is null) || _deleteInProgress)
             return;
 
         _pendingDeleteSelection = null;
+        _pendingConversationDeletion = null;
         DismissDeleteOverlay();
         _statusLabel.Text = "Deletion cancelled.";
     }
@@ -1798,13 +1861,15 @@ public sealed partial class LayoutFoundryPanel : Panel
 
     private void BeginInlineNameRename(HierarchyTreeItem item)
     {
-        if (!IsInlineRenameTarget(item) ||
+        if (_inlineDraft is not null || !IsInlineRenameTarget(item) ||
             SelectedItemCount() != 1 ||
             !_selection.Selected.Contains(item.Node.Key))
         {
             return;
         }
 
+        _nameClickGeneration++;
+        _lastNameClick = null;
         CloseHierarchyPaperEditor();
         CloseHierarchyDisplayModePicker();
         var kind = item.Node.Key.Kind switch
@@ -1812,6 +1877,7 @@ public sealed partial class LayoutFoundryPanel : Panel
             OverviewNodeKind.Folder => InlineDraftKind.RenameFolder,
             OverviewNodeKind.Sheet => InlineDraftKind.RenameSheet,
             OverviewNodeKind.AppearanceState => InlineDraftKind.RenameAppearanceState,
+            OverviewNodeKind.Conversation => InlineDraftKind.RenameConversation,
             _ => throw new ArgumentOutOfRangeException(),
         };
         var parentFolderId = item.Node.Sheet?.FolderId ??
@@ -1825,12 +1891,7 @@ public sealed partial class LayoutFoundryPanel : Panel
             item.Node.Label);
         item.BeginInlineEdit();
         SetInlineEditing(true);
-        _statusLabel.Text = kind switch
-        {
-            InlineDraftKind.RenameFolder => "Rename the folder. Press Return or click away to save; Escape cancels.",
-            InlineDraftKind.RenameSheet => "Rename the layout. Press Return or click away to save; Escape cancels. Rhino does not support Undo for this change.",
-            _ => "Rename the appearance state. Press Return or click away to save; Escape cancels.",
-        };
+        _statusLabel.Text = string.Empty;
         Application.Instance.AsyncInvoke(() =>
         {
             var rows = VisibleTreeRows.Flatten(
@@ -1903,7 +1964,8 @@ public sealed partial class LayoutFoundryPanel : Panel
         }
 
         if (invalidation.DocumentRuntimeSerialNumber is { } serial &&
-            serial != _overview.DocumentRuntimeSerialNumber)
+            serial != _overview.DocumentRuntimeSerialNumber &&
+            (invalidation.Kind & OverviewInvalidationKind.DocumentIdentity) == 0)
         {
             return;
         }
@@ -1983,7 +2045,15 @@ public sealed partial class LayoutFoundryPanel : Panel
 
     private void RefreshOverview()
     {
+        if (_inlineDraft is not null) return;
+        _nameClickGeneration++;
+        _lastNameClick = null;
         _overview = LayoutFoundryUiHost.CaptureOverview();
+        if (_overview.DocumentRuntimeSerialNumber is { } serial && FoundryConversationItems.Current is { } conversations)
+        {
+            try { _overview = _overview with { Conversations = conversations.List(serial) }; }
+            catch (Exception error) { _statusLabel.Text = "Could not read conversations: " + error.Message; }
+        }
         if (_documentSerialNumber != _overview.DocumentRuntimeSerialNumber)
         {
             if (_documentSerialNumber is { } previousSerial)
@@ -2000,14 +2070,15 @@ public sealed partial class LayoutFoundryPanel : Panel
                 LayoutFoundryUiHost.Selection.Clear(_overview.DocumentRuntimeSerialNumber, this);
             }
             _hierarchyExpansion.Clear();
+            _renderedTreeItems = [];
             _documentSerialNumber = _overview.DocumentRuntimeSerialNumber;
         }
 
         _selection.Prune(Flatten(OverviewTreeBuilder.Build(_overview)).Select(node => node.Key));
-        PopulateTree();
+        PopulateTree(preserveRows: true);
     }
 
-    private void PopulateTree()
+    private void PopulateTree(bool preserveRows = false)
     {
         var protection = _overview.Issues.FirstOrDefault(issue => issue.Code == "metadata.protected");
         _documentWarning.Text = protection?.Message ?? string.Empty;
@@ -2018,6 +2089,26 @@ public sealed partial class LayoutFoundryPanel : Panel
             OverviewTreeBuilder.Build(renderOverview, filter),
             _sortProperty,
             _sortDirection);
+        if (preserveRows && _inlineDraft is null && SameTreeShape(_renderedTreeItems, nodes))
+        {
+            var existing = Flatten(_renderedTreeItems).ToArray();
+            var updated = Flatten(nodes).ToArray();
+            for (var index = 0; index < existing.Length; index++)
+            {
+                var item = existing[index];
+                var node = updated[index];
+                var changed = item.Node.Label != node.Label || item.Node.SecondaryText != node.SecondaryText ||
+                    item.Node.StatusText != node.StatusText || item.Node.Sheet != node.Sheet ||
+                    item.Node.Detail != node.Detail || item.Node.AppearanceState != node.AppearanceState ||
+                    item.Node.Folder != node.Folder;
+                item.UpdateNode(node, renderOverview.FileDates);
+                if (changed) _treeGrid.ReloadItem(item, reloadChildren: false);
+            }
+            UpdatePresentation();
+            QueueThumbnails();
+            ApplyFilterProjection();
+            return;
+        }
         var nodeKeys = Flatten(nodes).Select(node => node.Key).ToHashSet();
         _hierarchyExpansion.Prune(nodeKeys);
         var draftKey = _inlineDraft is { } draft
@@ -2094,6 +2185,15 @@ public sealed partial class LayoutFoundryPanel : Panel
         ApplyFilterProjection();
     }
 
+    private static bool SameTreeShape(IEnumerable<HierarchyTreeItem> items, IEnumerable<OverviewTreeNode> nodes)
+    {
+        var left = items.ToArray();
+        var right = nodes.ToArray();
+        return left.Length == right.Length && left.Select((item, index) =>
+            item.Node.Key == right[index].Key &&
+            SameTreeShape(item.Children.OfType<HierarchyTreeItem>(), right[index].Children)).All(same => same);
+    }
+
     private void ApplyFilterProjection()
     {
         var projection = OverviewFilterProjector.Resolve(_overview, CurrentFilter);
@@ -2150,7 +2250,7 @@ public sealed partial class LayoutFoundryPanel : Panel
                     Details: [])).ToArray(),
             },
             InlineDraftKind.RenameFolder or InlineDraftKind.RenameSheet or
-                InlineDraftKind.RenameAppearanceState => _overview,
+                InlineDraftKind.RenameAppearanceState or InlineDraftKind.RenameConversation => _overview,
             _ => _overview,
         };
     }
@@ -2371,6 +2471,23 @@ public sealed partial class LayoutFoundryPanel : Panel
         if ((eventArgs.Buttons & MouseButtons.Primary) == 0 ||
             eventArgs.Item is not HierarchyTreeItem item)
         {
+            return;
+        }
+
+        if (IsInlineRenameTarget(item, eventArgs.GridColumn) && eventArgs.Modifiers == Keys.None)
+        {
+            var now = Environment.TickCount64;
+            var rename = _nameWasSelectedOnMouseDown && _lastNameClick == item.Node.Key &&
+                now - _lastNameClickTime >= 600;
+            _lastNameClick = item.Node.Key;
+            _lastNameClickTime = now;
+            var generation = ++_nameClickGeneration;
+            if (rename)
+            {
+                await Task.Delay(600);
+                if (generation == _nameClickGeneration && !_dragInProgress && _inlineDraft is null)
+                    BeginInlineNameRename(item);
+            }
             return;
         }
 
@@ -2832,9 +2949,6 @@ public sealed partial class LayoutFoundryPanel : Panel
         {
             InlineDraftKind.Folder => "Creating folder…",
             InlineDraftKind.Sheet => "Creating layout…",
-            InlineDraftKind.RenameFolder => "Renaming folder…",
-            InlineDraftKind.RenameSheet => "Renaming layout…",
-            InlineDraftKind.RenameAppearanceState => "Renaming appearance state…",
             _ => string.Empty,
         };
         var result = draft.Kind switch
@@ -2854,6 +2968,7 @@ public sealed partial class LayoutFoundryPanel : Panel
                 LayoutFoundryUiHost.RenameSheetDirect(draft.Id, name)),
             InlineDraftKind.RenameAppearanceState =>
                 await LayoutFoundryUiHost.UpdateAppearanceStateAsync(draft.Id, name),
+            InlineDraftKind.RenameConversation => CommitConversationRename(draft.Id, name),
             _ => throw new ArgumentOutOfRangeException(),
         };
         if (!result.Succeeded)
@@ -2865,6 +2980,13 @@ public sealed partial class LayoutFoundryPanel : Panel
 
         _inlineDraft = null;
         SetInlineEditing(false);
+        if (IsRenameDraft(draft.Kind))
+        {
+            item.CancelInlineEdit();
+            _statusLabel.Text = string.Empty;
+            RefreshOverview();
+            return;
+        }
         _overview = LayoutFoundryUiHost.CaptureOverview();
         var createdKey = draft.Kind == InlineDraftKind.Folder
             ? new OverviewNodeKey(OverviewNodeKind.Folder, draft.Id)
@@ -2941,7 +3063,7 @@ public sealed partial class LayoutFoundryPanel : Panel
     private static bool IsRenameDraft(InlineDraftKind kind) =>
         kind is InlineDraftKind.RenameFolder or
             InlineDraftKind.RenameSheet or
-            InlineDraftKind.RenameAppearanceState;
+            InlineDraftKind.RenameAppearanceState or InlineDraftKind.RenameConversation;
 
     private void UpdateContextMenuActions()
     {
@@ -3052,6 +3174,13 @@ public sealed partial class LayoutFoundryPanel : Panel
         var cell = _treeGrid.GetCellAt(eventArgs.Location);
         var item = cell.Item as HierarchyTreeItem;
         var column = cell.Column;
+        _nameWasSelectedOnMouseDown = item is not null &&
+            SelectedItemCount() == 1 && _selection.Selected.Contains(item.Node.Key);
+        if (!ReferenceEquals(column, _layoutsColumn) || eventArgs.Modifiers != Keys.None)
+        {
+            _lastNameClick = null;
+            _nameClickGeneration++;
+        }
         if (_hierarchyPaperEditingKey is { } paperEditingKey &&
             (item?.Node.Key != paperEditingKey || !ReferenceEquals(column, _paperColumn)))
         {
@@ -3170,7 +3299,7 @@ public sealed partial class LayoutFoundryPanel : Panel
             item is null ||
             item.IsInlineDraft ||
             item.Node.IsDocumentRoot ||
-            item.Node.Key.Kind is not (OverviewNodeKind.Folder or OverviewNodeKind.Sheet) ||
+            item.Node.Key.Kind is not (OverviewNodeKind.Folder or OverviewNodeKind.Sheet or OverviewNodeKind.Conversation) ||
             !ReferenceEquals(column, _layoutsColumn))
         {
             ResetPendingDrag();
@@ -3185,7 +3314,7 @@ public sealed partial class LayoutFoundryPanel : Panel
         // Capture the group before AppKit updates selection while starting its drag.
         _dragSourceKeys = SelectedItems()
             .Where(selected => !selected.Node.IsDocumentRoot &&
-                selected.Node.Key.Kind is OverviewNodeKind.Folder or OverviewNodeKind.Sheet)
+                selected.Node.Key.Kind is OverviewNodeKind.Folder or OverviewNodeKind.Sheet or OverviewNodeKind.Conversation)
             .Select(selected => selected.Node.Key).Distinct().ToArray();
         _dragStart = eventArgs.Location;
         _dragSourceItem = item;
@@ -3204,7 +3333,7 @@ public sealed partial class LayoutFoundryPanel : Panel
         !item.IsInlineDraft &&
         !item.Node.IsDocumentRoot &&
         item.Node.Key.Kind is OverviewNodeKind.Folder or OverviewNodeKind.Sheet or
-            OverviewNodeKind.AppearanceState;
+            OverviewNodeKind.AppearanceState or OverviewNodeKind.Conversation;
 
     private bool IsSelectionPreservingPropertyColumn(GridColumn column) =>
         IsInteractivePropertyColumn(column);
@@ -3253,6 +3382,8 @@ public sealed partial class LayoutFoundryPanel : Panel
 
         if (_dragSourceKeys.Count == 0)
             _dragSourceKeys = [_dragSourceItem.Node.Key];
+        _nameClickGeneration++;
+        _lastNameClick = null;
         _dragInProgress = true;
         _statusLabel.Text =
             "Drop on a folder, between matching siblings, or on empty hierarchy space to move to the root.";
@@ -3314,6 +3445,19 @@ public sealed partial class LayoutFoundryPanel : Panel
         }
 
         eventArgs.Effects = DragEffects.Move;
+        if (sourceKeys.All(key => key.Kind == OverviewNodeKind.Conversation))
+        {
+            ConversationAction((provider, serial) =>
+            {
+                foreach (var key in sourceKeys)
+                {
+                    var entry = _overview.Conversations.Single(item => item.Id == key.Id);
+                    provider.Write(serial, entry.Id, placement.TargetId, entry.Name, provider.Read(serial, entry.Id));
+                }
+                RefreshOverview();
+            });
+            return;
+        }
         var folderIds = sourceKeys
             .Where(key => key.Kind == OverviewNodeKind.Folder)
             .Select(key => key.Id)
@@ -3363,6 +3507,16 @@ public sealed partial class LayoutFoundryPanel : Panel
 
     private NavigatorDropResolution ResolveTreeDrop(TreeGridViewDragInfo dragInfo)
     {
+        if (_dragSourceKeys.Any(key => key.Kind == OverviewNodeKind.Conversation))
+        {
+            if (!_dragSourceKeys.All(key => key.Kind == OverviewNodeKind.Conversation))
+                return NavigatorDropResolution.Invalid("Move conversations separately from layouts.");
+            var target = dragInfo.Item as HierarchyTreeItem;
+            var folder = target is null ? _overview.RootFolderId : target.Node.Key.Kind == OverviewNodeKind.Folder ? target.Node.Key.Id : (Guid?)null;
+            return folder is { } id
+                ? new NavigatorDropResolution(true, new HierarchyPlacementTarget(HierarchyPlacementKind.IntoFolder, OverviewNodeKind.Folder, id), id, null)
+                : NavigatorDropResolution.Invalid("Drop conversations on a folder.");
+        }
         var folderIds = _dragSourceKeys
             .Where(key => key.Kind == OverviewNodeKind.Folder)
             .Select(key => key.Id)
@@ -4045,6 +4199,7 @@ public sealed partial class LayoutFoundryPanel : Panel
                     OverviewNodeKind.Sheet => FoundryHierarchyIcons.Layout,
                     OverviewNodeKind.Detail => FoundryHierarchyIcons.Detail,
                     OverviewNodeKind.AppearanceState => FoundryHierarchyIcons.AppearanceState,
+                    OverviewNodeKind.Conversation => FoundryHierarchyIcons.Conversation,
                     _ => null,
                 };
             _displayText = IsInlineDraft
@@ -4071,11 +4226,11 @@ public sealed partial class LayoutFoundryPanel : Panel
                 containsPreferredSelection: Contains(node.Children, preferredSelection));
         }
 
-        public OverviewTreeNode Node { get; }
+        public OverviewTreeNode Node { get; private set; }
 
-        private readonly DocumentFileDates? _fileDates;
+        private DocumentFileDates? _fileDates;
 
-        public OverviewRowPresentation Presentation { get; }
+        public OverviewRowPresentation Presentation { get; private set; }
 
         public bool IsInlineDraft { get; private set; }
 
@@ -4093,6 +4248,14 @@ public sealed partial class LayoutFoundryPanel : Panel
                     _displayText = value;
                 }
             }
+        }
+
+        public void UpdateNode(OverviewTreeNode node, DocumentFileDates? fileDates)
+        {
+            _fileDates = fileDates;
+            Node = node;
+            Presentation = OverviewRowPresentation.Create(node, useMacSafeSingleColumn: false);
+            _displayText = RowIcon is not null ? node.Label : Presentation.PrimaryText;
         }
 
         public void BeginInlineEdit()
@@ -4291,6 +4454,7 @@ false) ? "Layout" : "—";
         RenameFolder,
         RenameSheet,
         RenameAppearanceState,
+        RenameConversation,
     }
 
     private enum FoundryPanelViewMode

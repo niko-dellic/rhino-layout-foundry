@@ -49,6 +49,7 @@ public sealed record OverviewRowPresentation(
             OverviewNodeKind.Sheet => "▣",
             OverviewNodeKind.Detail => "⌗",
             OverviewNodeKind.AppearanceState => "◫",
+            OverviewNodeKind.Conversation => "☰",
             _ => throw new ArgumentOutOfRangeException(
                 nameof(node),
                 node.Key.Kind,

@@ -21,6 +21,7 @@ public sealed record FolderCreationDestination(Guid ParentFolderId, string Displ
             var destinationId = key.Kind switch
             {
                 OverviewNodeKind.Folder => key.Id,
+                OverviewNodeKind.Conversation => overview.Conversations.FirstOrDefault(item => item.Id == key.Id)?.FolderId,
                 OverviewNodeKind.Sheet => overview.Sheets
                     .FirstOrDefault(sheet => sheet.PageViewId == key.Id)?.FolderId,
                 OverviewNodeKind.Detail => overview.Sheets

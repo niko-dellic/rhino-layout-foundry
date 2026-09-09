@@ -134,6 +134,15 @@ internal sealed class RhinoDocumentEventBridge : IDisposable
 
     private void OnDocumentChanged(object? sender, DocumentEventArgs eventArgs)
     {
+        if (RhinoLayoutFoundry.Extensibility.ConversationMetadataWrite.IsActive(eventArgs.Document.RuntimeSerialNumber))
+        {
+            // Conversation autosaves update document strings, not drawing inputs.
+            // Refresh their table rows without making the agent's snapshot stale.
+            if (RhinoDoc.ActiveDoc?.RuntimeSerialNumber == eventArgs.Document.RuntimeSerialNumber)
+                _activeDocumentChanged(new OverviewInvalidation(eventArgs.Document.RuntimeSerialNumber,
+                    OverviewInvalidationKind.Metadata));
+            return;
+        }
         Track(
             eventArgs.Document,
             OverviewInvalidationKind.DocumentIdentity |

@@ -5,6 +5,29 @@ namespace RhinoLayoutFoundry.Core.Tests;
 public sealed class OverviewTreeBuilderTests
 {
     [Fact]
+    public void ConversationsUseFoldersAndRemainSearchable()
+    {
+        var overview = CreateOverview();
+        var folder = overview.Folders.First(item => item.Id != overview.RootFolderId);
+        var id = Guid.NewGuid();
+        overview = overview with { Conversations = [new(id, folder.Id, "Design discussion", DateTimeOffset.UtcNow)] };
+        var nodes = Flatten(OverviewTreeBuilder.Build(overview, "discussion")).ToArray();
+        Assert.Contains(nodes, node => node.Key == new OverviewNodeKey(OverviewNodeKind.Folder, folder.Id));
+        Assert.Contains(nodes, node => node.Key == new OverviewNodeKey(OverviewNodeKind.Conversation, id));
+        var conversation = nodes.Single(node => node.Key.Kind == OverviewNodeKind.Conversation);
+        Assert.Contains("Design discussion", OverviewRowPresentation.Create(conversation, false).PrimaryText);
+        Assert.Equal("1 conversation selected", OverviewSelectionSummary.Create([conversation.Key]).DisplayText);
+        Assert.DoesNotContain(Flatten(OverviewTreeBuilder.Build(overview, new OverviewTreeFilter(null, OverviewFilterKind.Sheets))),
+            node => node.Key.Kind == OverviewNodeKind.Conversation);
+    }
+
+    [Fact]
+    public void ConversationsWithMissingFoldersRemainAtRoot()
+    {
+        var overview = CreateOverview() with { Conversations = [new(Guid.NewGuid(), Guid.NewGuid(), "Recovered", DateTimeOffset.UtcNow)] };
+        Assert.Contains(Assert.Single(OverviewTreeBuilder.Build(overview)).Children, node => node.Label == "Recovered");
+    }
+    [Fact]
     public void WrapsTopLevelFoldersAndSheetsInDocumentRoot()
     {
         var roots = OverviewTreeBuilder.Build(CreateOverview());

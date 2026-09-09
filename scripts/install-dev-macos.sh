@@ -13,6 +13,7 @@ required_files=(
   RhinoFoundry.UI.dll
   RhinoFoundry.UI.Primitives.dll
   RhinoFoundry.UI.MacOS.dll
+  Markdig.dll
   RhinoLayoutFoundry.rhp
   RhinoLayoutFoundry.Core.dll
   RhinoLayoutFoundry.Extensibility.dll
@@ -40,6 +41,7 @@ done
 # cannot select an older UI or Core assembly.
 if [[ -d "${ai_plugin_dir}" ]]; then
   shared_files=(
+    Markdig.dll
     RhinoFoundry.UI.dll
     RhinoFoundry.UI.Primitives.dll
     RhinoFoundry.UI.MacOS.dll

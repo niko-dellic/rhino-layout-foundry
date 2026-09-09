@@ -13,6 +13,7 @@ internal static class FoundryHierarchyIcons
     private static readonly Icon DetailIcon = NewIcon(DrawDetail);
     private static readonly Icon ObjectIcon = NewIcon(DrawObject);
     private static readonly Icon AppearanceStateIcon = NewIcon(DrawAppearanceState);
+    internal static Image Conversation { get; } = DrawingSetIcon.Create();
 
     internal static Image Rhino => RhinoIcon;
 

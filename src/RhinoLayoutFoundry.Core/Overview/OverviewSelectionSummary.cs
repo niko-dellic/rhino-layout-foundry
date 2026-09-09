@@ -6,8 +6,9 @@ public sealed record OverviewSelectionSummary(
     int DetailCount,
     int AppearanceStateCount)
 {
+    public int ConversationCount { get; init; }
     public int TotalCount => FolderCount + SheetCount + DetailCount +
-        AppearanceStateCount;
+        AppearanceStateCount + ConversationCount;
 
     public string DisplayText
     {
@@ -23,6 +24,7 @@ public sealed record OverviewSelectionSummary(
             AddPart(parts, SheetCount, "sheet");
             AddPart(parts, DetailCount, "detail");
             AddPart(parts, AppearanceStateCount, "appearance state");
+            AddPart(parts, ConversationCount, "conversation");
             return string.Join(" · ", parts) + " selected";
         }
     }
@@ -35,6 +37,7 @@ public sealed record OverviewSelectionSummary(
         var sheets = 0;
         var details = 0;
         var appearanceStates = 0;
+        var conversations = 0;
         foreach (var key in keys.Distinct())
         {
             switch (key.Kind)
@@ -51,6 +54,9 @@ public sealed record OverviewSelectionSummary(
                 case OverviewNodeKind.AppearanceState:
                     appearanceStates++;
                     break;
+                case OverviewNodeKind.Conversation:
+                    conversations++;
+                    break;
                 default:
                     throw new ArgumentOutOfRangeException(nameof(keys), key.Kind, null);
             }
@@ -60,7 +66,7 @@ public sealed record OverviewSelectionSummary(
             folders,
             sheets,
             details,
-            appearanceStates);
+            appearanceStates) { ConversationCount = conversations };
     }
 
     private static void AddPart(ICollection<string> parts, int count, string singular)
