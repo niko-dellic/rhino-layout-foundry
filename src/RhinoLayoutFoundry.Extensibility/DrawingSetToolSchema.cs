@@ -18,7 +18,8 @@ public static class DrawingSetToolSchema
             ("cut", new JsonObject { ["anyOf"] = new JsonArray(cut, new JsonObject { ["type"] = "null" }) }),
             ("hidden_layer_ids", new JsonObject { ["type"] = "array", ["items"] = Text(), ["maxItems"] = 512 }));
         var sheet = Object(("key", Text()), ("name", Text()), ("width_mm", Number(1, 5000)),
-            ("height_mm", Number(1, 5000)), ("views", Array(view, DrawingSetSpecificationValidator.MaximumViewsPerSheet)));
+            ("height_mm", Number(1, 5000)), ("views", new JsonObject { ["type"] = "array", ["items"] = view,
+                ["minItems"] = 0, ["maxItems"] = DrawingSetSpecificationValidator.MaximumViewsPerSheet }));
         var root = Object(("schema_version", new JsonObject { ["type"] = "integer", ["enum"] = new JsonArray(2) }),
             ("proposal_id", Text()), ("document_runtime_serial_number", new JsonObject { ["type"] = "integer" }),
             ("source_revision", new JsonObject { ["type"] = "integer" }), ("destination_folder_id", Text()),

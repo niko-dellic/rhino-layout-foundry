@@ -1507,7 +1507,7 @@ public sealed partial class LayoutFoundryPanel : Panel
                 }
                 else
                 {
-                    PopulateTree();
+                    PopulateTree(preserveRows: true);
                     _statusLabel.Text = "Creation cancelled.";
                 }
 
@@ -2043,17 +2043,22 @@ public sealed partial class LayoutFoundryPanel : Panel
         }
     }
 
-    private void RefreshOverview()
+    private void CaptureCompleteOverview()
     {
-        if (_inlineDraft is not null) return;
-        _nameClickGeneration++;
-        _lastNameClick = null;
         _overview = LayoutFoundryUiHost.CaptureOverview();
         if (_overview.DocumentRuntimeSerialNumber is { } serial && FoundryConversationItems.Current is { } conversations)
         {
             try { _overview = _overview with { Conversations = conversations.List(serial) }; }
             catch (Exception error) { _statusLabel.Text = "Could not read conversations: " + error.Message; }
         }
+    }
+
+    private void RefreshOverview()
+    {
+        if (_inlineDraft is not null) return;
+        _nameClickGeneration++;
+        _lastNameClick = null;
+        CaptureCompleteOverview();
         if (_documentSerialNumber != _overview.DocumentRuntimeSerialNumber)
         {
             if (_documentSerialNumber is { } previousSerial)
@@ -2089,20 +2094,35 @@ public sealed partial class LayoutFoundryPanel : Panel
             OverviewTreeBuilder.Build(renderOverview, filter),
             _sortProperty,
             _sortDirection);
-        if (preserveRows && _inlineDraft is null && SameTreeShape(_renderedTreeItems, nodes))
+        // Keep the native data source and surviving item identities when only a
+        // branch changes (including insertion/removal of an inline creation draft).
+        if (preserveRows && _renderedTreeItems.Length > 0 &&
+            _renderedTreeItems.Select(item => item.Node.Key).SequenceEqual(nodes.Select(node => node.Key)))
         {
-            var existing = Flatten(_renderedTreeItems).ToArray();
-            var updated = Flatten(nodes).ToArray();
-            for (var index = 0; index < existing.Length; index++)
+            var preferredKey = _inlineDraft is { } activeDraft && !IsRenameDraft(activeDraft.Kind)
+                ? new OverviewNodeKey(activeDraft.Kind == InlineDraftKind.Folder
+                    ? OverviewNodeKind.Folder : OverviewNodeKind.Sheet, activeDraft.Id)
+                : _selection.Anchor ?? default;
+            _isPopulatingTree = true;
+            try
             {
-                var item = existing[index];
-                var node = updated[index];
-                var changed = item.Node.Label != node.Label || item.Node.SecondaryText != node.SecondaryText ||
-                    item.Node.StatusText != node.StatusText || item.Node.Sheet != node.Sheet ||
-                    item.Node.Detail != node.Detail || item.Node.AppearanceState != node.AppearanceState ||
-                    item.Node.Folder != node.Folder;
-                item.UpdateNode(node, renderOverview.FileDates);
-                if (changed) _treeGrid.ReloadItem(item, reloadChildren: false);
+                for (var index = 0; index < _renderedTreeItems.Length; index++)
+                    ReconcileTreeBranch(_renderedTreeItems[index], nodes[index], renderOverview,
+                        preferredKey, ancestorReloadsChildren: false);
+                var allItems = Flatten(_renderedTreeItems).ToArray();
+                _hierarchyExpansion.Prune(allItems.Select(item => item.Node.Key).ToHashSet());
+                _sheetItems.Clear();
+                foreach (var sheetItem in allItems.Where(item => item.Node.Key.Kind == OverviewNodeKind.Sheet))
+                    _sheetItems[sheetItem.Node.Key.Id] = sheetItem;
+                var selected = allItems.FirstOrDefault(item => item.Node.Key == preferredKey);
+                if (selected is not null && !ReferenceEquals(_treeGrid.SelectedItem, selected))
+                    _treeGrid.SelectedItem = selected;
+                RestoreVisibleTreeSelection(VisibleTreeRows.Flatten(
+                    _renderedTreeItems, item => item.Children.OfType<HierarchyTreeItem>(), item => item.Expanded).ToArray());
+            }
+            finally
+            {
+                _isPopulatingTree = false;
             }
             UpdatePresentation();
             QueueThumbnails();
@@ -2185,13 +2205,42 @@ public sealed partial class LayoutFoundryPanel : Panel
         ApplyFilterProjection();
     }
 
-    private static bool SameTreeShape(IEnumerable<HierarchyTreeItem> items, IEnumerable<OverviewTreeNode> nodes)
+    private void ReconcileTreeBranch(
+        HierarchyTreeItem item,
+        OverviewTreeNode node,
+        DocumentOverview overview,
+        OverviewNodeKey preferredSelection,
+        bool ancestorReloadsChildren)
     {
-        var left = items.ToArray();
-        var right = nodes.ToArray();
-        return left.Length == right.Length && left.Select((item, index) =>
-            item.Node.Key == right[index].Key &&
-            SameTreeShape(item.Children.OfType<HierarchyTreeItem>(), right[index].Children)).All(same => same);
+        var oldChildren = item.Children.OfType<HierarchyTreeItem>().ToArray();
+        var childrenChanged = !oldChildren.Select(child => child.Node.Key)
+            .SequenceEqual(node.Children.Select(child => child.Key));
+        var changed = item.Node.Label != node.Label || item.Node.SecondaryText != node.SecondaryText ||
+            item.Node.StatusText != node.StatusText || item.Node.Sheet != node.Sheet ||
+            item.Node.Detail != node.Detail || item.Node.AppearanceState != node.AppearanceState ||
+            item.Node.Folder != node.Folder || item.IsInlineDraft != (_inlineDraft?.Id == node.Key.Id);
+        var childrenByKey = oldChildren.ToDictionary(child => child.Node.Key);
+        var children = node.Children.Select(child => childrenByKey.TryGetValue(child.Key, out var existing)
+            ? existing
+            : new HierarchyTreeItem(child, CurrentFilter.IsActive, preferredSelection,
+                _usesMacSafeHierarchy, _inlineDraft?.Id, _hierarchyExpansion, overview.FileDates)).ToArray();
+        item.UpdateNode(node, overview.FileDates);
+        item.SetInlineDraft(_inlineDraft?.Id == node.Key.Id);
+        if (childrenChanged)
+        {
+            item.Children.Clear();
+            foreach (var child in children) item.Children.Add(child);
+        }
+        for (var index = 0; index < children.Length; index++)
+            ReconcileTreeBranch(children[index], node.Children[index], overview, preferredSelection,
+                ancestorReloadsChildren || childrenChanged);
+
+        // Opening a creation destination must not alter unrelated expansion state.
+        if (_inlineDraft is { } draft && !IsRenameDraft(draft.Kind) &&
+            Flatten(node.Children).Any(child => child.Key == preferredSelection))
+            item.Expanded = true;
+        if (!ancestorReloadsChildren && (changed || childrenChanged))
+            _treeGrid.ReloadItem(item, reloadChildren: childrenChanged);
     }
 
     private void ApplyFilterProjection()
@@ -2438,7 +2487,7 @@ public sealed partial class LayoutFoundryPanel : Panel
             InlineDraftKind.Sheet => "Name the new layout. Press Return or click away to create; Escape cancels.",
             _ => "Name the new appearance state. Press Return or click away to create; Escape cancels.",
         };
-        PopulateTree();
+        PopulateTree(preserveRows: true);
 
         Application.Instance.AsyncInvoke(() =>
         {
@@ -2987,7 +3036,7 @@ public sealed partial class LayoutFoundryPanel : Panel
             RefreshOverview();
             return;
         }
-        _overview = LayoutFoundryUiHost.CaptureOverview();
+        CaptureCompleteOverview();
         var createdKey = draft.Kind == InlineDraftKind.Folder
             ? new OverviewNodeKey(OverviewNodeKind.Folder, draft.Id)
             : draft.Kind == InlineDraftKind.RenameFolder
@@ -3016,7 +3065,7 @@ public sealed partial class LayoutFoundryPanel : Panel
                 $"Renamed appearance state to '{name}'.",
             _ => string.Empty,
         };
-        PopulateTree();
+        PopulateTree(preserveRows: true);
     }
 
     private static OperationResult ToOperationResult(OverviewNavigationResult result)
@@ -3042,7 +3091,7 @@ public sealed partial class LayoutFoundryPanel : Panel
 
             if (!IsRenameDraft(draft.Kind))
             {
-                PopulateTree();
+                PopulateTree(preserveRows: true);
             }
 
             var rows = VisibleTreeRows.Flatten(
@@ -4256,6 +4305,11 @@ public sealed partial class LayoutFoundryPanel : Panel
             Node = node;
             Presentation = OverviewRowPresentation.Create(node, useMacSafeSingleColumn: false);
             _displayText = RowIcon is not null ? node.Label : Presentation.PrimaryText;
+        }
+
+        public void SetInlineDraft(bool isDraft)
+        {
+            IsInlineDraft = isDraft;
         }
 
         public void BeginInlineEdit()

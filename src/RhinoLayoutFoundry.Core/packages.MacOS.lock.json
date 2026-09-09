@@ -4,9 +4,9 @@
     "net8.0": {
       "RhinoFoundry.UI.Primitives": {
         "type": "Direct",
-        "requested": "[0.3.0-preview.25, )",
-        "resolved": "0.3.0-preview.25",
-        "contentHash": "pJLZ9QRax0K+z4z7b8AOGulCT5HIeB9Ic05quGKNV3oFF64vkNUapBfF9W9s/NaXwdkFZdrB3dvdqAbVt3PsLg=="
+        "requested": "[0.3.0-preview.29, )",
+        "resolved": "0.3.0-preview.29",
+        "contentHash": "brr8yxhvuQSPLMn0998vxcNaNHkxrco4Btlhy79HGTypObzkTKTKM4d81qgjt1lvnZiRsMW8IHtuJyK7G+jIkQ=="
       }
     }
   }

@@ -101,8 +101,8 @@ public static class DrawingSetSpecificationValidator
                 Error(path + ".name", "sheet.name", "Use a unique readable sheet name, up to 120 characters.");
             if (!Positive(sheet.WidthMm, 5000) || !Positive(sheet.HeightMm, 5000))
                 Error(path, "paper.invalid", "Paper dimensions must be positive millimetres, no larger than 5000.");
-            if (sheet.Views is null || sheet.Views.Count is < 1 or > MaximumViewsPerSheet)
-            { Error(path + ".views", "views.count", $"Provide 1–{MaximumViewsPerSheet} views per sheet."); continue; }
+            if (sheet.Views is null || sheet.Views.Count > MaximumViewsPerSheet)
+            { Error(path + ".views", "views.count", $"Provide 0–{MaximumViewsPerSheet} views per sheet; zero means an explicit blank placeholder."); continue; }
             viewCount += sheet.Views.Count;
             for (var j = 0; j < sheet.Views.Count; j++)
             {

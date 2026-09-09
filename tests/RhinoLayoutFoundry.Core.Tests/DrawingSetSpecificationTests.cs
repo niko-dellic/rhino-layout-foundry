@@ -6,6 +6,13 @@ namespace RhinoLayoutFoundry.Core.Tests;
 
 public sealed class DrawingSetSpecificationTests
 {
+    [Fact]
+    public void CompleteBatchMayIncludeExplicitBlankPlaceholder()
+    {
+        var proposal = Proposal();
+        var blank = proposal.Sheets[0] with { Views = [] };
+        Assert.True(Validate(proposal with { Sheets = [blank] }).IsValid);
+    }
     [Theory]
     [InlineData("")]
     [InlineData("   ")]
