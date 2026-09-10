@@ -72,6 +72,7 @@ public partial class LayoutFoundryPanel
         _extensionWorkspace.Visible = true;
         _workspaceHost.Content = visible ? _extensionWorkspace : _layoutsHost;
         _statusLabel.Visible = _summaryLabel.Visible = !visible;
+        _viewModeButtonGroup.Visible = !visible;
         if (!visible) RefreshOverview();
     }
 }

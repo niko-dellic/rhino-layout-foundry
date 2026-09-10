@@ -32,7 +32,7 @@
       "rhinolayoutfoundry.core": {
         "type": "Project",
         "dependencies": {
-          "RhinoFoundry.UI.Primitives": "[0.3.0-preview.30, )"
+          "RhinoFoundry.UI.Primitives": "[0.3.0-preview.33, )"
         }
       },
       "rhinolayoutfoundry.extensibility": {
@@ -45,37 +45,37 @@
         "type": "Project",
         "dependencies": {
           "RhinoCommon": "[8.34.26223.11001, )",
-          "RhinoFoundry.UI": "[0.3.0-preview.30, )",
-          "RhinoFoundry.UI.MacOS": "[0.3.0-preview.30, )",
+          "RhinoFoundry.UI": "[0.3.0-preview.33, )",
+          "RhinoFoundry.UI.MacOS": "[0.3.0-preview.33, )",
           "RhinoLayoutFoundry.Core": "[0.1.0, )",
           "RhinoLayoutFoundry.Extensibility": "[0.1.0, )"
         }
       },
       "RhinoFoundry.UI": {
         "type": "CentralTransitive",
-        "requested": "[0.3.0-preview.30, )",
-        "resolved": "0.3.0-preview.30",
-        "contentHash": "FsnjfzMegyNRBiaLJ6gbhArrH4igyh8+9E5WaNgOymGWqk/y3NFqz157obUZntq5ibvLH0AYLE/8miMzmNwR5Q==",
+        "requested": "[0.3.0-preview.33, )",
+        "resolved": "0.3.0-preview.33",
+        "contentHash": "q8xqCtCQPrzmAeA6CnVifZ2gksKus/SQB6qN+sFmMbieb9TjQw0wSVlzG6F4+/rVLrBTq4RTW5bE0o2mvKb27w==",
         "dependencies": {
           "Markdig": "0.37.0",
           "RhinoCommon": "8.34.26223.11001",
-          "RhinoFoundry.UI.Primitives": "0.3.0-preview.30"
+          "RhinoFoundry.UI.Primitives": "0.3.0-preview.33"
         }
       },
       "RhinoFoundry.UI.MacOS": {
         "type": "CentralTransitive",
-        "requested": "[0.3.0-preview.30, )",
-        "resolved": "0.3.0-preview.30",
-        "contentHash": "N5F9ZdWgmDRgM3prbBNoT+0wPeoDKcN66Sbpb4vaOrMa/Oy/W5/MsqoHGI+m6vqU1WhvlrAwFrqQ8TspHjEOMg==",
+        "requested": "[0.3.0-preview.33, )",
+        "resolved": "0.3.0-preview.33",
+        "contentHash": "L1J1b0UfqihXaYOgdYOtlPf62mCjld4Hjpep0UGnxvkKCkj5D65i1+7YnBmStSVvo8zXKDcDep3NONea6HsUHQ==",
         "dependencies": {
-          "RhinoFoundry.UI": "0.3.0-preview.30"
+          "RhinoFoundry.UI": "0.3.0-preview.33"
         }
       },
       "RhinoFoundry.UI.Primitives": {
         "type": "CentralTransitive",
-        "requested": "[0.3.0-preview.30, )",
-        "resolved": "0.3.0-preview.30",
-        "contentHash": "LmjygciaPO9M9gNFR9OqfUO6rFPYtpQLiI/GCfjeD0k5Rh8hcsQx1bcp9fbNqKkIUXlq8eJpvFS4srOpD18cVg=="
+        "requested": "[0.3.0-preview.33, )",
+        "resolved": "0.3.0-preview.33",
+        "contentHash": "1g2xG/yJaN1xfwfb+TTO8QjLWRV8ESKBkPWf+PkXq0NNWo/Qh6yac1AahY1Sn2VbSYNa5zbnzSs4Znyfs/Uq+w=="
       }
     }
   }
