@@ -65,7 +65,6 @@ public sealed partial class LayoutFoundryPanel : Panel
     private readonly PixelLayout _panelOverlayHost;
     private readonly DeleteConfirmationOverlay _deleteConfirmationOverlay;
     private readonly CreateResourceMenuOverlay _createMenuOverlay;
-    private readonly LayoutTemplateOverlay _layoutTemplateOverlay;
     private ButtonMenuItem _setCurrentMenuItem = null!;
     private ButtonMenuItem _newFolderMenuItem = null!;
     private ButtonMenuItem _newPageMenuItem = null!;
@@ -324,9 +323,6 @@ public sealed partial class LayoutFoundryPanel : Panel
         _deleteConfirmationOverlay.CancelRequested += (_, _) => CancelDeleteConfirmation();
         _deleteConfirmationOverlay.ConfirmRequested += async (_, _) =>
             await ConfirmDeleteSelectionAsync();
-        _layoutTemplateOverlay = new LayoutTemplateOverlay();
-        _layoutTemplateOverlay.CommitRequested += async (_, eventArgs) =>
-            await CommitTemplateRegistrationAsync(eventArgs.Values);
         _createMenuOverlay = new CreateResourceMenuOverlay();
         _createMenuOverlay.ItemInvoked += (_, eventArgs) =>
         {
@@ -341,7 +337,6 @@ public sealed partial class LayoutFoundryPanel : Panel
         };
         _panelOverlayHost.Add(_panelShell, 0, 0);
         _panelOverlayHost.Add(_createMenuOverlay, 0, 0);
-        _panelOverlayHost.Add(_layoutTemplateOverlay, 0, 0);
         _panelOverlayHost.Add(_deleteConfirmationOverlay, 0, 0);
         _panelOverlayHost.SizeChanged += (_, _) => LayoutPanelOverlay();
         Content = CreateWorkspaceHost(_panelOverlayHost);
@@ -471,12 +466,14 @@ public sealed partial class LayoutFoundryPanel : Panel
         treeGrid.Columns.Add(printColumn);
         var templateColumn = new GridColumn
         {
-            HeaderText = "Template registration",
+            HeaderText = "Template",
             DataCell = new TextBoxCell
             {
                 Binding = Binding.Property<HierarchyTreeItem, string>(item => item.TemplateText),
+                TextAlignment = TextAlignment.Center,
             },
-            Width = 156,
+            Width = 80,
+            Editable = false,
             Sortable = true,
         };
         treeGrid.Columns.Add(templateColumn);
@@ -1217,11 +1214,9 @@ public sealed partial class LayoutFoundryPanel : Panel
 
         _panelShell.Size = size;
         _createMenuOverlay.Size = size;
-        _layoutTemplateOverlay.Size = size;
         _deleteConfirmationOverlay.Size = size;
         _panelOverlayHost.Move(_panelShell, 0, 0);
         _panelOverlayHost.Move(_createMenuOverlay, 0, 0);
-        _panelOverlayHost.Move(_layoutTemplateOverlay, 0, 0);
         _panelOverlayHost.Move(_deleteConfirmationOverlay, 0, 0);
     }
 
@@ -1285,12 +1280,7 @@ public sealed partial class LayoutFoundryPanel : Panel
         Items =
         {
             _fullscreenButton,
-            new Panel
-            {
-                Width = 1,
-                Height = 20,
-                BackgroundColor = FoundryTheme.CanvasBorder,
-            },
+            _viewModeSeparator,
             _viewModeButtonGroup,
             _canvasAppearanceControl,
             _thumbnailDensityControl,
@@ -1472,6 +1462,13 @@ public sealed partial class LayoutFoundryPanel : Panel
         else if (_inlineDraft is null && HierarchyClipboard.IsPasteShortcut(eventArgs))
         {
             _ = PasteSelectionAsync();
+            eventArgs.Handled = true;
+        }
+        else if (_inlineDraft is null && eventArgs.Modifiers == Keys.None &&
+                 eventArgs.Key == Keys.Space && _treeGrid.SelectedItem is HierarchyTreeItem templateItem &&
+                 templateItem.Node.Key.Kind == OverviewNodeKind.Sheet)
+        {
+            _ = ToggleLayoutTemplateAsync(templateItem, SelectedKeys());
             eventArgs.Handled = true;
         }
         else if (eventArgs.Key == Keys.Enter)
@@ -2013,7 +2010,6 @@ public sealed partial class LayoutFoundryPanel : Panel
         _fullscreenWindow?.Close();
         CloseHierarchyPaperEditor();
         CloseHierarchyDisplayModePicker();
-        _layoutTemplateOverlay.Dismiss(commit: false);
 
         if (!_isLoaded)
         {
@@ -2371,7 +2367,7 @@ public sealed partial class LayoutFoundryPanel : Panel
     {
         _layoutsColumn.HeaderText = SortHeader("Layouts", OverviewSortProperty.Name);
         _printColumn.HeaderText = SortHeader("Print", OverviewSortProperty.Print);
-        _templateColumn.HeaderText = SortHeader("Template registration", OverviewSortProperty.Template);
+        _templateColumn.HeaderText = SortHeader("Template", OverviewSortProperty.Template);
         _paperColumn.HeaderText = SortHeader("Paper size", OverviewSortProperty.PaperSize);
         _detailsColumn.HeaderText = SortHeader("Details", OverviewSortProperty.DetailCount);
         _displayModeColumn.HeaderText = SortHeader("Display mode", OverviewSortProperty.DisplayMode);
@@ -2585,7 +2581,7 @@ public sealed partial class LayoutFoundryPanel : Panel
 
         if (ReferenceEquals(eventArgs.GridColumn, _templateColumn))
         {
-            ShowLayoutTemplatePicker(PropertyInteractionTargets(item.Node.Key), eventArgs.Location);
+            await ToggleLayoutTemplateAsync(item);
             return;
         }
 
@@ -3275,9 +3271,7 @@ public sealed partial class LayoutFoundryPanel : Panel
 
                     _selectionPreservingPropertyInteraction = null;
                     if (ReferenceEquals(column, _templateColumn))
-                        ShowLayoutTemplatePicker(
-                            PropertyInteractionTargets(item.Node.Key),
-                            eventArgs.Location);
+                        await ToggleLayoutTemplateAsync(item);
                     else if (ReferenceEquals(column, _paperColumn))
                     {
                         if (!item.HasSheetTargets)
@@ -3792,65 +3786,37 @@ public sealed partial class LayoutFoundryPanel : Panel
         }
     }
 
-    private void ShowLayoutTemplatePicker(
-        IReadOnlyList<OverviewNodeKey> selection,
-        PointF hierarchyLocation)
+    private bool _templateTogglePending;
+
+    private async Task ToggleLayoutTemplateAsync(
+        HierarchyTreeItem item, IReadOnlyList<OverviewNodeKey>? selection = null)
     {
-        var snapshot = LayoutFoundryUiHost.CaptureSnapshot();
-        if (snapshot is null)
-        {
-            _statusLabel.Text = "The active Rhino document is unavailable.";
+        if (!_treeGrid.Enabled || _templateTogglePending || item.Node.Key.Kind != OverviewNodeKind.Sheet)
             return;
-        }
-        var targets = selection.Distinct().Where(key => key.Kind is
-            OverviewNodeKind.Sheet or OverviewNodeKind.Detail).ToArray();
+
+        var targets = (selection ?? PropertyInteractionTargets(item.Node.Key))
+            .Where(key => key.Kind == OverviewNodeKind.Sheet)
+            .Distinct()
+            .ToArray();
         if (targets.Length == 0)
-        {
-            _statusLabel.Text = "Only layouts and details can be templates.";
             return;
-        }
 
-        var initial = targets.ToDictionary(key => key, key =>
+        var enabled = !(item.Node.Sheet?.IsTemplate ?? false);
+        _templateTogglePending = true;
+        try
         {
-            var scope = ToHierarchyScope(key);
-            return snapshot.TemplateRegistrations.Any(item => item.Source == scope)
-;
-        });
-        var screenPoint = _treeGrid.PointToScreen(hierarchyLocation);
-        var overlayPoint = _panelOverlayHost.PointFromScreen(screenPoint);
-        _layoutTemplateOverlay.ShowPicker(
-            initial,
-            new Point((int)Math.Round(overlayPoint.X), (int)Math.Round(overlayPoint.Y + _treeGrid.RowHeight)));
-    }
-
-    private async Task CommitTemplateRegistrationAsync(
-        IReadOnlyDictionary<OverviewNodeKey, bool> values)
-    {
-        if (values.Count == 0) return;
-        _statusLabel.Text = "Updating template registration…";
-        foreach (var group in values.GroupBy(pair => pair.Value))
-        {
-            var result = await LayoutFoundryUiHost.SetLayoutTemplateRegistrationAsync(
-                group.Select(pair => pair.Key).ToArray(),
-                group.Key);
-            if (result.Succeeded) continue;
-            _statusLabel.Text = DiagnosticMessage(result);
+            _statusLabel.Text = "Updating template…";
+            var result = await LayoutFoundryUiHost.SetLayoutTemplateRegistrationAsync(targets, enabled);
+            _statusLabel.Text = result.Succeeded
+                ? enabled ? "Layout template enabled." : "Layout template disabled."
+                : DiagnosticMessage(result);
             RefreshOverview();
-            return;
         }
-        _statusLabel.Text = "Template registration updated.";
-        RefreshOverview();
-    }
-
-    private static HierarchyScope ToHierarchyScope(OverviewNodeKey key) => new(
-        key.Kind switch
+        finally
         {
-            OverviewNodeKind.Folder => HierarchyScopeKind.Folder,
-            OverviewNodeKind.Sheet => HierarchyScopeKind.Sheet,
-            OverviewNodeKind.Detail => HierarchyScopeKind.Detail,
-            _ => throw new ArgumentOutOfRangeException(nameof(key)),
-        },
-        key.Id);
+            _templateTogglePending = false;
+        }
+    }
 
     private async void OpenCreateLayouts(Guid? preferredFolderId)
     {
@@ -4366,9 +4332,9 @@ public sealed partial class LayoutFoundryPanel : Panel
             }
         }
 
-        public string TemplateText => Node.Key.Kind == OverviewNodeKind.Folder ? string.Empty : (Node.Sheet?.IsTemplate ??
-                                                        Node.Detail?.IsTemplate ??
-false) ? "Layout" : "—";
+        public string TemplateText => Node.Key.Kind == OverviewNodeKind.Sheet
+            ? Node.Sheet?.IsTemplate == true ? "●" : "○"
+            : string.Empty;
 
         public string AppearanceStateText => Node.AppearanceState is { } state
             ? $"{state.RuleCount} rule{(state.RuleCount == 1 ? string.Empty : "s")} · {state.DirectAssignmentCount} use{(state.DirectAssignmentCount == 1 ? string.Empty : "s")}"

@@ -9,6 +9,7 @@ public partial class LayoutFoundryPanel
     private readonly Panel _workspaceHost = new();
     private Control _workspaceRoot = null!;
     private Control? _layoutsHost;
+    private readonly Panel _viewModeSeparator = new() { Width = 1, Height = 20, BackgroundColor = FoundryTheme.CanvasBorder };
 
     private Control CreateWorkspaceHost(Control layouts)
     {
@@ -73,6 +74,7 @@ public partial class LayoutFoundryPanel
         _workspaceHost.Content = visible ? _extensionWorkspace : _layoutsHost;
         _statusLabel.Visible = _summaryLabel.Visible = !visible;
         _viewModeButtonGroup.Visible = !visible;
+        _viewModeSeparator.Visible = !visible;
         if (!visible) RefreshOverview();
     }
 }

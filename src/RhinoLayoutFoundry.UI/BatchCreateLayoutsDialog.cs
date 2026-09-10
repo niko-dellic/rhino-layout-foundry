@@ -816,7 +816,7 @@ PreviewCleanup = CleanupPreviewsAsync();
         return updates;
     }
 
-    private void RefreshPreview(bool refreshDetailAssignments = true)
+    private void RefreshPreview(bool refreshDetailAssignments = true, bool refreshRows = true)
     {
         if (_updatingPaper || _folders.Count == 0) return;
         if (_isEditMode)
@@ -839,49 +839,52 @@ PreviewCleanup = CleanupPreviewsAsync();
             QueueDraftLayoutPreview();
             return;
         }
-        var allRows = changes.Select((change, index) => new CreationPreviewRow(
-            _drafts[index].DraftId,
-            LayoutGroupKey.For(_drafts[index].Layout),
-            (index + 1).ToString(),
-            change.Name,
-            FolderLabel(change.DestinationFolderId),
-            change.Template.Name,
-            $"{change.Template.Paper.Width:0.###} × {change.Template.Paper.Height:0.###} {change.Template.Paper.UnitSystem}",
-            change.Template.DetailSlots.Count.ToString(),
-            "—",
-            change.Template.DetailSlots.Count == 0
-                ? "—"
-                : change.UseDedicatedDetailLayer
-                    ? ".details"
-                    : change.DetailLayerId is { } detailLayerId
-                        ? _snapshot.Layers.GetValueOrDefault(detailLayerId) ?? "Unavailable layer"
-                        : "Active layer",
-            DisplayModeSummary(change.Template),
-            change.Template.TitleBlock is { } titleBlockRecipe ? AdaptiveTitleBlockLayoutSolver.Label(titleBlockRecipe.BuiltInKind) : "None",
-            AppearanceStateLabel(
-                _drafts[index].AppearanceStateId, _appearanceStateByLabel))).ToArray();
-        EnsureActiveGroupExists();
-        _visiblePreviewRows.Clear();
-        _visiblePreviewRows.AddRange(allRows.Where(row =>
-            _activeGroupFilter is null || row.GroupKey == _activeGroupFilter));
-        _updatingPreviewSelection = true;
-        try
+        if (refreshRows)
         {
-            _previewGrid.DataStore = _visiblePreviewRows.ToArray();
-            _previewGrid.SelectedRows = _visiblePreviewRows
-                .Select((row, index) => (row, index))
-                .Where(item => selectedDraftIds.Contains(item.row.DraftId))
-                .Select(item => item.index)
-                .ToArray();
+            var allRows = changes.Select((change, index) => new CreationPreviewRow(
+                _drafts[index].DraftId,
+                LayoutGroupKey.For(_drafts[index].Layout),
+                (index + 1).ToString(),
+                change.Name,
+                FolderLabel(change.DestinationFolderId),
+                change.Template.Name,
+                $"{change.Template.Paper.Width:0.###} × {change.Template.Paper.Height:0.###} {change.Template.Paper.UnitSystem}",
+                change.Template.DetailSlots.Count.ToString(),
+                "—",
+                change.Template.DetailSlots.Count == 0
+                    ? "—"
+                    : change.UseDedicatedDetailLayer
+                        ? ".details"
+                        : change.DetailLayerId is { } detailLayerId
+                            ? _snapshot.Layers.GetValueOrDefault(detailLayerId) ?? "Unavailable layer"
+                            : "Active layer",
+                DisplayModeSummary(change.Template),
+                change.Template.TitleBlock is { } titleBlockRecipe ? AdaptiveTitleBlockLayoutSolver.Label(titleBlockRecipe.BuiltInKind) : "None",
+                AppearanceStateLabel(
+                    _drafts[index].AppearanceStateId, _appearanceStateByLabel))).ToArray();
+            EnsureActiveGroupExists();
+            _visiblePreviewRows.Clear();
+            _visiblePreviewRows.AddRange(allRows.Where(row =>
+                _activeGroupFilter is null || row.GroupKey == _activeGroupFilter));
+            _updatingPreviewSelection = true;
+            try
+            {
+                _previewGrid.DataStore = _visiblePreviewRows.ToArray();
+                _previewGrid.SelectedRows = _visiblePreviewRows
+                    .Select((row, index) => (row, index))
+                    .Where(item => selectedDraftIds.Contains(item.row.DraftId))
+                    .Select(item => item.index)
+                    .ToArray();
+            }
+            finally
+            {
+                _updatingPreviewSelection = false;
+            }
+            CreatedCount = changes.Length;
+            _countLabel.Text = $"Layouts to create  ·  {CreatedCount}";
+            RefreshGroupChips();
+            UpdateSelectionHint();
         }
-        finally
-        {
-            _updatingPreviewSelection = false;
-        }
-        CreatedCount = changes.Length;
-        _countLabel.Text = $"Layouts to create  ·  {CreatedCount}";
-        RefreshGroupChips();
-        UpdateSelectionHint();
         if (refreshDetailAssignments) RefreshDetailAssignments();
         var pickerError = PickerError();
         ParseRevisions(out var revisionError);
@@ -1226,7 +1229,7 @@ PreviewCleanup = CleanupPreviewsAsync();
             detailDisplayModes,
             detailAppearanceStates,
             ReadSpacing(CurrentPaper()),
-            _separateSpacing.Checked == true,
+            _spacingMode.SelectedIndex == 1,
             ReadSharedMargin(CurrentPaper()));
     }
 
@@ -1632,6 +1635,8 @@ PreviewCleanup = CleanupPreviewsAsync();
 
     private async Task RenderDraftPreviewAsync(long version)
     {
+        // A queued native capture can activate Rhino views; wait until editing ends.
+        if (MarginEditorHasFocus) return;
         var targetIndex = TargetDraftIndices().FirstOrDefault(-1);
         if (targetIndex < 0 || targetIndex >= _drafts.Count)
         {

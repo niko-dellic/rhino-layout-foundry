@@ -6,13 +6,14 @@ namespace RhinoLayoutFoundry.UI;
 
 internal sealed partial class BatchCreateLayoutsDialog
 {
-    private readonly FoundryCheckBox _separateSpacing = new("Separate spacing");
+    private readonly FoundryTextSegmentedControl _spacingMode = new(
+        ["Equal Spacing", "Separate Spacing"], segmentWidth: 124);
     private readonly NumericStepper _sharedMargin = MarginStepper();
     private readonly NumericStepper _pageEdgeMargin = MarginStepper();
     private readonly NumericStepper _detailGap = MarginStepper();
     private readonly NumericStepper _titleBlockGap = MarginStepper();
     private readonly NumericStepper _titleBlockEdge = MarginStepper();
-    private readonly Label _marginUnits = new();
+    private readonly List<Label> _marginUnitLabels = [];
     private readonly Label _marginHint = new() { Wrap = WrapMode.Word };
     private readonly Panel _sharedMarginHost = new();
     private readonly Panel _separateMarginsHost = new();
@@ -25,7 +26,7 @@ internal sealed partial class BatchCreateLayoutsDialog
     {
         MinValue = 0,
         MaxValue = 1000000,
-        DecimalPlaces = 6,
+        DecimalPlaces = 2,
         Value = 10,
     };
 
@@ -34,10 +35,10 @@ internal sealed partial class BatchCreateLayoutsDialog
         if (_isEditMode) return;
         _spacingInitialized = true;
         if (_drafts.Count > 0) LoadSpacingEditors(_drafts[0]);
-        _separateSpacing.CheckedChanged += (_, _) =>
+        _spacingMode.SelectedIndexChanged += (_, _) =>
         {
             if (_loadingSpacing || _updatingEditors) return;
-            if (_separateSpacing.Checked == true)
+            if (_spacingMode.SelectedIndex == 1)
             {
                 _loadingSpacing = true;
                 _pageEdgeMargin.Value = _detailGap.Value = _titleBlockGap.Value = _titleBlockEdge.Value = _sharedMargin.Value;
@@ -45,11 +46,11 @@ internal sealed partial class BatchCreateLayoutsDialog
             }
             ApplySpacingToTargets();
         };
-        _sharedMargin.ValueChanged += (_, _) => ApplySpacingToTargets();
-        _pageEdgeMargin.ValueChanged += (_, _) => ApplySpacingToTargets(SpacingField.PageEdge);
-        _detailGap.ValueChanged += (_, _) => ApplySpacingToTargets(SpacingField.DetailGap);
-        _titleBlockGap.ValueChanged += (_, _) => ApplySpacingToTargets(SpacingField.TitleBlockGap);
-        _titleBlockEdge.ValueChanged += (_, _) => ApplySpacingToTargets(SpacingField.TitleBlockEdge);
+        BindMarginEditor(_sharedMargin, SpacingField.All);
+        BindMarginEditor(_pageEdgeMargin, SpacingField.PageEdge);
+        BindMarginEditor(_detailGap, SpacingField.DetailGap);
+        BindMarginEditor(_titleBlockGap, SpacingField.TitleBlockGap);
+        BindMarginEditor(_titleBlockEdge, SpacingField.TitleBlockEdge);
     }
 
     private Control CreateMarginsEditor()
@@ -57,17 +58,17 @@ internal sealed partial class BatchCreateLayoutsDialog
         _sharedMarginHost.Content = new TableLayout
         {
             Spacing = new Size(FoundryTheme.Space2, FoundryTheme.Space1),
-            Rows = { new TableRow(new Label { Text = "Shared margin" }, new FoundryFormField(_sharedMargin)) },
+            Rows = { new TableRow(new Label { Text = "Shared margin" }, MarginField(_sharedMargin)) },
         };
         _separateMarginsHost.Content = new TableLayout
         {
             Spacing = new Size(FoundryTheme.Space2, FoundryTheme.Space1),
             Rows =
             {
-                new TableRow(new Label { Text = "Page edge to details" }, new FoundryFormField(_pageEdgeMargin)),
-                new TableRow(new Label { Text = "Between details" }, new FoundryFormField(_detailGap)),
-                new TableRow(new Label { Text = "Title block to details" }, new FoundryFormField(_titleBlockGap)),
-                new TableRow(new Label { Text = "Page edge to title block" }, new FoundryFormField(_titleBlockEdge)),
+                new TableRow(new Label { Text = "Page edge to details" }, MarginField(_pageEdgeMargin)),
+                new TableRow(new Label { Text = "Between details" }, MarginField(_detailGap)),
+                new TableRow(new Label { Text = "Title block to details" }, MarginField(_titleBlockGap)),
+                new TableRow(new Label { Text = "Page edge to title block" }, MarginField(_titleBlockEdge)),
             },
         };
         UpdateSpacingAvailability();
@@ -75,9 +76,32 @@ internal sealed partial class BatchCreateLayoutsDialog
         {
             Spacing = FoundryTheme.Space1,
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
-            Items = { _marginUnits, _separateSpacing, _sharedMarginHost, _separateMarginsHost, _marginHint },
+            Items = { _spacingMode, _sharedMarginHost, _separateMarginsHost, _marginHint },
         };
     }
+
+    private Control MarginField(NumericStepper input)
+    {
+        var units = new Label { VerticalAlignment = VerticalAlignment.Center };
+        _marginUnitLabels.Add(units);
+        return new TableLayout
+        {
+            Spacing = new Size(FoundryTheme.Space1, 0),
+            Rows = { new TableRow(new TableCell(new FoundryFormField(input), true), units) },
+        };
+    }
+
+    private void BindMarginEditor(NumericStepper input, SpacingField field)
+    {
+        input.ValueChanged += (_, _) => ApplySpacingToTargets(field, renderNativePreview: false);
+        input.LostFocus += (_, _) =>
+        {
+            if (!_loadingSpacing && !_updatingEditors) QueueDraftLayoutPreview();
+        };
+    }
+
+    private bool MarginEditorHasFocus => _sharedMargin.HasFocus || _pageEdgeMargin.HasFocus ||
+        _detailGap.HasFocus || _titleBlockGap.HasFocus || _titleBlockEdge.HasFocus;
 
     private double ReadSharedMargin(PaperRecipe paper) => !_spacingInitialized
         ? LayoutSpacing.Default(paper.UnitSystem).PageEdge
@@ -85,21 +109,34 @@ internal sealed partial class BatchCreateLayoutsDialog
 
     private LayoutSpacing ReadSpacing(PaperRecipe paper) => !_spacingInitialized
         ? LayoutSpacing.Default(paper.UnitSystem)
-        : (_separateSpacing.Checked == true
+        : (_spacingMode.SelectedIndex == 1
             ? new LayoutSpacing(_pageEdgeMargin.Value, _detailGap.Value, _titleBlockGap.Value,
                 _titleBlockEdge.Value, _spacingUnit)
             : LayoutSpacing.Uniform(_sharedMargin.Value, _spacingUnit)).InUnits(paper.UnitSystem);
 
-    private void ApplySpacingToTargets(SpacingField field = SpacingField.All)
+    private void ApplySpacingToTargets(SpacingField field = SpacingField.All, bool renderNativePreview = true)
     {
         if (_isEditMode || _loadingSpacing || _updatingEditors) return;
-        ApplyToTargets(draft => draft.Layout.TemplateId is not null ? draft : draft with
+        foreach (var index in TargetDraftIndices())
         {
-            Spacing = UpdatedSpacing(draft, field),
-            SeparateSpacing = _separateSpacing.Checked == true,
-            SharedMargin = field == SpacingField.All ? ReadSharedMargin(draft.Paper) : draft.SharedMargin,
-        });
-        QueueDraftLayoutPreview();
+            var draft = _drafts[index];
+            if (draft.Layout.TemplateId is not null) continue;
+            _drafts[index] = draft with
+            {
+                Spacing = UpdatedSpacing(draft, field),
+                SeparateSpacing = _spacingMode.SelectedIndex == 1,
+                SharedMargin = field == SpacingField.All ? ReadSharedMargin(draft.Paper) : draft.SharedMargin,
+            };
+        }
+        // Rebinding the table or reattaching field hosts during native text editing
+        // can end AppKit's field-editor session, including on Backspace.
+        _layoutSelectorPreview.SetPagePreview(null, null);
+        RefreshPreview(refreshDetailAssignments: false, refreshRows: false);
+        if (renderNativePreview)
+        {
+            UpdateSpacingAvailability();
+            QueueDraftLayoutPreview();
+        }
     }
 
     private LayoutSpacing UpdatedSpacing(CreationDraft draft, SpacingField field)
@@ -125,7 +162,7 @@ internal sealed partial class BatchCreateLayoutsDialog
             var spacing = (draft.Spacing ?? LayoutSpacing.Default(draft.Paper.UnitSystem)).InUnits(draft.Paper.UnitSystem);
             _spacingUnit = draft.Paper.UnitSystem;
             _sharedMargin.Value = draft.SharedMargin ?? spacing.PageEdge;
-            _separateSpacing.Checked = draft.SeparateSpacing;
+            _spacingMode.SelectedIndex = draft.SeparateSpacing ? 1 : 0;
             _pageEdgeMargin.Value = spacing.PageEdge;
             _detailGap.Value = spacing.DetailGap;
             _titleBlockGap.Value = spacing.TitleBlockGap;
@@ -135,21 +172,43 @@ internal sealed partial class BatchCreateLayoutsDialog
         finally { _loadingSpacing = false; }
     }
 
+    private static void SetEnabled(Control control, bool enabled)
+    {
+        if (control.Enabled != enabled) control.Enabled = enabled;
+    }
+
+    private static void SetVisible(Control control, bool visible)
+    {
+        if (control.Visible != visible) control.Visible = visible;
+    }
+
     private void UpdateSpacingAvailability()
     {
         if (_isEditMode || !_spacingInitialized) return;
         var generated = TargetDraftIndices().Select(index => _drafts[index])
             .Where(draft => draft.Layout.TemplateId is null).ToArray();
         var enabled = generated.Length > 0;
-        var separate = _separateSpacing.Checked == true;
-        _marginUnits.Text = $"Paper units: {_spacingUnit.ToLowerInvariant()}";
-        _marginHint.Text = enabled ? "Uniform on all sides. Saved templates keep their geometry."
-            : "Saved templates keep their geometry.";
-        _separateSpacing.Enabled = enabled;
-        _sharedMarginHost.Enabled = enabled;
-        _separateMarginsHost.Enabled = enabled;
-        _sharedMarginHost.Visible = !separate;
-        _separateMarginsHost.Visible = separate;
-        _titleBlockGap.Enabled = _titleBlockEdge.Enabled = enabled && generated.Any(draft => draft.TitleBlock.BuiltInKind is not null);
+        var separate = _spacingMode.SelectedIndex == 1;
+        var unitLabel = _spacingUnit switch
+        {
+            "Millimeters" => "mm",
+            "Centimeters" => "cm",
+            "Meters" => "m",
+            "Inches" => "in",
+            "Feet" => "ft",
+            _ => _spacingUnit,
+        };
+        foreach (var label in _marginUnitLabels)
+            if (label.Text != unitLabel) label.Text = unitLabel;
+        _marginHint.Text = "Saved templates keep their geometry.";
+        SetVisible(_marginHint, !enabled);
+        SetEnabled(_spacingMode, enabled);
+        SetEnabled(_sharedMarginHost, enabled);
+        SetEnabled(_separateMarginsHost, enabled);
+        SetVisible(_sharedMarginHost, !separate);
+        SetVisible(_separateMarginsHost, separate);
+        var titleBlockEnabled = enabled && generated.Any(draft => draft.TitleBlock.BuiltInKind is not null);
+        SetEnabled(_titleBlockGap, titleBlockEnabled);
+        SetEnabled(_titleBlockEdge, titleBlockEnabled);
     }
 }

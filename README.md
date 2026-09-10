@@ -21,6 +21,8 @@ An open-source layout manager for Rhino. Foundry organizes folders, layout sheet
 
 Foundry calls a Rhino page layout a **sheet**; a **detail** is its model-space viewport. **Folders** are Foundry metadata, while Rhino's native layout tabs remain flat.
 
+In List view, click a layout’s **Template** circle to toggle it: `○` is off (the default), and `●` is enabled. Clicking a selected layout applies its new state to all selected layouts; folder and detail rows are excluded. With the layout row focused, **Space** performs the same toggle. Existing detail templates remain accessible through the inspector.
+
 ## Known limitations
 
 Some Rhino layout operations are not natively undoable. Foundry uses validation, compensating rollback, and recovery packages where applicable; read each operation's warning. Do not assume one Undo will reverse layout creation, deletion, rename, or package replacement. Platform-specific Undo verification remains a release gate.
