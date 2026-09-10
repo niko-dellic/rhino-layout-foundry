@@ -1,14 +1,14 @@
 {
-  "version": "0.3.0-preview.29",
+  "version": "0.3.0-preview.30",
   "assemblyVersion": "0.3.0.0",
   "files": {
-    "RhinoFoundry.UI.Primitives.dll": "4c62ad729b0b6b69ef6f0b6bb2de23287f874dc94d18f0171930985817f7d8d2",
-    "RhinoFoundry.UI.dll": "fce960a57df129d10829c5a24c6267050810f97812a906eb57521203dd36ab29",
-    "RhinoFoundry.UI.MacOS.dll": "e1edc6de66572d3bd2a834faada10fe12383f4e3d21d65c976faba12020f13c6"
+    "RhinoFoundry.UI.Primitives.dll": "6527ff5dea554ad4095bb6bff4f953834bb3d4af7f2135b42ab16231b8904638",
+    "RhinoFoundry.UI.dll": "78cf702e9dff910a4cec58e6379087b173ae9eb3b02e48654291b0f07574b771",
+    "RhinoFoundry.UI.MacOS.dll": "a9960e6ba9fa6e652fa69bddee39570b324925fc4165671364c092ba69424525"
   },
   "packages": {
-    "RhinoFoundry.UI.Primitives.0.3.0-preview.29.nupkg": "d618204f8b9341357318a59a5ce519884bc1c90d2ec34c7f06979e482da6ae85",
-    "RhinoFoundry.UI.0.3.0-preview.29.nupkg": "a2abc950cf126549f92cacd80fc9c18a454d19f73e5bae9b03e36c83e83fb8d4",
-    "RhinoFoundry.UI.MacOS.0.3.0-preview.29.nupkg": "441be9610d71f19e9d573d627fa7fc96e423821366b6d470eaa524115177ccfa"
+    "RhinoFoundry.UI.Primitives.0.3.0-preview.30.nupkg": "d9d8bc4769539d1aa558ba96ff5a441b2125b56f6ecd118107a976ffe2294d68",
+    "RhinoFoundry.UI.0.3.0-preview.30.nupkg": "7381998899b8c953614a6e5bc15cf657cf4201000cfa3eb7a79bc072daad11d3",
+    "RhinoFoundry.UI.MacOS.0.3.0-preview.30.nupkg": "c2a081236747e56633bbbb5a8525b32a5fda6617d51e5cf40a6712f8e9d1f533"
   }
 }

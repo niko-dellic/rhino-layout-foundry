@@ -2096,7 +2096,7 @@ public sealed partial class LayoutFoundryPanel : Panel
             _sortDirection);
         // Keep the native data source and surviving item identities when only a
         // branch changes (including insertion/removal of an inline creation draft).
-        if (preserveRows && _renderedTreeItems.Length > 0 &&
+        if (preserveRows && _renderedTreeItems.Count > 0 &&
             _renderedTreeItems.Select(item => item.Node.Key).SequenceEqual(nodes.Select(node => node.Key)))
         {
             var preferredKey = _inlineDraft is { } activeDraft && !IsRenameDraft(activeDraft.Kind)
@@ -2106,7 +2106,7 @@ public sealed partial class LayoutFoundryPanel : Panel
             _isPopulatingTree = true;
             try
             {
-                for (var index = 0; index < _renderedTreeItems.Length; index++)
+                for (var index = 0; index < _renderedTreeItems.Count; index++)
                     ReconcileTreeBranch(_renderedTreeItems[index], nodes[index], renderOverview,
                         preferredKey, ancestorReloadsChildren: false);
                 var allItems = Flatten(_renderedTreeItems).ToArray();

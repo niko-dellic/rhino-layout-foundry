@@ -37,8 +37,8 @@ internal sealed partial class RhinoMutationExecutor
         var names = document.Views.GetPageViews().Select(p => p.PageName).ToHashSet(StringComparer.OrdinalIgnoreCase);
         if (spec.Sheets.Any(s => !names.Add(s.Name.Trim())))
             return Failure("drawing_set.name_conflict", "A proposed sheet name already exists.");
-        var mode = DisplayModeDescription.FindByName("Pen");
-        if (mode is null) return Failure("drawing_set.presentation_missing", "The Pen display mode is unavailable.");
+        var mode = FoundryDrawingDisplayMode.GetOrCreate();
+        if (mode is null) return Failure("drawing_set.presentation_missing", "The Foundry drawing display mode could not be initialized.");
         var pages = new List<RhinoPageView>();
         var clips = new List<Guid>();
         var namedViews = new List<string>();
