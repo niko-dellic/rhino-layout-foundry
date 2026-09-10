@@ -13,6 +13,7 @@ public sealed class LayoutFoundryPlugin : PlugIn
     private readonly DocumentStateStore _stateStore = new();
     private readonly DocumentRevisionTracker _revisionTracker = new();
     private RhinoDocumentEventBridge? _eventBridge;
+    private RhinoDetailCaptionService? _captions;
     private IDisposable? _automationRegistration;
     private System.Drawing.Icon? _panelIcon;
 
@@ -61,6 +62,8 @@ public sealed class LayoutFoundryPlugin : PlugIn
             _revisionTracker,
             LayoutFoundryUiHost.NotifyOverviewChanged);
         _eventBridge.Start();
+        _captions = new RhinoDetailCaptionService(_stateStore);
+        _captions.Start();
         RhinoDoc.ActiveDocumentChanged += OnActiveDocumentChanged;
         RhinoDoc.CloseDocument += OnCloseDocument;
         return LoadReturnCode.Success;
@@ -71,6 +74,8 @@ public sealed class LayoutFoundryPlugin : PlugIn
         RhinoDoc.ActiveDocumentChanged -= OnActiveDocumentChanged;
         RhinoDoc.CloseDocument -= OnCloseDocument;
         _eventBridge?.Dispose();
+        _captions?.Dispose();
+        _captions = null;
         _eventBridge = null;
         _automationRegistration?.Dispose();
         _automationRegistration = null;

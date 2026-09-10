@@ -132,11 +132,7 @@ internal sealed partial class RhinoMutationExecutor
                             document.Layers[sourceLayer.Index].PerViewportIsVisible(viewportId))
                             throw new InvalidOperationException($"Could not hide layer '{sourceLayer.FullPath}' in {view.Name}.");
                     }
-                    if (spec.SchemaVersion == 2)
-                        annotations.Add(AddDrawingSetCaption(document, page, spec.ProposalId,
-                            $"{view.Name.Trim()}  |  1:{view.ScaleDenominator.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}",
-                            b.Left * pageFactor, (b.Bottom - 2) * pageFactor, 2.5 * pageFactor,
-                            (b.Right - b.Left) * pageFactor, presentationLayerIndex));
+                    RhinoDetailCaptionService.Mark(detail);
                     if (view.Cut is { } cut)
                     {
                         var plane = new Plane(Point(cut.Origin), Vector(cut.Normal));

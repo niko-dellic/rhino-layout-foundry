@@ -110,7 +110,7 @@ public sealed class AutomationPlanRegistry(
 
     private static bool IsAllowed(OperationChange change) => change is
         CreateDrawingSetChange or
-        ConfigureDetailChange or FlipClippingPlaneChange or
+        ConfigureDetailChange or SetDetailCaptionsChange or FlipClippingPlaneChange or
         CreateNamedViewChange or
         CreateClippingPlaneChange or
         CreateSheetFromTemplateChange or

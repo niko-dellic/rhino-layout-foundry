@@ -423,7 +423,6 @@ PreviewCleanup = CleanupPreviewsAsync();
             new("Page size", CreatePaperEditor(), isExpanded: true),
             new("Layout", CreateLayoutEditor(), isExpanded: true),
         };
-        if (!_isEditMode) settingsItems.Add(new("Margins", CreateMarginsEditor(), isExpanded: true));
         var settingsContent = new FoundryAccordion(settingsItems.ToArray());
         var settingsPane = new FoundryScrollable(settingsContent);
         var previewPane = new Panel
@@ -638,6 +637,7 @@ PreviewCleanup = CleanupPreviewsAsync();
         table.Rows.Add(new TableRow(
             new Panel(),
             new TableCell(_detailLayerPickerHost, true)));
+        if (!_isEditMode) AddMarginRows(table);
         return table;
     }
 

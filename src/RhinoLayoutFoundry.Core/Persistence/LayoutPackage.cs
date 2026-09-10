@@ -69,7 +69,10 @@ public sealed record LayoutPackageSheet(
 public sealed record LayoutPackageDetail(
     Guid SourceDetailViewportId,
     DetailSlotRecipe Recipe,
-    [property: System.Text.Json.Serialization.JsonRequired] IReadOnlyList<LayoutPackageLayerOverride> LayerOverrides);
+    [property: System.Text.Json.Serialization.JsonRequired] IReadOnlyList<LayoutPackageLayerOverride> LayerOverrides)
+{
+    public bool HasManagedCaption { get; init; }
+}
 
 public sealed record LayoutPackageLayerOverride(
     string LayerFullPath,

@@ -70,6 +70,8 @@ public sealed record DetailSnapshot(
     Guid? LayerId = null,
     DetailPageBounds? PageBounds = null)
 {
+    public bool HasManagedCaption { get; init; }
+    public string? CaptionWarning { get; init; }
     public double? ScaleDenominator { get; init; }
     public Point3Coordinates? CameraLocation { get; init; }
     public Point3Coordinates? CameraTarget { get; init; }

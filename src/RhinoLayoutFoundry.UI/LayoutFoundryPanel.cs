@@ -464,19 +464,6 @@ public sealed partial class LayoutFoundryPanel : Panel
             Sortable = true,
         };
         treeGrid.Columns.Add(printColumn);
-        var templateColumn = new GridColumn
-        {
-            HeaderText = "Template",
-            DataCell = new TextBoxCell
-            {
-                Binding = Binding.Property<HierarchyTreeItem, string>(item => item.TemplateText),
-                TextAlignment = TextAlignment.Center,
-            },
-            Width = 80,
-            Editable = false,
-            Sortable = true,
-        };
-        treeGrid.Columns.Add(templateColumn);
         var paperColumn = new GridColumn
         {
             HeaderText = "Paper size",
@@ -514,6 +501,19 @@ public sealed partial class LayoutFoundryPanel : Panel
             Sortable = false,
         };
         treeGrid.Columns.Add(appearanceStateColumn);
+        var templateColumn = new GridColumn
+        {
+            HeaderText = "Template",
+            DataCell = new TextBoxCell
+            {
+                Binding = Binding.Property<HierarchyTreeItem, string>(item => item.TemplateText),
+                TextAlignment = TextAlignment.Center,
+            },
+            Width = 80,
+            Editable = false,
+            Sortable = true,
+        };
+        treeGrid.Columns.Add(templateColumn);
         var notesColumn = new GridColumn
         {
             HeaderText = "Notes",
@@ -1291,6 +1291,8 @@ public sealed partial class LayoutFoundryPanel : Panel
 
     private void CreateHierarchyContextMenu()
     {
+        var captions = new ButtonMenuItem { Text = "Detail captions…" };
+        captions.Click += async (_, _) => await EditDetailCaptionsAsync();
         _renameConversationMenu.Click += (_, _) => RenameConversation();
         _setCurrentMenuItem = new ButtonMenuItem { Text = "Set Current" };
         _newFolderMenuItem = new ButtonMenuItem { Text = "New Folder" };
@@ -1344,9 +1346,13 @@ public sealed partial class LayoutFoundryPanel : Panel
             _printPageMenuItem,
             _printScopeMenuItem,
             _propertiesPageMenuItem,
+            captions,
             new SeparatorMenuItem(),
             _renameFolderMenuItem);
-        contextMenu.Opening += (_, _) => { UpdateContextMenuActions(); UpdateConversationMenu(); };
+        contextMenu.Opening += (_, _) => { UpdateContextMenuActions(); UpdateConversationMenu();
+            var targets = SelectedKeys().ToArray();
+            captions.Enabled = targets.Length == 1 && targets[0].Kind is OverviewNodeKind.Folder or OverviewNodeKind.Sheet or OverviewNodeKind.Detail;
+        };
         _treeGrid.ContextMenu = contextMenu;
     }
 

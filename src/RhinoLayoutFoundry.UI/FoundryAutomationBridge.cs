@@ -61,6 +61,7 @@ internal static class FoundryAutomationBridge
                 "stage_create_layouts" => Stage(host, LayoutPlan(host, arguments)),
                 "stage_assign_named_view" => Stage(host, AssignmentPlan(host, arguments)),
                 "stage_configure_detail" => Stage(host, DetailPlan(host, arguments)),
+                "stage_set_detail_captions" => Stage(host, CaptionPlan(host, arguments)),
                 "stage_flip_clipping_plane" => Stage(host, FlipClipPlan(host, arguments)),
                 "apply_plan" => await ApplyAsync(host, GuidValue(arguments, "plan_id"), cancellationToken),
                 "abandon_plan" => Abandon(host, GuidValue(arguments, "plan_id")),
@@ -94,7 +95,7 @@ internal static class FoundryAutomationBridge
                 root_folder_id = snapshot.RootFolderId,
                 model_bounds = snapshot.ModelBounds,
                 model_units = snapshot.ModelUnitSystem,
-                automation_features = new[] { "drawing_set_v1", "drawing_set_v2", "drawing_captions", "per_view_hidden_layers", "single_approval_batch", "proposal_receipts" },
+                automation_features = new[] { "drawing_set_v1", "drawing_set_v2", "drawing_captions", "linked_detail_captions", "per_view_hidden_layers", "single_approval_batch", "proposal_receipts" },
                 drawing_set_receipts = snapshot.Metadata.Where(p => p.Key.StartsWith("RhinoLayoutFoundry.DrawingSet.", StringComparison.Ordinal))
                     .ToDictionary(p => p.Key, p => p.Value),
                 standard_viewport_ids = snapshot.StandardViewports,
@@ -104,12 +105,14 @@ internal static class FoundryAutomationBridge
                     parent_id = folder.ParentId,
                     folder.Name,
                     folder.Order,
+                    caption_settings = DetailCaptions.Read(snapshot.Metadata, new(HierarchyScopeKind.Folder, folder.Id)),
                 }),
                 layouts = snapshot.Sheets.Values.Select(sheet => new
                 {
                     id = sheet.PageViewId,
                     folder_id = sheet.FolderId,
                     sheet.Name,
+                    caption_settings = DetailCaptions.Read(snapshot.Metadata, new(HierarchyScopeKind.Sheet, sheet.PageViewId)),
                     notes = sheet.Notes,
                     ai_provenance = sheet.Metadata.Where(p => p.Key.StartsWith("RhinoLayoutFoundry.DrawingSet.", StringComparison.Ordinal))
                         .ToDictionary(p => p.Key, p => p.Value),
@@ -118,6 +121,11 @@ internal static class FoundryAutomationBridge
                     {
                         id = detail.DetailViewportId,
                         detail.Name,
+                        managed_caption = detail.HasManagedCaption,
+                        caption_warning = detail.CaptionWarning,
+                        caption_settings = DetailCaptions.Read(snapshot.Metadata, new(HierarchyScopeKind.Detail, detail.DetailViewportId)),
+                        effective_caption = DetailCaptions.Resolve(snapshot.Metadata, snapshot.Folders, sheet.FolderId,
+                            sheet.PageViewId, detail.DetailViewportId, detail.IsParallelProjection == true),
                         display_mode = detail.DisplayModeName,
                         page_bounds = detail.PageBounds,
                         scale_denominator = detail.ScaleDenominator,
@@ -182,6 +190,15 @@ internal static class FoundryAutomationBridge
         var result = await host.CaptureAsync(new AutomationCaptureRequest(AutomationCaptureKind.Model, null, null, 1200, 900), token);
         return Json(new { succeeded = result.Succeeded, media_type = result.MediaType,
             content_base64 = result.Content is null ? null : Convert.ToBase64String(result.Content), result.Message });
+    }
+
+    private static OperationPlan CaptionPlan(IFoundryAutomationHost host, JsonElement arguments)
+    {
+        var snapshot = host.CaptureSnapshot();
+        var scope = new HierarchyScope(Enum.Parse<HierarchyScopeKind>(String(arguments, "scope_kind"), true), GuidValue(arguments, "scope_id"));
+        var settings = new DetailCaptionSettings(Enum.Parse<CaptionVisibility>(String(arguments, "name"), true),
+            Enum.Parse<CaptionVisibility>(String(arguments, "scale"), true));
+        return new SetDetailCaptionsPlanner().Plan(new(snapshot.DocumentRuntimeSerialNumber, snapshot.Revision, scope, settings), snapshot);
     }
 
     private static OperationPlan NamedViewPlan(

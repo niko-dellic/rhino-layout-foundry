@@ -41,6 +41,7 @@ internal sealed partial class RhinoMutationExecutor(
             folderIds,
             sheetIds);
         _stateStore.Set(document, stamped);
+        RhinoDetailCaptionService.Synchronize(document, stamped);
         _overviewChanged(new OverviewInvalidation(
             document.RuntimeSerialNumber,
             OverviewInvalidationKind.Metadata));
@@ -51,6 +52,7 @@ internal sealed partial class RhinoMutationExecutor(
     {
         return plan.Changes switch
         {
+            [SetDetailCaptionsChange captions] => ApplyDetailCaptions(document, plan, captions),
             [RhinoLayoutFoundry.Extensibility.CreateDrawingSetChange drawingSet] => ApplyDrawingSet(document, plan, drawingSet),
             [ConfigureDetailChange configureDetail] => ApplyConfigureDetail(document, plan, configureDetail),
             [FlipClippingPlaneChange flip] => ApplyFlipClippingPlane(document, plan, flip),

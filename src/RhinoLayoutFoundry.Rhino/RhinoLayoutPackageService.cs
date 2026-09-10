@@ -189,6 +189,11 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
                         objectMap);
                     var created = CreateDetail(document, page, recipe, unit, scale);
                     detailsBySource[detail.SourceDetailViewportId] = created.Viewport.Id;
+                    if (detail.HasManagedCaption)
+                    {
+                        RhinoDetailCaptionService.Mark(created);
+                        created = page.GetDetailViews().Single(d => d.Viewport.Id == detailsBySource[detail.SourceDetailViewportId]);
+                    }
                     ApplyLayerOverrides(document, created.Viewport.Id, detail.LayerOverrides, warnings, transaction);
                     ApplyLayerRules(document, created.Viewport.Id, recipe.LayerRules, warnings, transaction);
                     ApplyObjectDisplayRules(document, created.Viewport.Id, recipe.ObjectDisplayRules, warnings, transaction);
@@ -241,6 +246,7 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
                 DateTimeOffset.UtcNow);
             _stateStore.Set(document,
                 _stateStore.BackfillHierarchyDates(document, stampedState));
+            RhinoDetailCaptionService.Synchronize(document, _stateStore.Get(document));
             cancellationToken.ThrowIfCancellationRequested();
             if (createRecovery) _checkpoint?.Invoke("metadata");
             document.Modified = true;
@@ -318,7 +324,8 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
                     return new LayoutPackageDetail(
                         detail.Viewport.Id,
                         CaptureDetail(document, detail),
-                        CaptureLayerOverrides(document, detail.Viewport.Id));
+                        CaptureLayerOverrides(document, detail.Viewport.Id))
+                    { HasManagedCaption = detail.Attributes.GetUserString(DetailCaptions.ManagedKey) == "1" };
                 }).ToArray();
                 var pageObjectIds = document.Objects
                     .Where(item => item.Attributes.Space == ActiveSpace.PageSpace &&
@@ -979,6 +986,8 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
         var selectedIds = contents.Manifest.Sheets.SelectMany(sheet => sheet.PageSpaceObjectIds).ToHashSet();
         foreach (var source in file.Objects.Where(item => selectedIds.Contains(item.Id)))
         {
+            // Managed text is regenerated against the destination detail object IDs.
+            if (source.Attributes.GetUserString(DetailCaptions.OwnerKey) is not null) continue;
             if (!pagesBySource.TryGetValue(source.Attributes.ViewportId, out var page)) continue;
             var sourceLayer = SourceLayer(file, source.Attributes.LayerIndex);
             var destinationLayerIndex = document.Layers.FindByFullPath(sourceLayer.FullPath, -1);
@@ -1357,7 +1366,12 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
             RootFolderId: rootId,
             Folders: folders,
             Sheets: sheets,
-            Metadata: metadata)
+            Metadata: DetailCaptions.CopyScopes(
+                DetailCaptions.CopyScopes(
+                    DetailCaptions.CopyScopes(metadata, manifest.FoundryState.Metadata, HierarchyScopeKind.Folder, folderMap),
+                    manifest.FoundryState.Metadata, HierarchyScopeKind.Sheet,
+                    pagesBySource.ToDictionary(p => p.Key, p => p.Value.MainViewport.Id)),
+                manifest.FoundryState.Metadata, HierarchyScopeKind.Detail, detailsBySource))
         {
             Canvas = canvas,
             Recovery = recovery,

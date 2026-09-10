@@ -35,6 +35,10 @@ internal sealed class RhinoDocumentSnapshotProvider : IDocumentSnapshotProvider
         }
 
         var pageViews = document.Views.GetPageViews();
+        var captionWarnings = document.Objects.GetObjectList(ObjectType.Annotation)
+            .Where(o => o.Attributes.GetUserString(DetailCaptions.OwnerKey) is not null)
+            .GroupBy(o => o.Attributes.GetUserString(DetailCaptions.OwnerKey)!)
+            .ToDictionary(g => g.Key, g => g.First().Attributes.GetUserString("RhinoLayoutFoundry.Caption.Warning"));
         var sheets = pageViews
             .Select((page, index) =>
             {
@@ -62,6 +66,8 @@ internal sealed class RhinoDocumentSnapshotProvider : IDocumentSnapshotProvider
                         CameraLocation = new Point3Coordinates(detail.Viewport.CameraLocation.X, detail.Viewport.CameraLocation.Y, detail.Viewport.CameraLocation.Z),
                         CameraTarget = new Point3Coordinates(detail.Viewport.CameraTarget.X, detail.Viewport.CameraTarget.Y, detail.Viewport.CameraTarget.Z),
                         IsParallelProjection = detail.Viewport.IsParallelProjection,
+                        HasManagedCaption = detail.Attributes.GetUserString(DetailCaptions.ManagedKey) == "1",
+                        CaptionWarning = captionWarnings.GetValueOrDefault(detail.Id.ToString("D")),
                     })
                     .ToArray();
                 var titleBlock = record?.TitleBlock;

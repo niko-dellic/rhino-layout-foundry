@@ -15,8 +15,9 @@ internal sealed partial class BatchCreateLayoutsDialog
     private readonly NumericStepper _titleBlockEdge = MarginStepper();
     private readonly List<Label> _marginUnitLabels = [];
     private readonly Label _marginHint = new() { Wrap = WrapMode.Word };
-    private readonly Panel _sharedMarginHost = new();
-    private readonly Panel _separateMarginsHost = new();
+    private readonly List<Control> _sharedMarginControls = [];
+    private readonly List<Control> _separateMarginControls = [];
+    private readonly Panel _marginHintKey = new();
     private enum SpacingField { All, PageEdge, DetailGap, TitleBlockGap, TitleBlockEdge }
     private bool _loadingSpacing;
     private bool _spacingInitialized;
@@ -53,31 +54,27 @@ internal sealed partial class BatchCreateLayoutsDialog
         BindMarginEditor(_titleBlockEdge, SpacingField.TitleBlockEdge);
     }
 
-    private Control CreateMarginsEditor()
+    private void AddMarginRows(TableLayout table)
     {
-        _sharedMarginHost.Content = new TableLayout
-        {
-            Spacing = new Size(FoundryTheme.Space2, FoundryTheme.Space1),
-            Rows = { new TableRow(new Label { Text = "Shared margin" }, MarginField(_sharedMargin)) },
-        };
-        _separateMarginsHost.Content = new TableLayout
-        {
-            Spacing = new Size(FoundryTheme.Space2, FoundryTheme.Space1),
-            Rows =
-            {
-                new TableRow(new Label { Text = "Page edge to details" }, MarginField(_pageEdgeMargin)),
-                new TableRow(new Label { Text = "Between details" }, MarginField(_detailGap)),
-                new TableRow(new Label { Text = "Title block to details" }, MarginField(_titleBlockGap)),
-                new TableRow(new Label { Text = "Page edge to title block" }, MarginField(_titleBlockEdge)),
-            },
-        };
+        // Share the Layout table's label/value columns, including in separate mode.
+        table.Rows.Add(new TableRow(new Label { Text = "Spacing", TextAlignment = TextAlignment.Right },
+            new TableCell(_spacingMode, true)));
+        AddMarginRow(table, "Shared margin", _sharedMargin, _sharedMarginControls);
+        AddMarginRow(table, "Page edge to details", _pageEdgeMargin, _separateMarginControls);
+        AddMarginRow(table, "Between details", _detailGap, _separateMarginControls);
+        AddMarginRow(table, "Title block to details", _titleBlockGap, _separateMarginControls);
+        AddMarginRow(table, "Page edge to title block", _titleBlockEdge, _separateMarginControls);
+        table.Rows.Add(new TableRow(_marginHintKey, new TableCell(_marginHint, true)));
         UpdateSpacingAvailability();
-        return new StackLayout
-        {
-            Spacing = FoundryTheme.Space1,
-            HorizontalContentAlignment = HorizontalAlignment.Stretch,
-            Items = { _spacingMode, _sharedMarginHost, _separateMarginsHost, _marginHint },
-        };
+    }
+
+    private void AddMarginRow(TableLayout table, string text, NumericStepper input, List<Control> controls)
+    {
+        var key = new Label { Text = text, TextAlignment = TextAlignment.Right };
+        var value = MarginField(input);
+        controls.Add(key);
+        controls.Add(value);
+        table.Rows.Add(new TableRow(key, new TableCell(value, true)));
     }
 
     private Control MarginField(NumericStepper input)
@@ -202,11 +199,18 @@ internal sealed partial class BatchCreateLayoutsDialog
             if (label.Text != unitLabel) label.Text = unitLabel;
         _marginHint.Text = "Saved templates keep their geometry.";
         SetVisible(_marginHint, !enabled);
+        SetVisible(_marginHintKey, !enabled);
         SetEnabled(_spacingMode, enabled);
-        SetEnabled(_sharedMarginHost, enabled);
-        SetEnabled(_separateMarginsHost, enabled);
-        SetVisible(_sharedMarginHost, !separate);
-        SetVisible(_separateMarginsHost, separate);
+        foreach (var control in _sharedMarginControls)
+        {
+            SetEnabled(control, enabled);
+            SetVisible(control, !separate);
+        }
+        foreach (var control in _separateMarginControls)
+        {
+            SetEnabled(control, enabled);
+            SetVisible(control, separate);
+        }
         var titleBlockEnabled = enabled && generated.Any(draft => draft.TitleBlock.BuiltInKind is not null);
         SetEnabled(_titleBlockGap, titleBlockEnabled);
         SetEnabled(_titleBlockEdge, titleBlockEnabled);

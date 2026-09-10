@@ -784,6 +784,20 @@ internal sealed partial class RhinoMutationExecutor
             }
 
             var afterState = beforeState with { Folders = folders, Sheets = sheets };
+            var captionMetadata = DetailCaptions.CopyScopes(afterState.Metadata, beforeState.Metadata,
+                HierarchyScopeKind.Sheet, duplicatedSheetIds);
+            foreach (var duplicate in folderChanges)
+                captionMetadata = DetailCaptions.CopyScopes(captionMetadata, beforeState.Metadata, HierarchyScopeKind.Folder, duplicate.FolderIdMap);
+            foreach (var page in createdPages)
+            foreach (var detail in page.GetDetailViews())
+                if (detail.Attributes.GetUserString(DetailCaptions.ManagedKey) == "1"
+                    && Guid.TryParse(detail.Attributes.GetUserString(DetailCaptions.SourceViewportKey), out var sourceViewport))
+                {
+                    captionMetadata = DetailCaptions.CopyScopes(captionMetadata, beforeState.Metadata, HierarchyScopeKind.Detail,
+                        new Dictionary<Guid, Guid> { [sourceViewport] = detail.Viewport.Id });
+                    RhinoDetailCaptionService.Mark(detail);
+                }
+            afterState = afterState with { Metadata = captionMetadata };
             if (placement is not null)
             {
                 afterState = afterState with
