@@ -7,6 +7,22 @@ namespace RhinoLayoutFoundry.Core.Tests;
 public sealed class AutomationPlanRegistryTests
 {
     [Fact]
+    public async Task SheetUpdatesAreFrozenAndRequireSingleUseApproval()
+    {
+        var context = new Context();
+        var registry = new AutomationPlanRegistry(context, context);
+        var basePlan = Plan();
+        var spec = new SheetUpdateSpecification(Guid.NewGuid(), basePlan.DocumentRuntimeSerialNumber, basePlan.SourceRevision,
+            [new(TestSnapshots.SheetOneId, "bottom", null, [], [], [])], []);
+        var envelope = registry.StagePlan(basePlan with { Changes = [new UpdateSheetsChange(spec, SheetUpdatePlanner.Digest(spec))] });
+        Assert.Equal(0, context.Applied);
+        var approval = registry.ApprovePlan(envelope.PlanId);
+        Assert.True((await registry.ApplyApprovedPlanAsync(approval, CancellationToken.None)).Succeeded);
+        Assert.IsType<UpdateSheetsChange>(context.LastPlan!.Changes[0]);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => registry.ApplyApprovedPlanAsync(approval, CancellationToken.None));
+    }
+
+    [Fact]
     public async Task DetailFramingUsesTheSameSingleUseApprovalGate()
     {
         var context = new Context();

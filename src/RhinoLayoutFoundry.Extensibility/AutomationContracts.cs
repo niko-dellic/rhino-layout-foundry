@@ -6,7 +6,7 @@ namespace RhinoLayoutFoundry.Extensibility;
 public static class FoundryAutomationProtocol
 {
     public const int MajorVersion = 2;
-    public const int MinorVersion = 0;
+    public const int MinorVersion = 1;
 }
 
 public sealed record AutomationCapabilities(
@@ -75,6 +75,10 @@ public interface IFoundryAutomationHost
     AutomationCapabilities GetCapabilities();
 
     DocumentSnapshot CaptureSnapshot();
+    void SelectAnnotation(Guid id) => throw new NotSupportedException("Update Layout Foundry to select annotations.");
+    string? PickAnnotationReferences(Guid id) => throw new NotSupportedException("Update Layout Foundry to repair annotations.");
+
+    string InspectDrawingGeometry(IReadOnlyList<Guid> ids) => "{\"error\":\"Drawing geometry inspection unavailable; update Layout Foundry.\"}";
 
     Task<AutomationCaptureResult> CaptureAsync(
         AutomationCaptureRequest request,

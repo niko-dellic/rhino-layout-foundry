@@ -5,7 +5,7 @@ using RhinoLayoutFoundry.Extensibility;
 
 namespace RhinoLayoutFoundry.Rhino;
 
-internal sealed class RhinoFoundryAutomationHost : IFoundryAutomationHost
+internal sealed partial class RhinoFoundryAutomationHost : IFoundryAutomationHost
 {
     private readonly AutomationPlanRegistry _plans;
     private readonly IDocumentSnapshotProvider _snapshotProvider;
@@ -46,6 +46,8 @@ internal sealed class RhinoFoundryAutomationHost : IFoundryAutomationHost
         ]);
 
     public DocumentSnapshot CaptureSnapshot() => _snapshotProvider.Capture();
+
+    public string InspectDrawingGeometry(IReadOnlyList<Guid> ids) => RhinoManagedAnnotations.Inspect(global::Rhino.RhinoDoc.ActiveDoc ?? throw new InvalidOperationException("No active document."), ids);
 
     public async Task<AutomationCaptureResult> CaptureAsync(
         AutomationCaptureRequest request,

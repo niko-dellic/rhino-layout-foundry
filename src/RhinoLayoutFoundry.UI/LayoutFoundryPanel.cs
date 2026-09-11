@@ -1296,14 +1296,23 @@ internal sealed partial class LayoutFoundryWorkspace : Panel
 
     private readonly List<WeakReference<FoundryToolbarSeparator>> _toolbarSeparators = [];
 
-    private FoundryToolbarSeparator CreateToolbarSeparator()
+    private Control CreateToolbarSeparator()
     {
         var separator = new FoundryToolbarSeparator();
         // Responsive layouts and companion toolbars can be rebuilt. Do not keep
         // detached controls alive solely for appearance refreshes.
         _toolbarSeparators.RemoveAll(reference => !reference.TryGetTarget(out var control) || control.IsDisposed);
         _toolbarSeparators.Add(new WeakReference<FoundryToolbarSeparator>(separator));
-        return separator;
+        // AppKit can top-align a short child between nested StackLayouts even
+        // when their cross-axis alignment is Center. Give the divider a full
+        // toolbar-height slot with explicit, symmetric insets instead.
+        return new Panel
+        {
+            Width = 1,
+            Height = 32,
+            Padding = new Padding(0, 6),
+            Content = separator,
+        };
     }
 
     private Control CreateBottomBar() => new StackLayout
@@ -1326,6 +1335,8 @@ internal sealed partial class LayoutFoundryWorkspace : Panel
 
     private void CreateHierarchyContextMenu()
     {
+        var annotations = new ButtonMenuItem { Text = "Sheet annotations…" };
+        annotations.Click += async (_, _) => await ReviewAnnotationsAsync();
         var captions = new ButtonMenuItem { Text = "Detail captions…" };
         captions.Click += async (_, _) => await EditDetailCaptionsAsync();
         _renameConversationMenu.Click += (_, _) => RenameConversation();
@@ -1382,10 +1393,12 @@ internal sealed partial class LayoutFoundryWorkspace : Panel
             _printScopeMenuItem,
             _propertiesPageMenuItem,
             captions,
+            annotations,
             new SeparatorMenuItem(),
             _renameFolderMenuItem);
         contextMenu.Opening += (_, _) => { UpdateContextMenuActions(); UpdateConversationMenu();
             var targets = SelectedKeys().ToArray();
+            annotations.Enabled = targets.Any(t => t.Kind is OverviewNodeKind.Sheet or OverviewNodeKind.Detail);
             captions.Enabled = targets.Length == 1 && targets[0].Kind is OverviewNodeKind.Folder or OverviewNodeKind.Sheet or OverviewNodeKind.Detail;
         };
         _treeGrid.ContextMenu = contextMenu;
@@ -2085,10 +2098,16 @@ internal sealed partial class LayoutFoundryWorkspace : Panel
         _observerView.Invalidate(true);
     }
 
+    private int? _themeForegroundArgb;
+
     private void RefreshThemeImages()
     {
-        if (_darkTheme == FoundryTheme.IsDarkMode) return;
+        var foreground = FoundryTheme.PrimaryText.ToArgb();
+        if (_darkTheme == FoundryTheme.IsDarkMode && _themeForegroundArgb == foreground) return;
         _darkTheme = FoundryTheme.IsDarkMode;
+        // Native text and background colors can settle on separate event-loop
+        // turns. Track the actual raster foreground, not only the dark flag.
+        _themeForegroundArgb = foreground;
         _viewModeSeparator.BackgroundColor = FoundryTheme.CanvasBorder;
         foreach (var reference in _toolbarSeparators)
             if (reference.TryGetTarget(out var separator) && !separator.IsDisposed)

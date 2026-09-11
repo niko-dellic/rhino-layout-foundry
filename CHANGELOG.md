@@ -2,6 +2,8 @@
 
 ## Coordinated clean break — unreleased
 
+- Center the Search divider with an explicit toolbar-height slot and refresh icon colors from the current foreground; coordinate with the AI companion’s batched, lifetime-safe context icon refresh.
+
 - Refresh toolbar divider colors after appearance changes and center the divider beside Search; reuse shared toolbar separators throughout the workspace.
 
 - Require automation protocol 2 and drawing-set specification 2 with explicit per-view visibility.

@@ -117,7 +117,9 @@ internal sealed class RhinoDocumentOverviewProvider : IDocumentOverviewProvider
                     Diagnostics = OverviewDiagnostics.ForSheet(
                         sheet,
                         assignedFolderExists,
-                        duplicateNames.Contains(page.PageName)),
+                        duplicateNames.Contains(page.PageName)).Concat(document.Objects.Where(o => o.Attributes.ViewportId == pageId &&
+                        o.Attributes.GetUserString(RhinoManagedAnnotations.WarningKey) is not null).Select(o => new OverviewIssue(
+                            "annotation.unresolved", OverviewIssueSeverity.Warning, o.Attributes.GetUserString(RhinoManagedAnnotations.WarningKey)!, o.Id))).ToArray(),
                 };
             })
             .ToArray();

@@ -103,6 +103,7 @@ public sealed class LayoutFoundryPlugin : PlugIn
         FileReadOptions options)
     {
         _stateStore.Read(document, archive);
+        RhinoManagedAnnotations.Queue(document);
     }
 
     private static void OnActiveDocumentChanged(object? sender, DocumentEventArgs eventArgs)

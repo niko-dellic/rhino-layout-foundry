@@ -48,6 +48,7 @@ internal sealed class RhinoDocumentEventBridge : IDisposable
         RhinoDoc.DimensionStyleTableEvent += OnDimensionStyleChanged;
         RhinoDoc.HatchPatternTableEvent += OnHatchPatternChanged;
         RhinoDoc.LinetypeTableEvent += OnLinetypeChanged;
+        RhinoManagedAnnotations.Start();
         _isStarted = true;
     }
 
@@ -77,6 +78,7 @@ internal sealed class RhinoDocumentEventBridge : IDisposable
         RhinoDoc.DimensionStyleTableEvent -= OnDimensionStyleChanged;
         RhinoDoc.HatchPatternTableEvent -= OnHatchPatternChanged;
         RhinoDoc.LinetypeTableEvent -= OnLinetypeChanged;
+        RhinoManagedAnnotations.Stop();
         _isStarted = false;
     }
 
@@ -202,6 +204,7 @@ internal sealed class RhinoDocumentEventBridge : IDisposable
             return;
         }
 
+        RhinoManagedAnnotations.Queue(document);
         _revisionTracker.Bump(document);
         if (RhinoDoc.ActiveDoc?.RuntimeSerialNumber == document.RuntimeSerialNumber)
         {

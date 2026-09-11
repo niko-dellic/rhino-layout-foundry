@@ -52,6 +52,8 @@ internal static class FoundryAutomationBridge
             return operation switch
             {
                 "inspect_document" => InspectJson(host),
+                "inspect_drawing_geometry" => host.InspectDrawingGeometry(arguments.GetProperty("object_ids").EnumerateArray().Select(i => i.GetGuid()).ToArray()),
+                "stage_update_sheets" => Stage(host, SheetUpdatePlanner.Plan(SheetUpdatePlanner.Parse(arguments), host.CaptureSnapshot())),
                 "stage_drawing_set" => Stage(host, DrawingSetPlanner.Plan(
                     DrawingSetSpecificationValidator.Parse(arguments), host.CaptureSnapshot())),
                 "validate_drawing_set" => Json(DrawingSetSpecificationValidator.Validate(
@@ -97,10 +99,11 @@ internal static class FoundryAutomationBridge
                 root_folder_id = snapshot.RootFolderId,
                 model_bounds = snapshot.ModelBounds,
                 model_units = snapshot.ModelUnitSystem,
-                automation_features = new[] { "drawing_set_v2", "drawing_captions", "linked_detail_captions", "per_view_hidden_layers", "single_approval_batch", "proposal_receipts" },
+                automation_features = new[] { "drawing_set_v2", "drawing_captions", "linked_detail_captions", "per_view_hidden_layers", "single_approval_batch", "proposal_receipts", "sheet_updates", "live_annotations", "dimension_styles", "readable_named_views", "drawing_presentation" },
                 drawing_set_receipts = snapshot.Metadata.Where(p => p.Key.StartsWith("RhinoLayoutFoundry.DrawingSet.", StringComparison.Ordinal))
                     .ToDictionary(p => p.Key, p => p.Value),
                 display_modes = snapshot.DisplayModes,
+                managed_views = snapshot.Metadata.Where(p => p.Key.StartsWith("RhinoLayoutFoundry.ManagedView.", StringComparison.Ordinal)).ToDictionary(p => p.Key, p => p.Value),
                 standard_viewport_ids = snapshot.StandardViewports,
                 folders = snapshot.Folders.Values.Select(folder => new
                 {
@@ -210,8 +213,11 @@ internal static class FoundryAutomationBridge
         string sessionId)
     {
         var snapshot = host.CaptureSnapshot();
+        var requestedName = String(arguments, "name");
+        var resolvedName = requestedName;
+        for (var suffix = 2; snapshot.NamedViews.Contains(resolvedName); suffix++) resolvedName = requestedName + $" ({suffix})";
         var definition = new NamedViewDefinition(
-            String(arguments, "name"),
+            resolvedName,
             Point(arguments.GetProperty("camera_location")),
             Point(arguments.GetProperty("camera_target")),
             Vector(arguments.GetProperty("camera_up")),

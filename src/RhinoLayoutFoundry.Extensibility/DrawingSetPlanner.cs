@@ -30,7 +30,8 @@ public static class DrawingSetPlanner
                 $"{s.Name} ({s.WidthMm:g} × {s.HeightMm:g} mm): " + string.Join(", ", s.Views.Select(v =>
                     $"{v.Name}, 1:{v.ScaleDenominator:g}{(v.Cut is null ? "" : ", clipped")}" +
                     (v.HiddenLayerIds is { Count: > 0 } hidden ? ", hides: " + string.Join(", ", hidden.Select(id => snapshot.Layers[id])) : ""))))) +
-                ". Includes editable sheet titles and drawing/scale captions."
+                ". Includes editable sheet titles and drawing/scale captions. Titleblock: " + frozen.TitleBlock +
+                ". Display mode: " + (frozen.DisplayModeId is { } mode ? snapshot.DisplayModes.GetValueOrDefault(mode, "Unavailable") : "Foundry drawing default") + "."
             : "Create drawing set";
         return new(snapshot.DocumentRuntimeSerialNumber, snapshot.Revision, summary,
             diagnostics.Count == 0 ? [new CreateDrawingSetChange(frozen, Digest(frozen))] : [], diagnostics);

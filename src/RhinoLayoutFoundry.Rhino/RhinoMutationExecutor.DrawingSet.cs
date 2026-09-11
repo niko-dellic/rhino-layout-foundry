@@ -169,7 +169,7 @@ internal sealed partial class RhinoMutationExecutor
                 {
                     var name = sheets[page.MainViewport.Id].DetailNamedViews[detail.Viewport.Id];
                     var native = document.NamedViews[document.NamedViews.FindByName(name)];
-                    metadata["RhinoLayoutFoundry.ManagedView." + native.Viewport.Id.ToString("D")] = JsonSerializer.Serialize(new
+                    metadata["RhinoLayoutFoundry.ManagedView." + native.NamedViewId.ToString("D")] = JsonSerializer.Serialize(new
                     { proposal_id = spec.ProposalId, sheet_id = page.MainViewport.Id, detail_id = detail.Viewport.Id,
                         logical_key = resources.First(p => p.Value == detail.Viewport.Id).Key, name });
                 }

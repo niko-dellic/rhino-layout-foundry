@@ -97,7 +97,7 @@ internal sealed class RhinoDocumentSnapshotProvider : IDocumentSnapshotProvider
                     Notes: record?.Notes ?? string.Empty)
                 {
                     TitleBlockSpacing = titleBlock?.Spacing,
-                    DetailNamedViews = record?.DetailNamedViews ?? new Dictionary<Guid, string>()
+                    DetailNamedViews = RhinoMutationExecutor.ResolveManagedAssignments(document, state, record)
                 };
             })
             .ToDictionary(sheet => sheet.PageViewId);

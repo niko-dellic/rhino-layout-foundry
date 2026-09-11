@@ -51,6 +51,7 @@ internal sealed partial class RhinoMutationExecutor
             .FirstOrDefault(d => d.Viewport.Id == change.DetailViewportId);
         if (detail is null) return Failure("detail.missing", "The target detail no longer exists.");
         using var before = new ViewportInfo(detail.Viewport);
+        var displayModeId = detail.Viewport.DisplayMode.Id;
         var ratio = detail.DetailGeometry.PageToModelRatio;
         var locked = detail.DetailGeometry.IsProjectionLocked;
         var name = detail.Attributes.Name;
@@ -75,7 +76,7 @@ internal sealed partial class RhinoMutationExecutor
             // Geometry commits replace the detail object; apply presentation to the fresh viewport.
             var committed = document.Views.GetPageViews().SelectMany(p => p.GetDetailViews())
                 .First(d => d.Viewport.Id == change.DetailViewportId);
-            committed.Viewport.DisplayMode = DisplayModeDescription.GetDisplayMode(before.DisplayModeId);
+            committed.Viewport.DisplayMode = DisplayModeDescription.GetDisplayMode(displayModeId);
             if (!committed.CommitViewportChanges()) throw new InvalidOperationException("Could not commit monochrome presentation.");
             document.Modified = true;
             _revisionTracker.Bump(document);
@@ -137,6 +138,13 @@ internal sealed partial class RhinoMutationExecutor
             if (document.NamedViews.Add(stored) < 0)
                 throw new InvalidOperationException("Rhino did not create the named view.");
             created = true;
+            var state = _stateStore.Get(document);
+            var metadata = state.Metadata.ToDictionary(p => p.Key, p => p.Value);
+            var native = document.NamedViews[document.NamedViews.FindByName(definition.Name)];
+            metadata["RhinoLayoutFoundry.ManagedView." + native.NamedViewId.ToString("D")] = System.Text.Json.JsonSerializer.Serialize(new
+                { session_id = definition.SessionId, name = definition.Name });
+            _stateStore.Set(document, state with { Metadata = metadata });
+            document.AddCustomUndoEvent(plan.UndoDescription, OnUndoDocumentState, new DocumentStateUndoTag(plan.UndoDescription, state));
             document.Modified = true;
             _revisionTracker.Bump(document);
             _overviewChanged(OverviewInvalidation.All);

@@ -52,6 +52,7 @@ internal sealed partial class RhinoMutationExecutor(
     {
         return plan.Changes switch
         {
+            [RhinoLayoutFoundry.Extensibility.UpdateSheetsChange updates] => ApplySheetUpdates(document, plan, updates),
             [SetDetailCaptionsChange captions] => ApplyDetailCaptions(document, plan, captions),
             [RhinoLayoutFoundry.Extensibility.CreateDrawingSetChange drawingSet] => ApplyDrawingSet(document, plan, drawingSet),
             [ConfigureDetailChange configureDetail] => ApplyConfigureDetail(document, plan, configureDetail),
@@ -124,6 +125,9 @@ internal sealed partial class RhinoMutationExecutor(
         {
             switch (change)
             {
+                case RhinoLayoutFoundry.Extensibility.UpdateSheetsChange updates:
+                    sheetIds.UnionWith(updates.Specification.Sheets.Select(s => s.SheetId));
+                    break;
                 case RenameSheetChange rename:
                     sheetIds.Add(rename.PageViewId);
                     break;
