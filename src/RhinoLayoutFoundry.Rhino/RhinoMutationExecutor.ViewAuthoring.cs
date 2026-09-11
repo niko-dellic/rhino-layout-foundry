@@ -64,8 +64,7 @@ internal sealed partial class RhinoMutationExecutor
             var target = Point(change.Target);
             var delta = target - detail.Viewport.CameraTarget;
             detail.Viewport.SetCameraLocations(target, detail.Viewport.CameraLocation + delta);
-            detail.Viewport.DisplayMode = DisplayModeDescription.FindByName("Pen")
-                ?? throw new InvalidOperationException("No monochrome drawing display mode is available.");
+            // Preserve the existing display mode during framing corrections.
             if (!detail.CommitViewportChanges() ||
                 !detail.DetailGeometry.SetScale(change.ScaleDenominator * RhinoMath.UnitScale(UnitSystem.Millimeters, document.ModelUnitSystem), document.ModelUnitSystem,
                     RhinoMath.UnitScale(UnitSystem.Millimeters, document.PageUnitSystem), document.PageUnitSystem))
@@ -76,13 +75,13 @@ internal sealed partial class RhinoMutationExecutor
             // Geometry commits replace the detail object; apply presentation to the fresh viewport.
             var committed = document.Views.GetPageViews().SelectMany(p => p.GetDetailViews())
                 .First(d => d.Viewport.Id == change.DetailViewportId);
-            committed.Viewport.DisplayMode = DisplayModeDescription.FindByName("Pen");
+            committed.Viewport.DisplayMode = DisplayModeDescription.GetDisplayMode(before.DisplayModeId);
             if (!committed.CommitViewportChanges()) throw new InvalidOperationException("Could not commit monochrome presentation.");
             document.Modified = true;
             _revisionTracker.Bump(document);
             document.Views.Redraw();
             _overviewChanged(OverviewInvalidation.All);
-            return SuccessWithEntity(plan, "detail.configured", "Applied parallel framing, scale and monochrome presentation.");
+            return SuccessWithEntity(plan, "detail.configured", "Applied parallel framing and scale; display mode preserved.");
         }
         catch (Exception exception)
         {
@@ -190,7 +189,7 @@ internal sealed partial class RhinoMutationExecutor
             var plane = new Plane(Point(definition.Origin), xAxis, yAxis);
             if (!plane.IsValid)
                 throw new InvalidOperationException("The clipping plane is invalid.");
-            var attributes = new ObjectAttributes { Name = definition.Name };
+            var attributes = new ObjectAttributes { Name = definition.Name, LayerIndex = EnsureClippingLayer(document) };
             attributes.SetUserString("RhinoLayoutFoundry.Automation.SessionId", definition.SessionId);
             attributes.SetUserString("RhinoLayoutFoundry.Automation.Kind", "ClippingPlane");
             objectId = document.Objects.AddClippingPlane(

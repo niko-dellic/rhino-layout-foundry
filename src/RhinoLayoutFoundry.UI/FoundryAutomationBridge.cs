@@ -100,6 +100,7 @@ internal static class FoundryAutomationBridge
                 automation_features = new[] { "drawing_set_v2", "drawing_captions", "linked_detail_captions", "per_view_hidden_layers", "single_approval_batch", "proposal_receipts" },
                 drawing_set_receipts = snapshot.Metadata.Where(p => p.Key.StartsWith("RhinoLayoutFoundry.DrawingSet.", StringComparison.Ordinal))
                     .ToDictionary(p => p.Key, p => p.Value),
+                display_modes = snapshot.DisplayModes,
                 standard_viewport_ids = snapshot.StandardViewports,
                 folders = snapshot.Folders.Values.Select(folder => new
                 {

@@ -13,6 +13,8 @@ public sealed record DrawingSetSpecification(
     Guid DestinationFolderId, IReadOnlyList<DrawingSheetSpecification> Sheets)
 {
     public string? NewDestinationFolderName { get; init; }
+    public Guid? DisplayModeId { get; init; }
+    public string TitleBlock { get; init; } = "off";
 }
 
 public sealed record DrawingSheetSpecification(string Key, string Name, double WidthMm,
@@ -50,7 +52,7 @@ public static class DrawingSetSpecificationValidator
             {
                 if (type.Kind == JsonTypeInfoKind.Object)
                     foreach (var property in type.Properties.Where(p => p.Set is not null))
-                        property.IsRequired = true;
+                        property.IsRequired = property.Name is not ("display_mode_id" or "title_block");
             } },
         },
     };
@@ -67,6 +69,10 @@ public static class DrawingSetSpecificationValidator
         ArgumentNullException.ThrowIfNull(spec);
         ArgumentNullException.ThrowIfNull(snapshot);
         var issues = new List<DrawingSetIssue>();
+        if (spec.DisplayModeId is { } mode && !snapshot.DisplayModes.ContainsKey(mode))
+            issues.Add(new("display_mode_id", "display_mode.missing", "Select an installed display mode."));
+        if (spec.TitleBlock is not ("off" or "right" or "bottom"))
+            issues.Add(new("title_block", "title_block.invalid", "Choose off, right or bottom."));
         void Error(string path, string code, string message) => issues.Add(new(path, code, message));
         if (spec.SchemaVersion != 2) Error("schema_version", "version.unsupported", "Use drawing-set schema version 2.");
         if (spec.ProposalId == Guid.Empty) Error("proposal_id", "proposal.id_required", "Provide a stable proposal ID.");
@@ -104,6 +110,10 @@ public static class DrawingSetSpecificationValidator
             if (sheet.Views is null || sheet.Views.Count > MaximumViewsPerSheet)
             { Error(path + ".views", "views.count", $"Provide 0–{MaximumViewsPerSheet} views per sheet; zero means an explicit blank placeholder."); continue; }
             viewCount += sheet.Views.Count;
+            var content = spec.TitleBlock is "right" or "bottom"
+                ? AdaptiveTitleBlockLayoutSolver.Solve(spec.TitleBlock == "right" ? BuiltInTitleBlockKind.RightSidebar : BuiltInTitleBlockKind.FullWidthBottom,
+                    new PaperRecipe(sheet.WidthMm, sheet.HeightMm, "Millimeters"), snapshot.ProjectInfo, sheet.Views.Count, null).Content
+                : new TitleBlockRectangle(10, 18, sheet.WidthMm - 20, sheet.HeightMm - 38);
             for (var j = 0; j < sheet.Views.Count; j++)
             {
                 var view = sheet.Views[j];
@@ -115,8 +125,8 @@ public static class DrawingSetSpecificationValidator
                     view.HiddenLayerIds.Distinct().Count() != view.HiddenLayerIds.Count ||
                     view.HiddenLayerIds.Any(id => !snapshot.Layers.ContainsKey(id)))
                     Error(vp + ".hidden_layer_ids", "visibility.layers", "Provide an explicit list of at most 512 distinct existing layer IDs; use [] to retain current visibility.");
-                if (view.BoundsMm is { } frame && (frame.Left < 10 || frame.Right > sheet.WidthMm - 10 ||
-                    frame.Bottom < 18 || frame.Top > sheet.HeightMm - 20))
+                if (view.BoundsMm is { } frame && (frame.Left < content.Left || frame.Right > content.Right ||
+                    frame.Bottom - (spec.TitleBlock == "off" ? 0 : 8) < content.Bottom || frame.Top > content.Top))
                     Error(vp + ".bounds_mm", "frame.caption_space", "Reserve 10 mm side margins, 18 mm below the lowest view and 20 mm above the highest view for captions and sheet title.");
                 // A caption occupies the 8 mm band immediately below its frame.
                 if (view.BoundsMm is { IsValid: true } captionFrame)
@@ -125,8 +135,8 @@ public static class DrawingSetSpecificationValidator
                             captionFrame.Left < otherFrame.Right && captionFrame.Right > otherFrame.Left &&
                             captionFrame.Bottom - 8 < otherFrame.Top && captionFrame.Top > otherFrame.Bottom - 8)
                             Error(vp + ".bounds_mm", "caption.overlap", "Drawing frames and their 8 mm caption bands must not overlap.");
-                if (view.Kind is not ("site_plan" or "floor_plan" or "elevation" or "section"))
-                    Error(vp + ".kind", "view.kind", "This contract supports site plans, floor plans, elevations and sections.");
+                if (view.Kind is not ("site_plan" or "floor_plan" or "elevation" or "section" or "isometric" or "detail"))
+                    Error(vp + ".kind", "view.kind", "This contract supports plans, elevations, sections, isometrics and details.");
                 if (!Positive(view.ScaleDenominator, 10000) || view.ScaleDenominator < 1)
                     Error(vp + ".scale_denominator", "scale.invalid", "Use a scale denominator between 1 and 10000.");
                 if (view.BoundsMm is not { IsValid: true } bounds || bounds.Left < 0 || bounds.Bottom < 0 ||

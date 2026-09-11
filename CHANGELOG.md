@@ -2,6 +2,8 @@
 
 ## Coordinated clean break — unreleased
 
+- Refresh toolbar divider colors after appearance changes and center the divider beside Search; reuse shared toolbar separators throughout the workspace.
+
 - Require automation protocol 2 and drawing-set specification 2 with explicit per-view visibility.
 - Preserve unsupported schema-16 metadata without migration; retain document schema 17 and package format 6.
 - Remove the obsolete AI batch-creation bridge and unused folder-duplication implementation; retain basic creation and active hierarchy duplication.

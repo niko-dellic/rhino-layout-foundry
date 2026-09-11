@@ -11,7 +11,7 @@ public static class DrawingSetToolSchema
         var point = Object(("x", Number()), ("y", Number()), ("z", Number()));
         var cut = Object(("origin", point.DeepClone()), ("normal", point.DeepClone()));
         var view = Object(("key", Text()), ("name", Text()),
-            ("kind", new JsonObject { ["type"] = "string", ["enum"] = new JsonArray("site_plan", "floor_plan", "elevation", "section") }),
+            ("kind", new JsonObject { ["type"] = "string", ["enum"] = new JsonArray("site_plan", "floor_plan", "elevation", "section", "isometric", "detail") }),
             ("scale_denominator", Number(1, 10000)),
             ("bounds_mm", Object(("left", Number()), ("bottom", Number()), ("right", Number()), ("top", Number()))),
             ("camera_location", point.DeepClone()), ("camera_target", point.DeepClone()), ("camera_up", point.DeepClone()),
@@ -21,6 +21,8 @@ public static class DrawingSetToolSchema
             ("height_mm", Number(1, 5000)), ("views", new JsonObject { ["type"] = "array", ["items"] = view,
                 ["minItems"] = 0, ["maxItems"] = DrawingSetSpecificationValidator.MaximumViewsPerSheet }));
         var root = Object(("schema_version", new JsonObject { ["type"] = "integer", ["enum"] = new JsonArray(2) }),
+            ("display_mode_id", new JsonObject { ["type"] = new JsonArray("string", "null") }),
+            ("title_block", new JsonObject { ["type"] = "string", ["enum"] = new JsonArray("off", "right", "bottom") }),
             ("proposal_id", Text()), ("document_runtime_serial_number", new JsonObject { ["type"] = "integer" }),
             ("source_revision", new JsonObject { ["type"] = "integer" }), ("destination_folder_id", Text()),
             ("new_destination_folder_name", new JsonObject { ["type"] = new JsonArray("string", "null") }),

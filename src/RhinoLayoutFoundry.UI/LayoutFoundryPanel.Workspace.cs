@@ -6,10 +6,11 @@ internal sealed partial class LayoutFoundryWorkspace
 {
     private readonly Panel _extensionWorkspace = new() { Visible = false };
     private Control? _extensionContent;
+    private FoundryToolbarIconButton? _extensionBackButton;
     private readonly Panel _workspaceHost = new();
     private Control _workspaceRoot = null!;
     private Control? _layoutsHost;
-    private readonly Panel _viewModeSeparator = new() { Width = 1, Height = 20, BackgroundColor = FoundryTheme.CanvasBorder };
+    private readonly FoundryToolbarSeparator _viewModeSeparator = new();
 
     private Control CreateWorkspaceHost(Control layouts)
     {
@@ -35,7 +36,7 @@ internal sealed partial class LayoutFoundryWorkspace
         if (ReferenceEquals(_extensionContent, content)) { SetWorkspaceVisible(true); return; }
         if (_extensionWorkspace.Content is StackLayout previous) previous.Items.Clear();
         _extensionContent = content;
-        var back = new FoundryToolbarIconButton(LayoutBrandIcon.BackToLayouts(), "Back to layouts");
+        var back = _extensionBackButton = new FoundryToolbarIconButton(LayoutBrandIcon.BackToLayouts(), "Back to layouts");
         back.Click += (_, _) => SetWorkspaceVisible(false);
         _extensionWorkspace.Content = new StackLayout
         {
@@ -57,7 +58,7 @@ internal sealed partial class LayoutFoundryWorkspace
                             Spacing = FoundryTheme.Space2,
                             VerticalContentAlignment = VerticalAlignment.Center,
                             Items = { back,
-                                new Panel { Width = 1, Height = 20, BackgroundColor = FoundryTheme.CanvasBorder },
+                                CreateToolbarSeparator(),
                                 toolbarActions, new StackLayoutItem(null, true) },
                         },
                     },

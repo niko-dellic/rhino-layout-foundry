@@ -66,3 +66,9 @@ On macOS, the docked hierarchy uses one text-only column. Detail/tag metadata an
 - Keyboard focus reaches search, filter, hierarchy actions, hierarchy, dialog tabs, staged fields, Close, and Apply in that order.
 
 Platform screenshot files will be added after this state contract passes on dedicated Windows and macOS Rhino hosts.
+
+## Toolbar divider regression (2026-09-11)
+
+Dividers use the shared 1 × 20 px `FoundryToolbarSeparator` and refresh their `CanvasBorder` color through the workspace's existing theme polling. The outer horizontal toolbar centers its children so the Search divider stays centered within the 32 px row. Top-bar, bottom-bar and companion-toolbar dividers participate. Responsive rebuilds use weak references to avoid retaining detached dividers.
+
+After installing this build and restarting Rhino, check light → dark → light at Retina scale with the panel already open; all dividers must adopt the current border color. Confirm equal top/bottom insets beside Search, then resize across the stacked-toolbar breakpoint and repeat. Open the AI workspace and check its toolbar and footer. Native visual verification is pending: the current Rhino session contains unsaved user edits and was left open. The broader live-theme-switch workaround remains documented until independently verified.

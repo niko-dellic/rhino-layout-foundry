@@ -37,7 +37,7 @@ internal sealed partial class RhinoMutationExecutor
         var names = document.Views.GetPageViews().Select(p => p.PageName).ToHashSet(StringComparer.OrdinalIgnoreCase);
         if (spec.Sheets.Any(s => !names.Add(s.Name.Trim())))
             return Failure("drawing_set.name_conflict", "A proposed sheet name already exists.");
-        var mode = FoundryDrawingDisplayMode.GetOrCreate();
+        var mode = spec.DisplayModeId is { } modeId ? DisplayModeDescription.GetDisplayMode(modeId) : FoundryDrawingDisplayMode.GetOrCreate();
         if (mode is null) return Failure("drawing_set.presentation_missing", "The Foundry drawing display mode could not be initialized.");
         var pages = new List<RhinoPageView>();
         var clips = new List<Guid>();
@@ -108,7 +108,7 @@ internal sealed partial class RhinoMutationExecutor
                         Math.Abs(detail.DetailGeometry.PageToModelRatio - ratio) > Math.Abs(ratio) * 1e-8 ||
                         detail.Viewport.DisplayMode.Id != mode.Id)
                         throw new InvalidOperationException($"Native scale/projection verification failed for {view.Name}.");
-                    var viewName = $"Foundry-{spec.ProposalId:N}-{view.Key}";
+                    var viewName = ReadableViewName(document, sheet.Name + " — " + view.Name);
                     if (document.NamedViews.FindByName(viewName) >= 0)
                         throw new InvalidOperationException("A generated named-view identity already exists.");
                     using var saved = new ViewInfo(detail.Viewport) { Name = viewName };
@@ -132,7 +132,7 @@ internal sealed partial class RhinoMutationExecutor
                     if (view.Cut is { } cut)
                     {
                         var plane = new Plane(Point(cut.Origin), Vector(cut.Normal));
-                        var attributes = new ObjectAttributes { Name = $"{view.Name} cut" };
+                        var attributes = new ObjectAttributes { Name = $"{view.Name} cut", LayerIndex = EnsureClippingLayer(document) };
                         attributes.SetUserString("RhinoLayoutFoundry.Automation.SessionId", spec.ProposalId.ToString("D"));
                         attributes.SetUserString("RhinoLayoutFoundry.Automation.Kind", "ClippingPlane");
                         var clipId = document.Objects.AddClippingPlane(plane, 1000 * modelFactor, 1000 * modelFactor,
@@ -144,6 +144,15 @@ internal sealed partial class RhinoMutationExecutor
                             throw new InvalidOperationException("Native clipping scope verification failed.");
                     }
                 }
+                TitleBlockRole? titleRole = null;
+                if (spec.TitleBlock != "off")
+                {
+                    var kind = spec.TitleBlock == "right" ? BuiltInTitleBlockKind.RightSidebar : BuiltInTitleBlockKind.FullWidthBottom;
+                    var id = CreateManagedTitleBlock(document, page, new PaperRecipe(page.PageWidth, page.PageHeight, document.PageUnitSystem.ToString()),
+                        kind, before.ProjectInfo, new SheetTitleBlockData(string.Empty, []), page.GetDetailViews().Select(d => CaptureDetail(document, d)).ToArray(), null);
+                    annotations.Add(id);
+                    titleRole = new TitleBlockRole(id, ((InstanceObject)document.Objects.FindId(id)).InstanceDefinition.Id, kind);
+                }
                 sheets.Add(page.MainViewport.Id, new SheetRecord(page.MainViewport.Id, destinationId,
                     order++, new Dictionary<string, string>
                     {
@@ -152,9 +161,18 @@ internal sealed partial class RhinoMutationExecutor
                         // Intended content, not a claim that subsequent user edits are up to date.
                         // Keep generated provenance separate from user-owned sheet notes.
                         ["RhinoLayoutFoundry.DrawingSet.IntendedContent"] = JsonSerializer.Serialize(sheet),
-                    }, null) { DetailNamedViews = assignments });
+                    }, titleRole) { DetailNamedViews = assignments });
             }
             var metadata = before.Metadata.ToDictionary(p => p.Key, p => p.Value);
+            foreach (var page in pages)
+                foreach (var detail in page.GetDetailViews())
+                {
+                    var name = sheets[page.MainViewport.Id].DetailNamedViews[detail.Viewport.Id];
+                    var native = document.NamedViews[document.NamedViews.FindByName(name)];
+                    metadata["RhinoLayoutFoundry.ManagedView." + native.Viewport.Id.ToString("D")] = JsonSerializer.Serialize(new
+                    { proposal_id = spec.ProposalId, sheet_id = page.MainViewport.Id, detail_id = detail.Viewport.Id,
+                        logical_key = resources.First(p => p.Value == detail.Viewport.Id).Key, name });
+                }
             metadata.Add(DrawingSetPlanner.ReceiptKey(spec.ProposalId), JsonSerializer.Serialize(new
             { digest = change.Digest, resources, clipping_plane_ids = clips, named_views = namedViews,
                 annotation_ids = annotations, presentation_layer_id = presentationLayerIndex < 0 ? Guid.Empty : document.Layers[presentationLayerIndex].Id,

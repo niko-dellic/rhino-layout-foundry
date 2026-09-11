@@ -1266,19 +1266,9 @@ internal sealed partial class LayoutFoundryWorkspace : Panel
                 _createButton,
                 _manageButton,
                 _deleteButton,
-                new Panel
-                {
-                    Width = 1,
-                    Height = 20,
-                    BackgroundColor = FoundryTheme.CanvasBorder,
-                },
+                CreateToolbarSeparator(),
                 _projectInfoButton,
-                new Panel
-                {
-                    Width = 1,
-                    Height = 20,
-                    BackgroundColor = FoundryTheme.CanvasBorder,
-                },
+                CreateToolbarSeparator(),
                 _printButton,
                 _importButton,
                 _exportButton,
@@ -1295,12 +1285,25 @@ internal sealed partial class LayoutFoundryWorkspace : Panel
         {
             Orientation = _stackToolbar ? Orientation.Vertical : Orientation.Horizontal,
             Spacing = FoundryTheme.Space1,
+            VerticalContentAlignment = VerticalAlignment.Center,
             Items = { actions },
         };
         if (!_stackToolbar)
-            toolbar.Items.Add(new Panel { Width = 1, Height = 20, BackgroundColor = FoundryTheme.CanvasBorder });
+            toolbar.Items.Add(CreateToolbarSeparator());
         toolbar.Items.Add(search);
         return toolbar;
+    }
+
+    private readonly List<WeakReference<FoundryToolbarSeparator>> _toolbarSeparators = [];
+
+    private FoundryToolbarSeparator CreateToolbarSeparator()
+    {
+        var separator = new FoundryToolbarSeparator();
+        // Responsive layouts and companion toolbars can be rebuilt. Do not keep
+        // detached controls alive solely for appearance refreshes.
+        _toolbarSeparators.RemoveAll(reference => !reference.TryGetTarget(out var control) || control.IsDisposed);
+        _toolbarSeparators.Add(new WeakReference<FoundryToolbarSeparator>(separator));
+        return separator;
     }
 
     private Control CreateBottomBar() => new StackLayout
@@ -2086,10 +2089,16 @@ internal sealed partial class LayoutFoundryWorkspace : Panel
     {
         if (_darkTheme == FoundryTheme.IsDarkMode) return;
         _darkTheme = FoundryTheme.IsDarkMode;
+        _viewModeSeparator.BackgroundColor = FoundryTheme.CanvasBorder;
+        foreach (var reference in _toolbarSeparators)
+            if (reference.TryGetTarget(out var separator) && !separator.IsDisposed)
+                separator.BackgroundColor = FoundryTheme.CanvasBorder;
         foreach (var reference in _headerVersionLabels)
             if (reference.TryGetTarget(out var label) && !label.IsDisposed) label.TextColor = FoundryTheme.MutedText;
         // Raster icon frames capture their colors at construction. Replace only
         // this panel's owned images; never dispose shared hierarchy image caches.
+        if (_extensionBackButton is { IsDisposed: false })
+            ReplaceImage(_extensionBackButton, LayoutBrandIcon.BackToLayouts());
         ReplaceImage(_clearFilterButton, FoundryViewIcons.Close());
         ReplaceImage(_createButton, FoundryViewIcons.Add());
         ReplaceImage(_manageButton, FoundryViewIcons.Properties());
