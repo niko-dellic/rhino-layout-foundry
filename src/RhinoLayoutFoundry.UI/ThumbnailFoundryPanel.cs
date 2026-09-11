@@ -125,6 +125,22 @@ internal sealed class ThumbnailFoundryPanel : Panel
         QueueVisiblePreviews();
     }
 
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing && !IsDisposed)
+        {
+            OnUnloaded(this, EventArgs.Empty);
+            _thumbnailCancellation.Cancel();
+            _thumbnailCancellation.Dispose();
+            _thumbnailTimer.Dispose();
+            _invalidationTimer.Dispose();
+            _resizeTimer.Dispose();
+            _grid.ReleasePreviews();
+            _grid.Dispose();
+        }
+        base.Dispose(disposing);
+    }
+
     private void OnLoaded(object? sender, EventArgs eventArgs)
     {
         if (_isLoaded) return;

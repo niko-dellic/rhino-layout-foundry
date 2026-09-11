@@ -5,7 +5,7 @@ using RhinoLayoutFoundry.Core.Overview;
 
 namespace RhinoLayoutFoundry.UI;
 
-public sealed partial class LayoutFoundryPanel
+internal sealed partial class LayoutFoundryWorkspace
 {
     private const string ConversationClipboardType = "application/x-foundry-conversations+json";
     private sealed record CopiedConversation(string Name, string Payload);

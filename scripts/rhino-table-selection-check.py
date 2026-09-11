@@ -134,7 +134,8 @@ def run(sender, event):
             panel = make('LayoutFoundryPanel')
             window = Form(Title='Foundry table view selection check',
                           ClientSize=Size(1200, 570), Content=panel)
-            instrument(field(panel, '_treeGrid'))
+            workspace = panel.GetType().GetField('_workspace', INSTANCE)
+            instrument(field(workspace.GetValue(panel) if workspace else panel, '_treeGrid'))
         elif SURFACE == 'appearance state':
             window = make('AppearanceStateEditorDialog', snapshot, snapshot.RootFolderId, 'Selection check')
             instrument(field(field(window, '_rules'), '_tree'))

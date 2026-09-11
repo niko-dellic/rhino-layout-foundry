@@ -39,6 +39,9 @@ internal static class FoundryAutomationBridge
         {
             using var document = JsonDocument.Parse(requestJson);
             var root = document.RootElement;
+            if (!root.TryGetProperty("protocol_major", out var protocol) ||
+                protocol.ValueKind != JsonValueKind.Number || !protocol.TryGetInt32(out var major) || major != FoundryAutomationProtocol.MajorVersion)
+                throw new InvalidOperationException("Layout Foundry and Foundry AI use incompatible automation protocols. Update both components together and restart Rhino.");
             var operation = String(root, "operation");
             var arguments = root.TryGetProperty("arguments", out var value)
                 ? value
@@ -58,7 +61,6 @@ internal static class FoundryAutomationBridge
                 "capture_model" => await CaptureModelAsync(host, cancellationToken),
                 "stage_create_named_view" => Stage(host, NamedViewPlan(host, arguments, String(root, "session_id"))),
                 "stage_create_clipping_plane" => Stage(host, ClippingPlanePlan(host, arguments, String(root, "session_id"))),
-                "stage_create_layouts" => Stage(host, LayoutPlan(host, arguments)),
                 "stage_assign_named_view" => Stage(host, AssignmentPlan(host, arguments)),
                 "stage_configure_detail" => Stage(host, DetailPlan(host, arguments)),
                 "stage_set_detail_captions" => Stage(host, CaptionPlan(host, arguments)),
@@ -95,7 +97,7 @@ internal static class FoundryAutomationBridge
                 root_folder_id = snapshot.RootFolderId,
                 model_bounds = snapshot.ModelBounds,
                 model_units = snapshot.ModelUnitSystem,
-                automation_features = new[] { "drawing_set_v1", "drawing_set_v2", "drawing_captions", "linked_detail_captions", "per_view_hidden_layers", "single_approval_batch", "proposal_receipts" },
+                automation_features = new[] { "drawing_set_v2", "drawing_captions", "linked_detail_captions", "per_view_hidden_layers", "single_approval_batch", "proposal_receipts" },
                 drawing_set_receipts = snapshot.Metadata.Where(p => p.Key.StartsWith("RhinoLayoutFoundry.DrawingSet.", StringComparison.Ordinal))
                     .ToDictionary(p => p.Key, p => p.Value),
                 standard_viewport_ids = snapshot.StandardViewports,
@@ -239,12 +241,6 @@ internal static class FoundryAutomationBridge
             sessionId);
         return new CreateClippingPlanePlanner().Plan(new CreateClippingPlaneRequest(
             snapshot.DocumentRuntimeSerialNumber, snapshot.Revision, definition), snapshot);
-    }
-
-    private static OperationPlan LayoutPlan(IFoundryAutomationHost host, JsonElement arguments)
-    {
-        var snapshot = host.CaptureSnapshot();
-        return new BatchCreateSheetsPlanner().Plan(AutomationLayoutRequest.Parse(arguments, snapshot), snapshot);
     }
 
     private static OperationPlan FlipClipPlan(IFoundryAutomationHost host, JsonElement arguments)

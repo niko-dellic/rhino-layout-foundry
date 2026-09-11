@@ -1,23 +1,26 @@
-# Windows matched-pair test handoff
+# Historical handoff — superseded by protocol 2
 
-Use `artifacts/pre-beta-clean-break-20260911/matched-Windows.zip` and `ARCHIVE-SHA256.txt`. This is a private protocol-2 source candidate, not a published or beta-qualified release. Earlier beta archives are superseded for this cleanup.
+# Windows beta candidate handoff
 
-## Installation
+Candidate: **0.1.0-beta.1**, Rhino **8.34+**, .NET 8. The Windows configuration was compiled on macOS; native Windows loading, UI and document behavior are **pending**.
 
-Fully quit Rhino. Back up existing development bundles and remove duplicate older load paths from the test profile. Extract the matched archive to a permanent local folder, keeping every DLL/JSON beside both RHP files. In Rhino Options → Plug-ins → Install, select `RhinoLayoutFoundry.rhp`, then `RhinoLayoutFoundry.AI.Rhino.rhp`. Fully quit and reopen Rhino. No SDK or source checkout is required to use the compiled files. This is a manual local installation, not a polished consumer installer.
+**macOS qualification is still blocked.** The refreshed archive is usable for independent Windows diagnosis, but is not a release-approved handoff. See [Beta qualification](BETA_QUALIFICATION.md) for outstanding UI, Undo, lifecycle, performance and clean-profile installation gates.
 
-Match extracted hashes with `assembly-hashes.json` under `Windows-Release`; do not combine files from different candidates. Native Windows install/update/uninstall and dependency isolation remain unverified. No Rhino Package Manager upload is authorized.
+The September 11 candidate includes document-workspace cleanup and a toolbar that stacks at narrow widths. Pay particular attention to active/non-active document close, hiding/reopening the panel, shutdown, and repeated resize across the toolbar breakpoint. The final macOS ten-cycle leak regression collected every closed workspace; performance and the full native matrix remain separate gates.
 
-## Clean-break acceptance
+## Package and installation
 
-- Verify protocol mismatches refuse a task with instructions to update both components.
-- Basic creation must still work. Exercise Drawing Set in-panel: brief → questions → reviewed explicit approval → creation → capture/review → save/reopen.
-- Checkpoint 2 must preserve manual titles, ordered messages, pending versus answered questions and resource navigation. Restore must not execute actions or retain approval authority. Saved images become references/placeholders.
-- Schema 16, malformed metadata and checkpoint 1 are refused without changing original payloads or Rhino geometry. Valid conversation records still load beside unsupported ones.
-- Duplicate sheets/folders through the active hierarchy action and verify caption links; run current schema-17/package-6 round trips and recovery checks.
-- Record native Windows version, Rhino build, theme, DPI, candidate hashes and evidence. Use only fresh disposable fixtures.
+In the supplied archive, use the `candidate/` folder. In this checkout, use `artifacts/beta-candidate-windows-20260911/rhino-layout-foundry-0.1.0-beta.1-rh8_34-win.yak` from this checkout and its adjacent `PACKAGE-SHA256.txt`. Compare `Get-FileHash -Algorithm SHA256` before installing. Never install the Mac package on Windows.
 
-See [current evidence and blockers](PRE_BETA_CLEAN_BREAK.md). The macOS run used a scripted offline provider; it does not certify live-provider behavior or Windows.
+On a clean test profile, install the local package from PowerShell:
+
+```powershell
+& 'C:\Program Files\Rhino 8\System\yak.exe' install 'C:\path\to\rhino-layout-foundry-0.1.0-beta.1-rh8_34-win.yak'
+```
+
+Local-file installation is supported by the [official Yak CLI](https://developer.rhino3d.com/en/guides/yak/yak-cli-reference/). Fully quit and reopen Rhino, confirm the version in PlugInManager, and run `LayoutFoundry`. Do not retain a development load path or another older Foundry plugin that supplies different shared assemblies. This package is unsigned and unpublished. Hash verification is integrity checking, not publisher authentication.
+
+Record Windows version, Rhino build, architecture, theme, display scale, package hash, and each result. Run only on new models or disposable copies. Preserve the original project.
 
 ## Guided native pass
 

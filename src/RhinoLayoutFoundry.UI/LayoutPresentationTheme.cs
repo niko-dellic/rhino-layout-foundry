@@ -4,7 +4,7 @@ namespace RhinoLayoutFoundry.UI;
 
 internal static class LayoutPresentationTheme
 {
-    internal static Color DefaultSelectionAccent => FoundryTheme.IsDarkMode
+    internal static Color SelectionAccent => FoundryTheme.IsDarkMode
         ? Color.FromArgb(68, 68, 68)
         : Color.FromArgb(219, 219, 219);
     // A contrasting keyline keeps neutral selections visible against both
@@ -15,7 +15,6 @@ internal static class LayoutPresentationTheme
         graphics.DrawRectangle(pen, bounds);
     }
 
-    internal static Color SelectionAccent => LayoutSelectionAppearance.Color;
     internal static Color SelectionForeground => FoundryTable.SelectionForeground(SelectionAccent);
     internal static Color SelectionFill => FoundryTheme.WithAlpha(SelectionAccent, 40);
     internal static Color CanvasLabelHalo => FoundryTheme.WithAlpha(FoundryTheme.CanvasBackground, 185);

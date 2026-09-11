@@ -42,7 +42,7 @@ internal sealed class RhinoFoundryAutomationHost : IFoundryAutomationHost
         [
             "Layout creation is rollback-protected but is not natively undoable in Rhino 8.",
             "Arbitrary deletion/rename plans are unavailable; appearance resource edits and linked naming are supported.",
-            "PDF export is not exposed through the automation host in protocol 1.0.",
+            "PDF export is not exposed through the automation host in protocol 2.0.",
         ]);
 
     public DocumentSnapshot CaptureSnapshot() => _snapshotProvider.Capture();

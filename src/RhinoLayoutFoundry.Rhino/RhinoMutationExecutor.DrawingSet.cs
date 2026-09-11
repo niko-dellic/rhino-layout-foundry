@@ -51,15 +51,12 @@ internal sealed partial class RhinoMutationExecutor
         var modelFactor = RhinoMath.UnitScale(UnitSystem.Millimeters, document.ModelUnitSystem);
         try
         {
-            if (spec.SchemaVersion == 2)
+            presentationLayerIndex = document.Layers.Add(new Layer
             {
-                presentationLayerIndex = document.Layers.Add(new Layer
-                {
-                    Name = $"Foundry Sheets {spec.ProposalId:N}",
-                    Color = System.Drawing.Color.Black,
-                });
-                if (presentationLayerIndex < 0) throw new InvalidOperationException("Could not create the drawing presentation layer.");
-            }
+                Name = $"Foundry Sheets {spec.ProposalId:N}",
+                Color = System.Drawing.Color.Black,
+            });
+            if (presentationLayerIndex < 0) throw new InvalidOperationException("Could not create the drawing presentation layer.");
             var sheets = before.Sheets.ToDictionary(p => p.Key, p => p.Value);
             var folders = before.Folders.ToList();
             var destinationId = spec.DestinationFolderId;
@@ -77,10 +74,9 @@ internal sealed partial class RhinoMutationExecutor
                     ?? throw new InvalidOperationException($"Could not create {sheet.Name}.");
                 pages.Add(page);
                 resources.Add(sheet.Key, page.MainViewport.Id);
-                if (spec.SchemaVersion == 2)
-                    annotations.Add(AddDrawingSetCaption(document, page, spec.ProposalId, sheet.Name.Trim(),
-                        10 * pageFactor, (sheet.HeightMm - 8) * pageFactor, 3.5 * pageFactor,
-                        (sheet.WidthMm - 20) * pageFactor, presentationLayerIndex));
+                annotations.Add(AddDrawingSetCaption(document, page, spec.ProposalId, sheet.Name.Trim(),
+                    10 * pageFactor, (sheet.HeightMm - 8) * pageFactor, 3.5 * pageFactor,
+                    (sheet.WidthMm - 20) * pageFactor, presentationLayerIndex));
                 var assignments = new Dictionary<Guid, string>();
                 foreach (var view in sheet.Views)
                 {

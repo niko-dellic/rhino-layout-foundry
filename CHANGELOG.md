@@ -1,5 +1,13 @@
 # Changelog
 
+## Coordinated clean break — unreleased
+
+- Require automation protocol 2 and drawing-set specification 2 with explicit per-view visibility.
+- Preserve unsupported schema-16 metadata without migration; retain document schema 17 and package format 6.
+- Remove the obsolete AI batch-creation bridge and unused folder-duplication implementation; retain basic creation and active hierarchy duplication.
+- Coordinate with AI checkpoint 2: typed display events, protected unsupported conversation records and Release exclusion of the demo driver.
+- This source candidate requires fresh qualification and matched installation; it is not published.
+
 ## 0.1.0-beta.1 — candidate (unpublished)
 
 - Avoid native hierarchy row reloads when displayed values are unchanged; invalidate cached paper/display-mode labels when source data changes.

@@ -1,3 +1,4 @@
+# HISTORICAL ONLY: obsolete v1 fixture; never candidate qualification.
 """Recorded-provider UI regression, explicitly labelled; never contacts an AI service.
 Uses the real session, tool executor, staged approval UI and native Rhino executor.
 """

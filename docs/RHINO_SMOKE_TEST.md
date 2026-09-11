@@ -1,6 +1,6 @@
 # Native smoke checks for the current candidate
 
-Use fresh schema-17 fixtures and package-6 archives. Retain one schema-16 document to verify the supported timestamp migration. Record the platform, Rhino version, candidate hash, and pass/fail evidence. Other historical fixture compatibility is outside acceptance. The release gate is TESTING_AND_RELEASE.md.
+Use fresh schema-17 fixtures and package-6 archives. Retain one schema-16 document to verify protected rejection without migration. Record the platform, Rhino version, candidate hash, and pass/fail evidence. Other historical fixture compatibility is outside acceptance. The release gate is TESTING_AND_RELEASE.md.
 
 ## Creation, templates, and title blocks
 
@@ -10,7 +10,7 @@ Use fresh schema-17 fixtures and package-6 archives. Retain one schema-16 docume
 4. Test None, Right, and Bottom title blocks. Update project fields, per-sheet numbers and revisions. Confirm only Foundry-generated blocks are managed. Ordinary block instances must remain ordinary page objects.
 5. Test equivalent metric/imperial paper and scales, named-view count validation, unavailable sources, and stale drafts. Confirm cancellation/failed creation cleans temporary resources and respects the declared Undo policy.
 6. Save, close, reopen, and Save As. Confirm current hierarchy, registration, appearance, naming bindings, project data, revisions, and Canvas placements survive.
-7. Confirm Created and Last modified are populated for folders and sheets. Create one of each, record their matching initial times, then rename or edit each and confirm only Last modified advances. Open the schema-16 fixture without editing and confirm its rows show the 3DM file-date fallback; perform one intentional Foundry edit, save/reopen, and confirm schema-17 JSON now contains `CreatedUtc` and `LastModifiedUtc` key/value pairs.
+7. Confirm Created and Last modified are populated for folders and sheets. Create one of each, record their matching initial times, then rename or edit each and confirm only Last modified advances. Open the schema-16 fixture and confirm Foundry rejects editing. Save/reopen using Rhino and verify the original metadata envelope and native geometry remain unchanged.
 
 ## UI and gestures
 

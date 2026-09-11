@@ -4,6 +4,8 @@ An open-source layout manager for Rhino. Foundry organizes folders, layout sheet
 
 **Status: 0.1.0-beta.1 candidate, unpublished.** The repository includes v1 hardening and candidate tooling. Public Windows and macOS support requires the host checks in [Testing and release](docs/TESTING_AND_RELEASE.md). A passing core test suite is not a Rhino compatibility certificate.
 
+The current source is a coordinated [protocol-2 clean-break candidate](docs/PRE_BETA_CLEAN_BREAK.md), requiring matched Layout and AI builds. Earlier beta packages do not contain this cleanup. Conversation checkpoint v1 and drawing-set specification v1 are unsupported.
+
 ## Requirements
 
 - Target host for candidate validation: Rhino 8.34 or later, Windows or macOS, running .NET 8. The SDK is pinned to RhinoCommon 8.34; older Rhino versions are not advertised as supported.
@@ -27,7 +29,7 @@ In List view, click a layout’s **Template** circle to toggle it: `○` is off 
 
 Some Rhino layout operations are not natively undoable. Foundry uses validation, compensating rollback, and recovery packages where applicable; read each operation's warning. Do not assume one Undo will reverse layout creation, deletion, rename, or package replacement. Platform-specific Undo verification remains a release gate.
 
-Unsupported or malformed Foundry metadata is protected from Foundry edits. Recoverable archive envelopes are preserved on save. Document schema **17** and package format **6** are current. Schema 16 document metadata migrates to schema 17 in memory; other historical formats remain unsupported. See [Recovery](docs/RECOVERY.md).
+Unsupported or malformed Foundry metadata is protected from Foundry edits. Recoverable archive envelopes are preserved on save. Document schema **17** and package format **6** are current. Schema 16 and other historical formats are unsupported and preserved without migration or automatic reset. See [Recovery](docs/RECOVERY.md).
 
 Live previews temporarily create Rhino page content. Canceling a preview can leave an unsaved-change indicator: Foundry deliberately does not clear that flag after deferred native events, because doing so could hide a real edit.
 

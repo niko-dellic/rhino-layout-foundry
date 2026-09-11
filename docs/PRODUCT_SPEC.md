@@ -16,7 +16,7 @@ Reusable appearance states and local rules govern per-viewport layer visibility 
 
 ## Persistence and exchange
 
-Document schema 17 and package format 6 are current. Schema 16 document metadata migrates forward with file-date baselines for the folder/sheet timestamps that schema 16 did not store. Other historical projects/packages have no compatibility requirement. Invalid and unsupported metadata remain protected against destructive writes, with recoverable original envelopes preserved. Required collections and structural integrity are validated before use. Tags, tag filters, and tag naming tokens are removed.
+Document schema 17 and package format 6 are current. Schema 16 and all other unsupported document metadata remain preserved and unavailable for Foundry editing; there is no migration or automatic reset. Other historical projects/packages have no compatibility requirement. Invalid and unsupported metadata remain protected against destructive writes, with recoverable original envelopes preserved. Required collections and structural integrity are validated before use. Tags, tag filters, and tag naming tokens are removed.
 
 PDF export follows selected hierarchy order. Packages retain native page geometry and dependency checksums, conflict decisions, import compensation, cancellation, and recovery packages.
 

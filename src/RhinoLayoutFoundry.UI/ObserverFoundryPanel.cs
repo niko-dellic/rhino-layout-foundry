@@ -509,6 +509,22 @@ public sealed class ObserverFoundryPanel : Panel
         return grid;
     }
 
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing && !IsDisposed)
+        {
+            OnUnloaded(this, EventArgs.Empty);
+            _thumbnailCancellation.Cancel();
+            _thumbnailCancellation.Dispose();
+            _thumbnailTimer.Dispose();
+            _invalidationTimer.Dispose();
+            _overlayLayoutTimer.Dispose();
+            _inspector.Dispose();
+            _canvas.Dispose();
+        }
+        base.Dispose(disposing);
+    }
+
     private void OnLoaded(object? sender, EventArgs eventArgs)
     {
         if (_isLoaded) return;

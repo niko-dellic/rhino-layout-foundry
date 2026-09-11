@@ -9,8 +9,7 @@ using RhinoLayoutFoundry.Core.Persistence;
 
 namespace RhinoLayoutFoundry.UI;
 
-[Guid("c43e26dd-b64b-454b-8b50-a10560e5045f")]
-public sealed partial class LayoutFoundryPanel : Panel
+internal sealed partial class LayoutFoundryWorkspace : Panel
 {
     private const string InternalHierarchyDragType = "application/x-layout-foundry-hierarchy";
     private readonly Label _emptyTitleLabel;
@@ -101,7 +100,6 @@ public sealed partial class LayoutFoundryPanel : Panel
     private CancellationTokenSource _thumbnailCancellation = new();
     private FoundryResponsiveLayout _responsiveLayout = FoundryResponsiveLayout.ForWidth(420);
     private uint? _documentSerialNumber;
-    private readonly FoundryColorField _selectionColorField;
     private Color _selectionColor = LayoutPresentationTheme.SelectionAccent;
     private bool _isLoaded;
     private bool _darkTheme = FoundryTheme.IsDarkMode;
@@ -109,6 +107,8 @@ public sealed partial class LayoutFoundryPanel : Panel
     private readonly ImageView _brandIcon = new() { Image = LayoutBrandIcon.BrandMark() };
     private bool _isPopulatingTree;
     private bool _isApplyingResponsiveLayout;
+    private bool _responsiveIdleQueued;
+    private bool _stackToolbar = true;
     private bool _thumbnailCaptureInProgress;
     private bool _dragInProgress;
     private OverviewSortProperty _sortProperty = OverviewSortProperty.None;
@@ -143,7 +143,7 @@ public sealed partial class LayoutFoundryPanel : Panel
     private bool _deleteInProgress;
     private FoundryPanelViewMode _viewMode = FoundryPanelViewMode.List;
 
-    public LayoutFoundryPanel()
+    internal LayoutFoundryWorkspace()
     {
         BackgroundColor = FoundryTheme.PanelBackground;
 
@@ -156,6 +156,7 @@ public sealed partial class LayoutFoundryPanel : Panel
         _emptyDescriptionLabel = FoundryTheme.MutedLabel();
         _emptyDescriptionLabel.TextAlignment = TextAlignment.Center;
         _summaryLabel = FoundryTheme.MutedLabel();
+        _summaryLabel.Visible = false;
         _documentWarning = FoundryTheme.MutedLabel();
         _documentWarning.Wrap = WrapMode.Word;
         _documentWarning.Visible = false;
@@ -258,13 +259,6 @@ public sealed partial class LayoutFoundryPanel : Panel
             FoundryViewIcons.ThumbnailStack(),
             "Thumbnail view (page grid)",
             isToggle: true);
-        _selectionColorField = new FoundryColorField(_selectionColor, width: 124,
-            toolTip: "Selection color for List, Thumbnail and Canvas");
-        _selectionColorField.ValueChanged += (_, _) =>
-        {
-            LayoutSelectionAppearance.Set(_selectionColorField.Value);
-            RefreshSelectionColor();
-        };
         _viewModeButtonGroup = new FoundryToolbarButtonGroup(
             _listViewButton,
             _thumbnailViewButton,
@@ -426,14 +420,8 @@ public sealed partial class LayoutFoundryPanel : Panel
         _thumbnailTimer.Elapsed += async (_, _) => await CaptureNextThumbnailAsync();
         Load += OnPanelLoaded;
         UnLoad += OnPanelUnloaded;
-        // Rhino's macOS dock splitter runs a nested AppKit tracking loop. Any
-        // managed Eto frame mutation scheduled from SizeChanged can recursively
-        // enter NSView geometry validation. Mac density is chosen on panel load;
-        // live breakpoint transitions remain enabled on Windows.
-        if (!OperatingSystem.IsMacOS())
-        {
-            SizeChanged += (_, _) => QueueResponsiveLayout();
-        }
+        // Mac reflow is deferred to Rhino Idle, outside AppKit's splitter loop.
+        SizeChanged += (_, _) => QueueResponsiveLayout();
         RefreshOverview();
     }
 
@@ -1239,9 +1227,9 @@ public sealed partial class LayoutFoundryPanel : Panel
 
     private Control CreateToolbarContent()
     {
-        _searchField.Width = _responsiveLayout.StackToolbar ? 240 : 320;
-        _filterKindField.Width = _responsiveLayout.StackToolbar ? 84 : 96;
-        return new StackLayout
+        _searchField.Width = _stackToolbar ? 180 : 320;
+        _filterKindField.Width = _stackToolbar ? 84 : 96;
+        var actions = new StackLayout
         {
             Orientation = Orientation.Horizontal,
             Spacing = FoundryTheme.Space1,
@@ -1267,18 +1255,25 @@ public sealed partial class LayoutFoundryPanel : Panel
                 _printButton,
                 _importButton,
                 _exportButton,
-                new Panel
-                {
-                    Width = 1,
-                    Height = 20,
-                    BackgroundColor = FoundryTheme.CanvasBorder,
-                },
-                _searchField,
-                _filterKindField,
-                _clearFilterButton,
-                new StackLayoutItem(null, expand: true),
             },
         };
+        var search = new StackLayout
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = FoundryTheme.Space1,
+            VerticalContentAlignment = VerticalAlignment.Center,
+            Items = { _searchField, _filterKindField, _clearFilterButton },
+        };
+        var toolbar = new StackLayout
+        {
+            Orientation = _stackToolbar ? Orientation.Vertical : Orientation.Horizontal,
+            Spacing = FoundryTheme.Space1,
+            Items = { actions },
+        };
+        if (!_stackToolbar)
+            toolbar.Items.Add(new Panel { Width = 1, Height = 20, BackgroundColor = FoundryTheme.CanvasBorder });
+        toolbar.Items.Add(search);
+        return toolbar;
     }
 
     private Control CreateBottomBar() => new StackLayout
@@ -1292,7 +1287,6 @@ public sealed partial class LayoutFoundryPanel : Panel
             _fullscreenButton,
             _viewModeSeparator,
             _viewModeButtonGroup,
-            _selectionColorField,
             _canvasAppearanceControl,
             _thumbnailDensityControl,
             new StackLayoutItem(_statusLabel, expand: true),
@@ -2026,6 +2020,8 @@ public sealed partial class LayoutFoundryPanel : Panel
 
     private void OnPanelUnloaded(object? sender, EventArgs eventArgs)
     {
+        Rhino.RhinoApp.Idle -= OnResponsiveIdle;
+        _responsiveIdleQueued = false;
         _fullscreenWindow?.Close();
         CloseHierarchyPaperEditor();
         CloseHierarchyDisplayModePicker();
@@ -2036,7 +2032,6 @@ public sealed partial class LayoutFoundryPanel : Panel
         }
 
         _isLoaded = false;
-        LayoutSelectionAppearance.Save();
         DetachNativeClipboardShortcuts();
         _layoutPollTimer.Stop();
         _invalidationTimer.Stop();
@@ -2055,7 +2050,6 @@ public sealed partial class LayoutFoundryPanel : Panel
         var color = LayoutPresentationTheme.SelectionAccent;
         if (_selectionColor == color) return;
         _selectionColor = color;
-        _selectionColorField.Value = color;
         RefreshHierarchyColors();
         _thumbnailView.Invalidate(true);
         _observerView.Invalidate(true);
@@ -2116,7 +2110,6 @@ public sealed partial class LayoutFoundryPanel : Panel
     {
         RefreshThemeImages();
         RefreshSelectionColor();
-        LayoutSelectionAppearance.Save();
         var identity = LayoutFoundryUiHost.CaptureOverviewIdentity();
         if (!identity.Matches(_overview))
         {
@@ -3944,7 +3937,8 @@ public sealed partial class LayoutFoundryPanel : Panel
             var next = FoundryResponsiveLayout.Transition(
                 Math.Max(Width, 1),
                 _responsiveLayout.Density);
-            if (next == _responsiveLayout)
+            var stackToolbar = Width < (_stackToolbar ? 780 : 740);
+            if (next == _responsiveLayout && stackToolbar == _stackToolbar)
             {
                 return;
             }
@@ -3952,6 +3946,8 @@ public sealed partial class LayoutFoundryPanel : Panel
             var dimensionsChanged = next.ThumbnailWidth != _responsiveLayout.ThumbnailWidth ||
                                     next.ThumbnailHeight != _responsiveLayout.ThumbnailHeight;
             _responsiveLayout = next;
+            _stackToolbar = stackToolbar;
+            _summaryLabel.Visible = !stackToolbar;
             // Eto maps this to NSTableColumn.setHidden on macOS. Toggling that
             // property while Rhino's dock splitter runs its nested tracking loop
             // recursively enters AppKit geometry validation. Keep the column on
@@ -3981,11 +3977,27 @@ public sealed partial class LayoutFoundryPanel : Panel
             return;
         }
 
+        if (OperatingSystem.IsMacOS())
+        {
+            if (!_responsiveIdleQueued)
+            {
+                _responsiveIdleQueued = true;
+                Rhino.RhinoApp.Idle += OnResponsiveIdle;
+            }
+            return;
+        }
+
         // Coalesce Windows resize bursts so toolbar reflow and preview-size
-        // invalidation happen once after the splitter settles. Mac live density
-        // changes are disabled at subscription time because of AppKit recursion.
+        // invalidation happen once after the splitter settles.
         _responsiveTimer.Stop();
         _responsiveTimer.Start();
+    }
+
+    private void OnResponsiveIdle(object? sender, EventArgs eventArgs)
+    {
+        Rhino.RhinoApp.Idle -= OnResponsiveIdle;
+        _responsiveIdleQueued = false;
+        if (_isLoaded && !IsDisposed) ApplyResponsiveLayout();
     }
 
     private OverviewThumbnailKey ThumbnailKey(Guid sheetPageViewId)

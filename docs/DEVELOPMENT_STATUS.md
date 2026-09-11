@@ -13,7 +13,7 @@ Foundry is qualifying an unpublished 0.1.0-beta.1 candidate for Windows and macO
 
 ## Pre-release cleanup
 
-Schema 17/package 6; schema-16 document migration; live sheet/detail registrations; built-in title blocks; canonical per-detail creation inputs. Stored recipes, capability links, tags, old display rules, custom title-block sources, and the Observer command alias are removed.
+Schema 17/package 6; protected rejection of schema-16 document metadata; live sheet/detail registrations; built-in title blocks; canonical per-detail creation inputs. Stored recipes, capability links, tags, old display rules, custom title-block sources, and the Observer command alias are removed.
 
 ## Evidence and outstanding gates
 

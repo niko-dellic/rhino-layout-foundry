@@ -71,6 +71,9 @@ public static class FoundryCreateMenuActions
                 invoke = (Action<Control, IReadOnlyDictionary<string, object?>>)entry[3];
         }
         if (invoke is null) return false;
+        if (actionId == "rhino-layout-foundry.ai" &&
+            AppDomain.CurrentDomain.GetData("RhinoLayoutFoundry.AI.AutomationProtocolMajor") is not 2)
+            throw new InvalidOperationException("Layout Foundry and Foundry AI use incompatible automation protocols. Update both components together and restart Rhino.");
 
         invoke(owner, context);
         return true;

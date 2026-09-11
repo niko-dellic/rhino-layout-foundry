@@ -1,6 +1,6 @@
 namespace RhinoLayoutFoundry.UI;
 
-public sealed partial class LayoutFoundryPanel
+internal sealed partial class LayoutFoundryWorkspace
 {
     private IDisposable? _nativeClipboardShortcuts;
 

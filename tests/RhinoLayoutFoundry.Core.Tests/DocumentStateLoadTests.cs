@@ -26,37 +26,14 @@ public sealed class DocumentStateLoadTests
     }
 
     [Fact]
-    public void Schema16MigratesWithoutInventingHierarchyDates()
+    public void Schema16IsProtectedInsteadOfMigrated()
     {
-        var state = DocumentState.Empty();
-        var sheetId = Guid.NewGuid();
-        state = state with
-        {
-            Sheets = new Dictionary<Guid, SheetRecord>
-            {
-                [sheetId] = new(sheetId, state.RootFolderId, 0,
-                    new Dictionary<string, string>(), null),
-            },
-        };
-        var json = JsonNode.Parse(DocumentStateSerializer.Serialize(state))!.AsObject();
+        var json = JsonNode.Parse(DocumentStateSerializer.Serialize(DocumentState.Empty()))!.AsObject();
         json[nameof(DocumentState.SchemaVersion)] = 16;
-        foreach (var folder in json[nameof(DocumentState.Folders)]!.AsArray())
-        {
-            folder!.AsObject().Remove(nameof(FolderRecord.CreatedUtc));
-            folder.AsObject().Remove(nameof(FolderRecord.LastModifiedUtc));
-        }
-        foreach (var sheet in json[nameof(DocumentState.Sheets)]!.AsObject())
-        {
-            sheet.Value!.AsObject().Remove(nameof(SheetRecord.CreatedUtc));
-            sheet.Value.AsObject().Remove(nameof(SheetRecord.LastModifiedUtc));
-        }
-
         var result = DocumentStateLoadResult.Read(16, json.ToJsonString());
-
-        Assert.True(result.CanWrite);
-        Assert.Equal(DocumentState.CurrentSchemaVersion, result.State.SchemaVersion);
-        Assert.Null(result.State.Folders[0].CreatedUtc);
-        Assert.Null(result.State.Sheets[sheetId].LastModifiedUtc);
+        Assert.Equal(DocumentStateLoadStatus.Unsupported, result.Status);
+        Assert.False(result.CanWrite);
+        Assert.Contains("preserved", result.Diagnostic);
     }
 
     [Fact]

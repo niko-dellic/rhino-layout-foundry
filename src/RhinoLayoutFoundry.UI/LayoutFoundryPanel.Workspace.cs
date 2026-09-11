@@ -2,7 +2,7 @@ using Eto.Forms;
 
 namespace RhinoLayoutFoundry.UI;
 
-public partial class LayoutFoundryPanel
+internal sealed partial class LayoutFoundryWorkspace
 {
     private readonly Panel _extensionWorkspace = new() { Visible = false };
     private Control? _extensionContent;

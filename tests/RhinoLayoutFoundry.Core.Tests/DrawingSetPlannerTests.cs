@@ -6,13 +6,13 @@ namespace RhinoLayoutFoundry.Core.Tests;
 
 public sealed class DrawingSetPlannerTests
 {
-    private static DrawingSetSpecification Proposal() => new(1, Guid.NewGuid(), 42, 1,
+    private static DrawingSetSpecification Proposal() => new(2, Guid.NewGuid(), 42, 1,
         TestSnapshots.Create().RootFolderId, new DrawingSheetSpecification[]
         {
             new("sheet", "Proposed set", 420, 297, new DrawingViewSpecification[]
             {
-                new("view", "Site", "site_plan", 200, new(10,10,400,280),
-                    new(0,0,100), new(0,0,0), new(0,1,0), null),
+                new("view", "Site", "site_plan", 200, new(10,18,400,277),
+                    new(0,0,100), new(0,0,0), new(0,1,0), null) { HiddenLayerIds = [] },
             }),
         });
 

@@ -22,7 +22,7 @@ public sealed record DrawingViewSpecification(string Key, string Name, string Ki
     double ScaleDenominator, DetailPageBounds BoundsMm, Point3Coordinates CameraLocation,
     Point3Coordinates CameraTarget, Vector3Coordinates CameraUp, DrawingCutSpecification? Cut)
 {
-    // Required explicitly in v2; absent in legacy v1 proposals.
+    // Required explicitly; an empty list retains current visibility.
     public IReadOnlyList<Guid>? HiddenLayerIds { get; init; }
 }
 
@@ -50,7 +50,7 @@ public static class DrawingSetSpecificationValidator
             {
                 if (type.Kind == JsonTypeInfoKind.Object)
                     foreach (var property in type.Properties.Where(p => p.Set is not null))
-                        property.IsRequired = property.Name != "hidden_layer_ids";
+                        property.IsRequired = true;
             } },
         },
     };
@@ -68,7 +68,7 @@ public static class DrawingSetSpecificationValidator
         ArgumentNullException.ThrowIfNull(snapshot);
         var issues = new List<DrawingSetIssue>();
         void Error(string path, string code, string message) => issues.Add(new(path, code, message));
-        if (spec.SchemaVersion is not (1 or 2)) Error("schema_version", "version.unsupported", "Use drawing-set schema version 1 or 2.");
+        if (spec.SchemaVersion != 2) Error("schema_version", "version.unsupported", "Use drawing-set schema version 2.");
         if (spec.ProposalId == Guid.Empty) Error("proposal_id", "proposal.id_required", "Provide a stable proposal ID.");
         if (spec.DocumentRuntimeSerialNumber != snapshot.DocumentRuntimeSerialNumber)
             Error("document_runtime_serial_number", "document.changed", "Inspect the active document again.");
@@ -111,25 +111,20 @@ public static class DrawingSetSpecificationValidator
                 if (view is null) { Error(vp, "view.required", "A view cannot be null."); continue; }
                 CheckKey(view.Key, vp + ".key");
                 if (!ValidName(view.Name)) Error(vp + ".name", "view.name", "Provide a readable drawing title, up to 120 characters.");
-                if (spec.SchemaVersion == 1 && view.HiddenLayerIds is not null)
-                    Error(vp + ".hidden_layer_ids", "version.feature", "Per-view visibility requires schema version 2.");
-                if (spec.SchemaVersion == 2)
-                {
-                    if (view.HiddenLayerIds is null || view.HiddenLayerIds.Count > 512 ||
-                        view.HiddenLayerIds.Distinct().Count() != view.HiddenLayerIds.Count ||
-                        view.HiddenLayerIds.Any(id => !snapshot.Layers.ContainsKey(id)))
-                        Error(vp + ".hidden_layer_ids", "visibility.layers", "Provide an explicit list of at most 512 distinct existing layer IDs; use [] to retain current visibility.");
-                    if (view.BoundsMm is { } frame && (frame.Left < 10 || frame.Right > sheet.WidthMm - 10 ||
-                        frame.Bottom < 18 || frame.Top > sheet.HeightMm - 20))
-                        Error(vp + ".bounds_mm", "frame.caption_space", "Reserve 10 mm side margins, 18 mm below the lowest view and 20 mm above the highest view for captions and sheet title.");
-                    // A caption occupies the 8 mm band immediately below its frame.
-                    if (view.BoundsMm is { IsValid: true } captionFrame)
-                        for (var k = 0; k < j; k++)
-                            if (sheet.Views[k]?.BoundsMm is { IsValid: true } otherFrame &&
-                                captionFrame.Left < otherFrame.Right && captionFrame.Right > otherFrame.Left &&
-                                captionFrame.Bottom - 8 < otherFrame.Top && captionFrame.Top > otherFrame.Bottom - 8)
-                                Error(vp + ".bounds_mm", "caption.overlap", "Drawing frames and their 8 mm caption bands must not overlap.");
-                }
+                if (view.HiddenLayerIds is null || view.HiddenLayerIds.Count > 512 ||
+                    view.HiddenLayerIds.Distinct().Count() != view.HiddenLayerIds.Count ||
+                    view.HiddenLayerIds.Any(id => !snapshot.Layers.ContainsKey(id)))
+                    Error(vp + ".hidden_layer_ids", "visibility.layers", "Provide an explicit list of at most 512 distinct existing layer IDs; use [] to retain current visibility.");
+                if (view.BoundsMm is { } frame && (frame.Left < 10 || frame.Right > sheet.WidthMm - 10 ||
+                    frame.Bottom < 18 || frame.Top > sheet.HeightMm - 20))
+                    Error(vp + ".bounds_mm", "frame.caption_space", "Reserve 10 mm side margins, 18 mm below the lowest view and 20 mm above the highest view for captions and sheet title.");
+                // A caption occupies the 8 mm band immediately below its frame.
+                if (view.BoundsMm is { IsValid: true } captionFrame)
+                    for (var k = 0; k < j; k++)
+                        if (sheet.Views[k]?.BoundsMm is { IsValid: true } otherFrame &&
+                            captionFrame.Left < otherFrame.Right && captionFrame.Right > otherFrame.Left &&
+                            captionFrame.Bottom - 8 < otherFrame.Top && captionFrame.Top > otherFrame.Bottom - 8)
+                            Error(vp + ".bounds_mm", "caption.overlap", "Drawing frames and their 8 mm caption bands must not overlap.");
                 if (view.Kind is not ("site_plan" or "floor_plan" or "elevation" or "section"))
                     Error(vp + ".kind", "view.kind", "This contract supports site plans, floor plans, elevations and sections.");
                 if (!Positive(view.ScaleDenominator, 10000) || view.ScaleDenominator < 1)

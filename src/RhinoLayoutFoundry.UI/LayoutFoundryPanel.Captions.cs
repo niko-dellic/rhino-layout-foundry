@@ -5,7 +5,7 @@ using RhinoLayoutFoundry.Extensibility;
 
 namespace RhinoLayoutFoundry.UI;
 
-public partial class LayoutFoundryPanel
+internal sealed partial class LayoutFoundryWorkspace
 {
     private async Task EditDetailCaptionsAsync()
     {

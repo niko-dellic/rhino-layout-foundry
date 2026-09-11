@@ -16,7 +16,7 @@ host through `FoundryAutomation.Current`. The host provides five operations:
 4. Stage an allow-listed Core `OperationPlan`.
 5. Mint a one-shot approval and apply the approved plan.
 
-The current protocol is `1.0`. Companions must check the major version before
+The current protocol is `2.0`. Companions must check the major version before
 using the host and feature-detect individual capabilities.
 
 ## Trust and consent
@@ -44,7 +44,7 @@ Those calls belong in trusted UI/controller code after a direct user action.
 The alpha host accepts additive and assignment-oriented changes for named views,
 clipping planes, layouts, detail/named-view assignments, linked sheet names, and
 appearance state resources/assignments. Unknown change types are rejected before
-a plan is staged. PDF export is intentionally not exposed in protocol 1.0.
+a plan is staged. PDF export is intentionally not exposed in protocol 2.0.
 
 ## Example flow
 
@@ -71,29 +71,15 @@ A separately distributed Eto companion can register a
 `FoundryCreateMenuAction` through `FoundryCreateMenuActions.Register`. Layout
 Foundry renders the contributed label and icon in its existing `+` menu and
 invokes the action with the panel as its owner. A companion can therefore open
-its own modal without adding another Rhino pane or replacing a Foundry view.
+its in-panel workspace without adding another Rhino pane or replacing a Foundry view.
 The registration is disposable, and this presentation hook does not grant
 document access; automation still crosses the host contract and its approval
 gates.
 
-## Layout creation contract
+## Drawing creation contract
 
-`stage_create_layouts` requires `layouts`, `destination_folder_id`, and `naming_pattern`. Each specification supplies quantity and paper size/units. Optional fields are `layout_kind`, `template_id` (a live registration ID), `named_views_by_detail`, and `title_block` (`none`, `right`, or `bottom`). Layout kinds are `blank`, `single_detail`, `two_details_horizontal`, `two_details_vertical`, and `four_details_grid`. Unknown fields and values fail before staging.
+AI batch creation uses `stage_drawing_set` with drawing-set specification v2. Required fields, including each view's `hidden_layer_ids` array (empty is allowed), must be explicit. The JSON request envelope includes `protocol_major: 2`; incompatible pairs must update both components and restart Rhino before a task begins. Unknown tools, specification v1 and missing fields are rejected before staging.
 
-```json
-{
-  "destination_folder_id": "<folder-guid>",
-  "naming_pattern": "A-{index:000}",
-  "layouts": [{
-    "quantity": 2,
-    "page_width": 594,
-    "page_height": 420,
-    "page_units": "Millimeters",
-    "layout_kind": "two_details_horizontal",
-    "named_views_by_detail": ["Plan", null],
-    "title_block": "right"
-  }]
-}
-```
+Drawing proposals contain explicit sheets and views, exact scale, cameras, page bounds and optional cuts, with reserved title/caption space. Inspect current document revision and resource IDs first. The current schema is defined by `DrawingSetSpecification` and validated by `DrawingSetSpecificationValidator`. Native mutation occurs only after a reviewed plan receives one-shot approval. Normal basic sheet creation and existing correction operations remain available.
 
-Assignments follow resolved detail order. Null preserves that detail's camera. The planner validates view existence and assignment count before mutation. The C# equivalent is `BatchCreateSheetsRequest.CreationSpecs` with `LayoutCreationSpec.NamedViewsByDetail`; quantity-only template requests, singular assignments, and request-wide defaults are removed. Core records remain experimental and have no compatibility aliases.
+Document schema 17 and package format 6 remain current. Unsupported metadata is preserved without migration or automatic reset. Conversations use checkpoint v2 with typed presentation events separate from provider history; checkpoint v1 is unsupported. See [clean-break validation](PRE_BETA_CLEAN_BREAK.md).

@@ -118,7 +118,7 @@ def archive(label,version,value,writable):
   call(store,'Remove',d);d.Dispose()
 check('current metadata native save/reopen and Save As',lambda:archive('current',17,payload,True))
 legacy=json.loads(payload);legacy['SchemaVersion']=16
-check('schema-16 migration and intentional save upgrade',lambda:archive('schema16',16,json.dumps(legacy),True))
+check('schema-16 metadata is protected and preserved',lambda:archive('schema16',16,json.dumps(legacy),False))
 check('malformed metadata is protected and preserved',lambda:archive('malformed',17,'{"SchemaVersion":17,broken',False))
 check('mismatched metadata is protected and preserved',lambda:archive('mismatch',16,payload,False))
 with open(os.path.join(root,'report.json'),'w') as f:json.dump({'host':host.Location,'rhino':str(Rhino.RhinoApp.Version),'results':results},f,indent=2)

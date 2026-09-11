@@ -5,7 +5,7 @@ namespace RhinoLayoutFoundry.Extensibility;
 
 public static class FoundryAutomationProtocol
 {
-    public const int MajorVersion = 1;
+    public const int MajorVersion = 2;
     public const int MinorVersion = 0;
 }
 

@@ -25,6 +25,9 @@ def run(sender,event):
   assert doc and os.path.basename(doc.Path or '')=='benchmark-200.3dm' and len(doc.Views.GetPageViews())==200
   panel=Rhino.UI.Panels.GetPanel(clr.GetClrType(LayoutFoundryPanel).GUID,doc)
   assert panel is not None,'Open LayoutFoundry panel first'
+  workspace=panel.GetType().GetField('_workspace',F)
+  if workspace:panel=workspace.GetValue(panel)
+  assert panel is not None and field(panel,'_isLoaded'),'Benchmark requires a mounted, loaded workspace'
   host=next(a for a in System.AppDomain.CurrentDomain.GetAssemblies() if a.GetName().Name=='RhinoLayoutFoundry')
   plugin=host.GetType('RhinoLayoutFoundry.Rhino.LayoutFoundryPlugin').GetProperty('Instance',S).GetValue(None,None)
   store=field(plugin,'_stateStore')

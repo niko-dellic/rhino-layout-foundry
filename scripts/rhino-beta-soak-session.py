@@ -12,7 +12,7 @@ assert not os.path.exists(report_path),'Archive the previous session report befo
 state={'panels':[],'closes':[],'last_serial':None}
 code=open(source).read().split('Rhino.RhinoApp.Idle+=run')[0]
 code=code.replace('foundry-beta-soak-resumed.json','foundry-beta-soak-session.json')
-code=code.replace("assert panel is not None,'Open LayoutFoundry panel first'", "assert panel is not None,'Open LayoutFoundry panel first'\n  state['panels'].append(System.WeakReference(panel))")
+code=code.replace("assert panel is not None and field(panel,'_isLoaded'),'Benchmark requires a mounted, loaded workspace'", "assert panel is not None and field(panel,'_isLoaded'),'Benchmark requires a mounted, loaded workspace'\n  state['panels'].append(System.WeakReference(panel))")
 exec(compile(code,source,'exec'))
 def after_close(sender,event):
  Rhino.RhinoApp.Idle-=after_close

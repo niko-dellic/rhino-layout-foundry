@@ -34,10 +34,10 @@ public sealed class DrawingSetSpecificationTests
     private static DrawingSetSpecification Proposal()
     {
         var doc = TestSnapshots.Create();
-        return new(1, Guid.NewGuid(), doc.DocumentRuntimeSerialNumber, doc.Revision, doc.RootFolderId,
+        return new(2, Guid.NewGuid(), doc.DocumentRuntimeSerialNumber, doc.Revision, doc.RootFolderId,
             [new("a01", "A01 Proposed", 420, 297,
-                [new("site", "Site plan", "site_plan", 200, new(10, 10, 410, 287),
-                    new(0, 0, 100), new(0, 0, 0), new(0, 1, 0), null)])]);
+                [new("site", "Site plan", "site_plan", 200, new(10, 18, 410, 277),
+                    new(0, 0, 100), new(0, 0, 0), new(0, 1, 0), null) { HiddenLayerIds = [] }])]);
     }
 
     private static DrawingSetPreflight Validate(DrawingSetSpecification proposal) =>
@@ -46,7 +46,7 @@ public sealed class DrawingSetSpecificationTests
     [Fact]
     public void VersionTwoRequiresExplicitVisibilityAndCaptionSpace()
     {
-        var legacy = Proposal();
+        var legacy = ChangeView(v => v with { HiddenLayerIds = null, BoundsMm = new(0, 0, 410, 287) });
         var sheet = legacy.Sheets[0];
         var view = sheet.Views[0];
         var invalid = Validate(legacy with { SchemaVersion = 2 });
@@ -75,8 +75,8 @@ public sealed class DrawingSetSpecificationTests
     }
 
     [Fact]
-    public void VersionOneCannotSilentlyApplyVersionTwoVisibility() => Assert.Contains(
-        Validate(ChangeView(v => v with { HiddenLayerIds = [] })).Issues, i => i.Code == "version.feature");
+    public void VersionOneIsRejected() => Assert.Contains(
+        Validate(Proposal() with { SchemaVersion = 1 }).Issues, i => i.Code == "version.unsupported");
 
     [Fact]
     public void ValidProposalReportsCountsWithoutMutatingSnapshot()
@@ -97,6 +97,16 @@ public sealed class DrawingSetSpecificationTests
         var json = JsonSerializer.SerializeToElement(proposal, new JsonSerializerOptions
         { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower });
         Assert.True(Validate(DrawingSetSpecificationValidator.Parse(json)).IsValid);
+    }
+
+    [Fact]
+    public void MissingVisibilityFieldIsRejectedDuringParsing()
+    {
+        var json = System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(Proposal(),
+            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower }))!;
+        json["sheets"]![0]!["views"]![0]!.AsObject().Remove("hidden_layer_ids");
+        Assert.Throws<JsonException>(() => DrawingSetSpecificationValidator.Parse(
+            JsonSerializer.SerializeToElement(json)));
     }
 
     [Theory]

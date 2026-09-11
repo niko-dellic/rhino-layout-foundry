@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Text.Json.Nodes;
 using RhinoLayoutFoundry.Core.Domain;
 
 namespace RhinoLayoutFoundry.Core.Persistence;
@@ -27,14 +26,6 @@ public sealed record DocumentStateLoadResult(
                 version.ValueKind != JsonValueKind.Number ||
                 !version.TryGetInt32(out var payloadVersion) || payloadVersion != envelopeVersion)
                 return Invalid("The metadata envelope and payload schema versions do not match.");
-            if (payloadVersion == 16)
-            {
-                var migrated = JsonNode.Parse(payload)?.AsObject()
-                    ?? throw new JsonException("The metadata payload was empty.");
-                migrated[nameof(DocumentState.SchemaVersion)] = DocumentState.CurrentSchemaVersion;
-                return new(DocumentStateLoadStatus.Loaded,
-                    DocumentStateSerializer.Deserialize(migrated.ToJsonString()));
-            }
             if (payloadVersion != DocumentState.CurrentSchemaVersion)
                 return new(DocumentStateLoadStatus.Unsupported, DocumentState.Empty(),
                     $"Foundry metadata schema {payloadVersion} is unsupported. Foundry changes are disabled; original metadata is preserved on save.");

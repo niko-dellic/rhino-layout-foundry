@@ -41,7 +41,9 @@ def run(sender,event):
   cold,overview=timed(lambda:provider.GetType().GetMethod('Capture',FLAGS).Invoke(provider,None))
   warm=[timed(lambda:provider.GetType().GetMethod('Capture',FLAGS).Invoke(provider,None))[0] for _ in range(5)]
   report.update({'sheets':len(overview.Sheets),'details':sum(len(s.Details) for s in overview.Sheets),'capture_cold_ms':cold,'capture_warm_ms':warm})
-  panel=LayoutFoundryPanel()
+  panel_host=LayoutFoundryPanel()
+  workspace=panel_host.GetType().GetField('_workspace',FLAGS)
+  panel=workspace.GetValue(panel_host) if workspace else panel_host
   try:
    refresh=panel.GetType().GetMethod('RefreshOverview',FLAGS)
    report['panel_refresh_ms']=[timed(lambda:refresh.Invoke(panel,None))[0] for _ in range(5)]
@@ -49,7 +51,7 @@ def run(sender,event):
    def query(value):field.Text=value
    report['filter_input_ms']=[timed(lambda q=q:query(q))[0] for q in ['Benchmark-1','Detail-3','missing','']]
    System.GC.Collect();System.GC.WaitForPendingFinalizers();System.GC.Collect()
-  finally:panel.Dispose()
+  finally:panel_host.Dispose()
   report['working_set_before_bytes']=before;report['working_set_after_bytes']=Process.GetCurrentProcess().WorkingSet64
   options=Rhino.FileIO.FileWriteOptions();options.SuppressDialogBoxes=True;options.WriteUserData=True
   assert doc.Write3dmFile(os.path.join(root,'benchmark-200.3dm'),options);options.Dispose()
