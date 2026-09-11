@@ -39,9 +39,11 @@ Switching the system theme while an existing panel is open can leave cached icon
 
 Built-in creation reserves at least 6 mm below detail frames for linked captions, including when a smaller vertical gap is requested. Registered source templates retain their source geometry.
 
-## Installing a published release
+## Installing the private candidate
 
-When a release is published, use Rhino's `PackageManager` to install `rhino-layout-foundry`, then fully restart Rhino and run `LayoutFoundry`. For a supplied candidate, use its matching Windows or Mac `.yak` package and follow the clean-profile checks in [Testing and release](docs/TESTING_AND_RELEASE.md). A local candidate is not a published release.
+For macOS Layout + AI, use the combined Yak and [beta installation instructions](docs/MACOS_AI_BETA_INSTALL.md). For Windows Layout + AI, use the matched archive and [Windows installation instructions](docs/WINDOWS_BETA_TESTING.md). The Layout-only Yak does not include the AI companion. These are unpublished candidates; no public PackageManager listing is available for this handoff.
+
+Developers switching between source builds and package testing should follow [Developer installation testing](docs/DEVELOPER_INSTALL_TESTING.md), including the Debug-only `LayoutFoundryDev` diagnostics command, macOS park/restore helper and clean-account qualification checklist.
 
 ## Build and development install
 

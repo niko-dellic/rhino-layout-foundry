@@ -1,5 +1,7 @@
 # Review scope and input layout — preview.26
 
+> Historical development snapshot. Status, candidate versions and local evidence paths below reflect this dated session; they are not current release acceptance. See the [current clean-break status](../PRE_BETA_CLEAN_BREAK.md) and [testing and release guide](../TESTING_AND_RELEASE.md).
+
 Installed both coordinated bundles and restarted Rhino. Installed DLL/RHP SHA-256
 hashes match isolated candidates. Builds: zero warnings/errors. Tests: 447 public,
 55 AI, 4 shared UI, 15 primitives (521 total). No paid provider requests.

@@ -1,5 +1,7 @@
 # Readiness pass — 2026-09-09
 
+> Historical development snapshot. Status, candidate versions and local evidence paths below reflect this dated session; they are not current release acceptance. See the [current clean-break status](../PRE_BETA_CLEAN_BREAK.md) and [testing and release guide](../TESTING_AND_RELEASE.md).
+
 This is an interim acceptance report, not a v1 sign-off.
 
 ## Implemented

@@ -1,5 +1,7 @@
 # Plan, inspection and attachments candidate
 
+> Historical development snapshot. Status, candidate versions and local evidence paths below reflect this dated session; they are not current release acceptance. See the [current clean-break status](../PRE_BETA_CLEAN_BREAK.md) and [testing and release guide](../TESTING_AND_RELEASE.md).
+
 Installed coordinated preview.29 bundles after user confirmed Rhino was closed.
 Rhino was fully restarted. All installed DLL/RHP hashes match isolated builds;
 both builds had zero warnings/errors. Final suites: 448 public, 57 AI, 4 shared

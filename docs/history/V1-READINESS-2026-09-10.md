@@ -1,5 +1,7 @@
 # Readiness fixture: V1 end-to-end exercise
 
+> Historical development snapshot. Status, candidate versions and local evidence paths below reflect this dated session; they are not current release acceptance. See the [current clean-break status](../PRE_BETA_CLEAN_BREAK.md) and [testing and release guide](../TESTING_AND_RELEASE.md).
+
 ## Conversation polish — preview.33
 
 - Installed coordinated UI preview.33 and matching Layout/AI bundles, with zero build warnings/errors and matching installed RHP/UI/Core hashes. 532 automated tests and 8 existing native HostChecks passed.

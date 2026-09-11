@@ -1,6 +1,8 @@
 # Shared UI dependency
 
-This consumer pins RhinoFoundry.UI, Primitives and (on Mac) MacOS to `0.3.0-preview.4`. The canonical source and contracts are in the sibling `rhino-foundry-ui` repository. Bootstrap packages and their hashes live in `packages/`; do not edit generated DLLs or maintain forked shared controls here.
+This consumer pins RhinoFoundry.UI, Primitives and (on Mac) MacOS to `0.3.0-preview.40`. The canonical source and contracts are in the sibling `rhino-foundry-ui` repository. Bootstrap packages and their hashes live in `packages/`; do not edit generated DLLs or maintain forked shared controls here.
+
+Track only the three package archives named in `packages/foundry-ui-manifest.json`. When updating the shared UI version, update the `.gitignore` package exceptions alongside the central versions, lockfiles and manifest, and remove superseded archives from the Git index. Old packages may remain locally ignored; historical commits retain the versions they used. Keep the current bootstrap packages and NuGet lockfiles tracked so a clean checkout can restore the pinned dependency graph.
 
 Build with an explicit `-p:FoundryPlatform=MacOS` or `-p:FoundryPlatform=Windows`, and restore for the same platform first. Use locked restore after updating the lockfile for the target platform. Windows excludes the Mac adapter; Mac native behavior requires the provisioned adapter package. Build into an isolated `BaseOutputPath` while Rhino is open.
 

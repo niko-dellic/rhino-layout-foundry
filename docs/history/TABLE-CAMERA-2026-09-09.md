@@ -1,5 +1,7 @@
 # Table and camera follow-up — preview.30
 
+> Historical development snapshot. Status, candidate versions and local evidence paths below reflect this dated session; they are not current release acceptance. See the [current clean-break status](../PRE_BETA_CLEAN_BREAK.md) and [testing and release guide](../TESTING_AND_RELEASE.md).
+
 Installed matching `0.3.0-preview.30` shared UI packages into Layout Foundry and Foundry AI, then fully restarted Rhino 8 for macOS.
 
 ## Changes

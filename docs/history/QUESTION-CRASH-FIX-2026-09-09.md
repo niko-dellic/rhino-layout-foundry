@@ -1,5 +1,7 @@
 # Question interaction updates
 
+> Historical development snapshot. Status, candidate versions and local evidence paths below reflect this dated session; they are not current release acceptance. See the [current clean-break status](../PRE_BETA_CLEAN_BREAK.md) and [testing and release guide](../TESTING_AND_RELEASE.md).
+
 ## preview.25 — installed and native-tested
 
 Suggested-answer release now stores the answer and advances immediately. The

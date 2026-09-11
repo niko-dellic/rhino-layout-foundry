@@ -33,6 +33,8 @@ dotnet /private/tmp/foundry-candidate/Release/net8.0/Foundry.ReleaseCheck.dll --
 
 Use a fresh staging directory each time. On Windows use equivalent absolute paths and `Windows`/`win`. The staging tool checks all four assembly versions and platform markers, net8.0 runtime metadata, and the dependency manifest. It copies only the six Layout runtime files, the platform-specific shared UI assemblies, and Markdig.dll, manifest, license, user/recovery documentation, and SHA256SUMS. Inspect the resulting Yak ZIP and verify package hashes after Yak finishes. SDK/runtime/test assemblies must not be bundled. The post-package verifier rejects extra/missing/duplicate files and validates every payload checksum. Yak rewrites the manifest, so it is checked separately and covered by the final package hash. Replace VERSION and repository paths in the example above.
 
+The commands above produce the Layout-only package. For the complete macOS AI pair use the [combined-package guide](MACOS_AI_BETA_INSTALL.md). Follow [Developer installation testing](DEVELOPER_INSTALL_TESTING.md) for dependency isolation, local install/uninstall/reinstall, and restoration of development bundles. Same-version reinstall is not an update test.
+
 ## Native regression scripts
 
 Fully restart Rhino with the candidate installed. Open a **disposable copy** of a representative document named `foundry-boundary-fixture.3dm`. Include model views, layouts/details, named resources and title-block/page objects; never rename your original model for this purpose.

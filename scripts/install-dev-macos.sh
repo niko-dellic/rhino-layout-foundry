@@ -5,9 +5,16 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 repository_root="$(cd "${script_dir}/.." && pwd -P)"
 configuration="${1:-Debug}"
-output_dir="${repository_root}/src/RhinoLayoutFoundry.Rhino/bin/${configuration}/net8.0"
+output_dir="${2:-${repository_root}/src/RhinoLayoutFoundry.Rhino/bin/${configuration}/net8.0}"
 plugin_dir="${RHINO_LAYOUT_FOUNDRY_MAC_PLUGIN_DIR:-${HOME}/Library/Application Support/McNeel/Rhinoceros/8.0/MacPlugIns/RhinoLayoutFoundry.rhp}"
 ai_plugin_dir="${RHINO_LAYOUT_FOUNDRY_AI_MAC_PLUGIN_DIR:-${HOME}/Library/Application Support/McNeel/Rhinoceros/8.0/MacPlugIns/RhinoLayoutFoundry.AI.rhp}"
+
+# Installation is never a live reload, including when using an isolated build.
+python3 - "${script_dir}/dev-install-macos.py" <<'PY'
+import runpy
+import sys
+runpy.run_path(sys.argv[1])["require_rhino_closed"]()
+PY
 
 required_files=(
   RhinoFoundry.UI.dll
@@ -59,3 +66,4 @@ printf 'Installed Rhino Layout Foundry development bundle at %s\n' "${plugin_dir
 if [[ -d "${ai_plugin_dir}" ]]; then
   printf 'Synchronized shared assemblies in companion bundle at %s\n' "${ai_plugin_dir}"
 fi
+printf 'Fully reopen Rhino after installation.\n'

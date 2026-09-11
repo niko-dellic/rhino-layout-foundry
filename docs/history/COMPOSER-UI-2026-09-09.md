@@ -1,5 +1,7 @@
 # Composer UI candidate — installed, native acceptance pending
 
+> Historical development snapshot. Status, candidate versions and local evidence paths below reflect this dated session; they are not current release acceptance. See the [current clean-break status](../PRE_BETA_CLEAN_BREAK.md) and [testing and release guide](../TESTING_AND_RELEASE.md).
+
 Implemented shared preview.22 question paging in the composer, answer buttons
 with full-text tooltips, retained answer drafts during paging, final submission,
 and a collapsed answer summary. Added bounded growing custom-answer and normal

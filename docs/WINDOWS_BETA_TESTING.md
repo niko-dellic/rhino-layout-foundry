@@ -8,6 +8,8 @@ Fully quit Rhino. Back up existing development bundles and remove duplicate olde
 
 Match extracted hashes with `assembly-hashes.json` under `Windows-Release`; do not combine files from different candidates. Native Windows install/update/uninstall and dependency isolation remain unverified. No Rhino Package Manager upload is authorized.
 
+For repeatable isolation and removal of manual development load paths, see [Developer installation testing](DEVELOPER_INSTALL_TESTING.md). A manual archive installation is not removed by Yak uninstall.
+
 ## Clean-break acceptance
 
 - Verify protocol mismatches refuse a task with instructions to update both components.
@@ -23,7 +25,7 @@ See [current evidence and blockers](PRE_BETA_CLEAN_BREAK.md). The macOS run used
 
 1. Create two empty documents. Open Foundry in each and switch between them. Confirm no rows or selections leak between documents. Save, close, reopen, and Save As.
 2. Create layouts with None, Right and Bottom title blocks; test A3 and 11 × 17 inch paper, named-view assignments, mixed quantities and captions. Inspect captions below frames and above the bottom block. Register a layout/detail template, modify its source, reopen creation and confirm the source is current.
-3. Check List, Thumbnail and Canvas at narrow and wide dock widths. Use dark/light themes and Windows 100/150/200% scaling. Switch themes while the panel stays open and confirm icons recolor without restarting. Check search, empty results, multiselect, clipboard, row drag, view navigation, Tab/Enter/Space/Escape and arrow keys.
+3. Check List, Thumbnail and Canvas at narrow and wide dock widths. Use dark/light themes and Windows 100/150/200% scaling. Record live-theme-switch behavior; if icons retain the previous theme, verify the documented panel/document reopen or Rhino restart workaround. Check search, empty results, multiselect, clipboard, row drag, view navigation, Tab/Enter/Space/Escape and arrow keys.
 4. Verify each operation's stated Undo behavior. Folder and metadata edits must round-trip as declared. Native layout operations marked non-undoable must retain clear warnings and usable recovery paths.
 5. Export an ordered mixed-size PDF. Confirm page order, white backgrounds, dimensions, print linework and captions. A failed or cancelled export must preserve an existing destination.
 6. Export/import an `.rlf` package with ordinary page geometry, blocks, layers and appearance overrides. Exercise Merge and Replace, conflict choices, cancellation and recovery. Inspect actual native contents, not just counts.
