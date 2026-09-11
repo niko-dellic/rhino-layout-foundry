@@ -50,7 +50,7 @@ internal sealed partial class LayoutFoundryWorkspace
                     HorizontalContentAlignment = HorizontalAlignment.Stretch,
                     Items =
                     {
-                        CreateHeader(),
+                        CreateHeader(content.GetType().Assembly),
                         new StackLayout
                         {
                             Orientation = Orientation.Horizontal,

@@ -795,7 +795,9 @@ internal sealed partial class LayoutFoundryWorkspace : Panel
         _layoutsColumn.Editable = enabled;
     }
 
-    private Control CreateHeader()
+    private readonly List<WeakReference<Label>> _headerVersionLabels = [];
+
+    private Control CreateHeader(System.Reflection.Assembly? extensionAssembly = null)
     {
         var title = new Label
         {
@@ -804,6 +806,20 @@ internal sealed partial class LayoutFoundryWorkspace : Panel
             TextColor = FoundryTheme.PrimaryText,
             TextAlignment = TextAlignment.Left,
         };
+
+        var layoutAssembly = AppDomain.CurrentDomain.GetAssemblies()
+            .FirstOrDefault(assembly => assembly.GetName().Name == "RhinoLayoutFoundry")
+            ?? typeof(LayoutFoundryWorkspace).Assembly;
+        var versionText = "v" + DisplayVersion(layoutAssembly);
+        if (extensionAssembly?.GetName().Name == "RhinoLayoutFoundry.AI.Rhino")
+            versionText += " · AI v" + DisplayVersion(extensionAssembly);
+        var version = FoundryTheme.MutedLabel(versionText);
+        version.Font = SystemFonts.Default(11);
+        version.TextAlignment = TextAlignment.Left;
+        version.Wrap = WrapMode.Word;
+        version.ToolTip = "Installed versions: Layout Foundry " + versionText;
+        _headerVersionLabels.RemoveAll(reference => !reference.TryGetTarget(out var label) || label.IsDisposed);
+        _headerVersionLabels.Add(new WeakReference<Label>(version));
 
         return new StackLayout
         {
@@ -814,9 +830,20 @@ internal sealed partial class LayoutFoundryWorkspace : Panel
             {
                 _brandIcon,
                 title,
+                version,
                 new StackLayoutItem(null, true),
             },
         };
+    }
+
+    private static string DisplayVersion(System.Reflection.Assembly assembly)
+    {
+        var version = assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+            .OfType<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion;
+        // Keep prerelease labels, while omitting optional build/commit metadata.
+        return string.IsNullOrWhiteSpace(version)
+            ? assembly.GetName().Version?.ToString(3) ?? "unknown"
+            : version.Split('+')[0];
     }
 
     private void OpenProjectInformation()
@@ -2059,6 +2086,8 @@ internal sealed partial class LayoutFoundryWorkspace : Panel
     {
         if (_darkTheme == FoundryTheme.IsDarkMode) return;
         _darkTheme = FoundryTheme.IsDarkMode;
+        foreach (var reference in _headerVersionLabels)
+            if (reference.TryGetTarget(out var label) && !label.IsDisposed) label.TextColor = FoundryTheme.MutedText;
         // Raster icon frames capture their colors at construction. Replace only
         // this panel's owned images; never dispose shared hierarchy image caches.
         ReplaceImage(_clearFilterButton, FoundryViewIcons.Close());
