@@ -191,7 +191,7 @@ internal sealed class RhinoLayoutPackageService : ILayoutPackageService
                     detailsBySource[detail.SourceDetailViewportId] = created.Viewport.Id;
                     if (detail.HasManagedCaption)
                     {
-                        RhinoDetailCaptionService.Mark(created);
+                        RhinoDetailCaptionService.Mark(document, created);
                         created = page.GetDetailViews().Single(d => d.Viewport.Id == detailsBySource[detail.SourceDetailViewportId]);
                     }
                     ApplyLayerOverrides(document, created.Viewport.Id, detail.LayerOverrides, warnings, transaction);

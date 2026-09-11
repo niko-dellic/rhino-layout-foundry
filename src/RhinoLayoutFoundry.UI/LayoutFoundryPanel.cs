@@ -101,7 +101,12 @@ public sealed partial class LayoutFoundryPanel : Panel
     private CancellationTokenSource _thumbnailCancellation = new();
     private FoundryResponsiveLayout _responsiveLayout = FoundryResponsiveLayout.ForWidth(420);
     private uint? _documentSerialNumber;
+    private readonly FoundryColorField _selectionColorField;
+    private Color _selectionColor = LayoutPresentationTheme.SelectionAccent;
     private bool _isLoaded;
+    private bool _darkTheme = FoundryTheme.IsDarkMode;
+    private readonly ImageView _searchIcon = new() { Image = FoundryViewIcons.Search(), Size = new Size(18, 18) };
+    private readonly ImageView _brandIcon = new() { Image = LayoutBrandIcon.BrandMark() };
     private bool _isPopulatingTree;
     private bool _isApplyingResponsiveLayout;
     private bool _thumbnailCaptureInProgress;
@@ -179,11 +184,7 @@ public sealed partial class LayoutFoundryPanel : Panel
             VerticalContentAlignment = VerticalAlignment.Center,
             Items =
             {
-                new ImageView
-                {
-                    Image = FoundryViewIcons.Search(),
-                    Size = new Size(18, 18),
-                },
+                _searchIcon,
                 new StackLayoutItem(_filterTextBox, expand: true),
             },
         };
@@ -257,6 +258,13 @@ public sealed partial class LayoutFoundryPanel : Panel
             FoundryViewIcons.ThumbnailStack(),
             "Thumbnail view (page grid)",
             isToggle: true);
+        _selectionColorField = new FoundryColorField(_selectionColor, width: 124,
+            toolTip: "Selection color for List, Thumbnail and Canvas");
+        _selectionColorField.ValueChanged += (_, _) =>
+        {
+            LayoutSelectionAppearance.Set(_selectionColorField.Value);
+            RefreshSelectionColor();
+        };
         _viewModeButtonGroup = new FoundryToolbarButtonGroup(
             _listViewButton,
             _thumbnailViewButton,
@@ -557,6 +565,7 @@ public sealed partial class LayoutFoundryPanel : Panel
             Sortable = true,
         };
         treeGrid.Columns.Add(statusColumn);
+        FoundryTable.ConfigureSelectionColor(treeGrid, () => LayoutPresentationTheme.SelectionAccent);
 
         return (treeGrid, layoutsColumn, printColumn, templateColumn, paperColumn, detailsColumn,
             displayModeColumn, appearanceStateColumn, notesColumn, createdColumn,
@@ -573,7 +582,8 @@ public sealed partial class LayoutFoundryPanel : Panel
         }
 
         if (FoundryTable.FormatCell(eventArgs, _treeGrid.SelectedItems
-                .OfType<HierarchyTreeItem>().Any(selected => selected.Node.Key == item.Node.Key)))
+                .OfType<HierarchyTreeItem>().Any(selected => selected.Node.Key == item.Node.Key),
+                LayoutPresentationTheme.SelectionAccent))
             return;
 
         if (_treeDrop is { IsValid: true, HighlightFolderId: { } highlight } &&
@@ -814,7 +824,7 @@ public sealed partial class LayoutFoundryPanel : Panel
             VerticalContentAlignment = VerticalAlignment.Center,
             Items =
             {
-                new ImageView { Image = LayoutBrandIcon.BrandMark() },
+                _brandIcon,
                 title,
                 new StackLayoutItem(null, true),
             },
@@ -1282,6 +1292,7 @@ public sealed partial class LayoutFoundryPanel : Panel
             _fullscreenButton,
             _viewModeSeparator,
             _viewModeButtonGroup,
+            _selectionColorField,
             _canvasAppearanceControl,
             _thumbnailDensityControl,
             new StackLayoutItem(_statusLabel, expand: true),
@@ -2002,6 +2013,8 @@ public sealed partial class LayoutFoundryPanel : Panel
         }
 
         _isLoaded = true;
+        RefreshSelectionColor();
+        RefreshThemeImages();
         AttachNativeClipboardShortcuts();
         ApplyResponsiveLayout();
         LayoutFoundryUiHost.OverviewChanged += OnOverviewChanged;
@@ -2023,6 +2036,7 @@ public sealed partial class LayoutFoundryPanel : Panel
         }
 
         _isLoaded = false;
+        LayoutSelectionAppearance.Save();
         DetachNativeClipboardShortcuts();
         _layoutPollTimer.Stop();
         _invalidationTimer.Stop();
@@ -2036,8 +2050,73 @@ public sealed partial class LayoutFoundryPanel : Panel
 
     partial void DetachNativeClipboardShortcuts();
 
+    private void RefreshSelectionColor()
+    {
+        var color = LayoutPresentationTheme.SelectionAccent;
+        if (_selectionColor == color) return;
+        _selectionColor = color;
+        _selectionColorField.Value = color;
+        RefreshHierarchyColors();
+        _thumbnailView.Invalidate(true);
+        _observerView.Invalidate(true);
+    }
+
+    private void RefreshThemeImages()
+    {
+        if (_darkTheme == FoundryTheme.IsDarkMode) return;
+        _darkTheme = FoundryTheme.IsDarkMode;
+        // Raster icon frames capture their colors at construction. Replace only
+        // this panel's owned images; never dispose shared hierarchy image caches.
+        ReplaceImage(_clearFilterButton, FoundryViewIcons.Close());
+        ReplaceImage(_createButton, FoundryViewIcons.Add());
+        ReplaceImage(_manageButton, FoundryViewIcons.Properties());
+        ReplaceImage(_deleteButton, FoundryViewIcons.Delete());
+        ReplaceImage(_projectInfoButton, FoundryViewIcons.ProjectInformation());
+        ReplaceImage(_printButton, FoundryViewIcons.Print());
+        ReplaceImage(_importButton, FoundryViewIcons.ImportPackage());
+        ReplaceImage(_exportButton, FoundryViewIcons.ExportPackage());
+        ReplaceImage(_listViewButton, FoundryViewIcons.ListView());
+        ReplaceImage(_canvasViewButton, FoundryViewIcons.CartesianPlane());
+        ReplaceImage(_thumbnailViewButton, FoundryViewIcons.ThumbnailStack());
+        ReplaceImage(_fullscreenButton, _fullscreenWindow is null
+            ? FoundryViewIcons.Fullscreen() : FoundryViewIcons.ExitFullscreen());
+        var search = _searchIcon.Image;
+        _searchIcon.Image = FoundryViewIcons.Search();
+        search?.Dispose();
+        var brand = _brandIcon.Image;
+        _brandIcon.Image = LayoutBrandIcon.BrandMark();
+        brand?.Dispose();
+        _observerView.RefreshThemeImages();
+        RefreshHierarchyColors();
+        Invalidate(true);
+    }
+
+    private void RefreshHierarchyColors()
+    {
+        var rows = _treeGrid.SelectedRows.ToArray();
+        var populating = _isPopulatingTree;
+        _isPopulatingTree = true;
+        try
+        {
+            _treeGrid.ReloadData();
+            _treeGrid.SelectedRows = rows;
+            if (OperatingSystem.IsMacOS()) FoundryNative.Services?.SelectRows(_treeGrid, rows);
+        }
+        finally { _isPopulatingTree = populating; }
+    }
+
+    private static void ReplaceImage(FoundryToolbarIconButton button, Image image)
+    {
+        var previous = button.Image;
+        button.Image = image;
+        previous.Dispose();
+    }
+
     private void OnLayoutPoll(object? sender, EventArgs eventArgs)
     {
+        RefreshThemeImages();
+        RefreshSelectionColor();
+        LayoutSelectionAppearance.Save();
         var identity = LayoutFoundryUiHost.CaptureOverviewIdentity();
         if (!identity.Matches(_overview))
         {
@@ -2217,10 +2296,11 @@ public sealed partial class LayoutFoundryPanel : Panel
         var oldChildren = item.Children.OfType<HierarchyTreeItem>().ToArray();
         var childrenChanged = !oldChildren.Select(child => child.Node.Key)
             .SequenceEqual(node.Children.Select(child => child.Key));
-        var changed = item.Node.Label != node.Label || item.Node.SecondaryText != node.SecondaryText ||
-            item.Node.StatusText != node.StatusText || item.Node.Sheet != node.Sheet ||
-            item.Node.Detail != node.Detail || item.Node.AppearanceState != node.AppearanceState ||
-            item.Node.Folder != node.Folder || item.IsInlineDraft != (_inlineDraft?.Id == node.Key.Id);
+        // Overview records contain freshly allocated collections. Comparing record
+        // identity reloads every native row even when no displayed value changed.
+        var beforeCells = item.CaptureCellText();
+        var beforeTone = item.StatusTone;
+        var beforeDraft = item.IsInlineDraft;
         var childrenByKey = oldChildren.ToDictionary(child => child.Node.Key);
         var children = node.Children.Select(child => childrenByKey.TryGetValue(child.Key, out var existing)
             ? existing
@@ -2228,6 +2308,8 @@ public sealed partial class LayoutFoundryPanel : Panel
                 _usesMacSafeHierarchy, _inlineDraft?.Id, _hierarchyExpansion, overview.FileDates)).ToArray();
         item.UpdateNode(node, overview.FileDates);
         item.SetInlineDraft(_inlineDraft?.Id == node.Key.Id);
+        var changed = !beforeCells.SequenceEqual(item.CaptureCellText()) ||
+            beforeTone != item.StatusTone || beforeDraft != item.IsInlineDraft;
         if (childrenChanged)
         {
             item.Children.Clear();
@@ -4212,17 +4294,6 @@ public sealed partial class LayoutFoundryPanel : Panel
             _fileDates = fileDates;
             Presentation = OverviewRowPresentation.Create(node, useMacSafeSingleColumn: false);
             IsInlineDraft = inlineDraftId == node.Key.Id;
-            RowIcon = node.IsDocumentRoot
-                ? FoundryHierarchyIcons.Rhino
-                : node.Key.Kind switch
-                {
-                    OverviewNodeKind.Folder => FoundryHierarchyIcons.Folder,
-                    OverviewNodeKind.Sheet => FoundryHierarchyIcons.Layout,
-                    OverviewNodeKind.Detail => FoundryHierarchyIcons.Detail,
-                    OverviewNodeKind.AppearanceState => FoundryHierarchyIcons.AppearanceState,
-                    OverviewNodeKind.Conversation => FoundryHierarchyIcons.Conversation,
-                    _ => null,
-                };
             _displayText = IsInlineDraft
                 ? node.Label
                 : RowIcon is not null
@@ -4255,7 +4326,17 @@ public sealed partial class LayoutFoundryPanel : Panel
 
         public bool IsInlineDraft { get; private set; }
 
-        public Image? RowIcon { get; }
+        public Image? RowIcon => Node.IsDocumentRoot
+                ? FoundryHierarchyIcons.Rhino
+                : Node.Key.Kind switch
+                {
+                    OverviewNodeKind.Folder => FoundryHierarchyIcons.Folder,
+                    OverviewNodeKind.Sheet => FoundryHierarchyIcons.Layout,
+                    OverviewNodeKind.Detail => FoundryHierarchyIcons.Detail,
+                    OverviewNodeKind.AppearanceState => FoundryHierarchyIcons.AppearanceState,
+                    OverviewNodeKind.Conversation => FoundryHierarchyIcons.Conversation,
+                    _ => null,
+                };
 
         private string _displayText;
 
@@ -4275,9 +4356,18 @@ public sealed partial class LayoutFoundryPanel : Panel
         {
             _fileDates = fileDates;
             Node = node;
+            _paperText = null;
+            _displayModeText = null;
             Presentation = OverviewRowPresentation.Create(node, useMacSafeSingleColumn: false);
             _displayText = RowIcon is not null ? node.Label : Presentation.PrimaryText;
         }
+
+        public string[] CaptureCellText() =>
+        [
+            DisplayText, PrimaryText, SecondaryText, StatusText, PrintText,
+            PaperCellText, DetailsText, DisplayModeCellText, AppearanceStateText,
+            TemplateText, NotesText, CreatedText, LastModifiedText,
+        ];
 
         public void SetInlineDraft(bool isDraft)
         {

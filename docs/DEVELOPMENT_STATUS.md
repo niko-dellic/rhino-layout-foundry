@@ -1,6 +1,6 @@
 # Development status
 
-Foundry is preparing for public v1 on Windows and macOS. Package version remains defined in Version.props; no public release is implied by a development installation.
+Foundry is qualifying an unpublished 0.1.0-beta.1 candidate for Windows and macOS. See [Beta qualification](BETA_QUALIFICATION.md) for current evidence and remaining gates. Package version remains defined in Version.props; no public release is implied by a development installation.
 
 ## Implemented hardening
 

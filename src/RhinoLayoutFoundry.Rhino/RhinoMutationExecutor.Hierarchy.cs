@@ -795,7 +795,7 @@ internal sealed partial class RhinoMutationExecutor
                 {
                     captionMetadata = DetailCaptions.CopyScopes(captionMetadata, beforeState.Metadata, HierarchyScopeKind.Detail,
                         new Dictionary<Guid, Guid> { [sourceViewport] = detail.Viewport.Id });
-                    RhinoDetailCaptionService.Mark(detail);
+                    RhinoDetailCaptionService.Mark(document, detail);
                 }
             afterState = afterState with { Metadata = captionMetadata };
             if (placement is not null)

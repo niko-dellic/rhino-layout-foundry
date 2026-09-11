@@ -131,7 +131,7 @@ def protected_archive():
             os.remove(path)
 
 
-def import_rollback(stage, mode_name="Merge"):
+def import_rollback(stage, mode_name="Merge", source_package=None):
     doc = Rhino.RhinoDoc.ActiveDoc
     if doc is None or os.path.basename(doc.Path or "").lower() != "foundry-boundary-fixture.3dm":
         raise Exception("Import checks require the disposable foundry-boundary-fixture.3dm.")
@@ -153,6 +153,8 @@ def import_rollback(stage, mode_name="Merge"):
     def inventory():
         return {
             "pages": sorted(page.PageName for page in doc.Views.GetPageViews()),
+            "dependencyContent": {name: sorted(item.ToJSON(Rhino.FileIO.SerializationOptions()) for item in table if not item.IsDeleted) for name, table in [("layers", doc.Layers), ("materials", doc.Materials), ("linetypes", doc.Linetypes), ("dimStyles", doc.DimStyles), ("hatches", doc.HatchPatterns)]},
+            "namedViewContent": sorted((view.Name, str(view.Viewport.CameraLocation), str(view.Viewport.CameraDirection), str(view.Viewport.CameraUp), view.Viewport.IsPerspectiveProjection, str(view.Viewport.GetFrustum()), str(view.Viewport.ScreenPort), view.Viewport.Camera35mmLensLength) for view in doc.NamedViews),
             "views": sorted(view.Name for view in doc.NamedViews),
             "layerStates": sorted(doc.NamedLayerStates.Names),
             "definitions": sorted(str(item.Id) for item in doc.InstanceDefinitions if not item.IsDeleted),
@@ -168,7 +170,7 @@ def import_rollback(stage, mode_name="Merge"):
         exported = call(service, "ExportOnUiThread", export, token)
         assert exported.Succeeded, str(exported.ErrorMessage)
         mode = System.Enum.Parse(core.GetType("RhinoLayoutFoundry.Core.Persistence.LayoutPackageImportMode"), mode_name)
-        request = record("LayoutPackageImportRequest", doc.RuntimeSerialNumber, call(tracker, "Current", doc), path, mode, None, False)
+        request = record("LayoutPackageImportRequest", doc.RuntimeSerialNumber, call(tracker, "Current", doc), source_package or path, mode, None, False)
         result = call(service, "ImportOnUiThread", request, token, True)
         assert reached, "Import did not reach checkpoint: " + str(result.ErrorMessage)
         assert not result.Succeeded, "Injected failure was ignored"
@@ -176,8 +178,12 @@ def import_rollback(stage, mode_name="Merge"):
             assert "cancelled" in result.ErrorMessage, str(result.ErrorMessage)
         assert result.RecoveryPackagePath and os.path.exists(result.RecoveryPackagePath), "Recovery package missing"
         assert len(list(result.Warnings)) == 0, str(result.ErrorMessage)
-        assert inventory() == before, "Resource inventory differs after rollback: " + str(result.ErrorMessage)
-        if mode_name == "Replace":
+        after = inventory()
+        if after != before:
+            with open(os.path.join(tempfile.gettempdir(), "foundry-import-content-" + stage.replace(":", "-") + ".json"), "w") as evidence:
+                json.dump({"before": before, "after": after}, evidence, indent=2)
+        assert after == before, "Resource inventory differs after rollback: " + str(result.ErrorMessage)
+        if mode_name == "Replace" and stage in ("replace-cutover", "metadata"):
             assert "Original layouts were restored" in result.ErrorMessage, str(result.ErrorMessage)
     finally:
         if os.path.exists(path):

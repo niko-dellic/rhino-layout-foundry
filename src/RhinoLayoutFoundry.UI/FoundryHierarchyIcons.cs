@@ -6,28 +6,26 @@ internal static class FoundryHierarchyIcons
 {
     private const int IconSize = 16;
     private static readonly float[] IconScales = [1f, 2f, 3f];
-    private static readonly Icon RhinoIcon = NewIcon(DrawRhino);
-    private static readonly Icon FolderIcon = NewIcon(DrawFolder);
-    private static readonly Icon LayerIcon = NewIcon(DrawLayer);
-    private static readonly Icon LayoutIcon = NewIcon(DrawLayout);
-    private static readonly Icon DetailIcon = NewIcon(DrawDetail);
-    private static readonly Icon ObjectIcon = NewIcon(DrawObject);
-    private static readonly Icon AppearanceStateIcon = NewIcon(DrawAppearanceState);
-    internal static Image Conversation { get; } = DrawingSetIcon.Create();
+    // Keep at most one icon set per appearance. Native cells may still hold
+    // the previous set while another panel reloads, so those images stay valid.
+    private static readonly Dictionary<(bool Dark, string Kind), Image> ThemeIcons = [];
 
-    internal static Image Rhino => RhinoIcon;
+    private static Image ForTheme(string kind, Func<Image> create)
+    {
+        var key = (FoundryTheme.IsDarkMode, kind);
+        if (!ThemeIcons.TryGetValue(key, out var image))
+            ThemeIcons[key] = image = create();
+        return image;
+    }
 
-    internal static Image Folder => FolderIcon;
-
-    internal static Image Layer => LayerIcon;
-
-    internal static Image Layout => LayoutIcon;
-
-    internal static Image Detail => DetailIcon;
-
-    internal static Image Object => ObjectIcon;
-
-    internal static Image AppearanceState => AppearanceStateIcon;
+    internal static Image Rhino => ForTheme(nameof(Rhino), () => NewIcon(DrawRhino));
+    internal static Image Folder => ForTheme(nameof(Folder), () => NewIcon(DrawFolder));
+    internal static Image Layer => ForTheme(nameof(Layer), () => NewIcon(DrawLayer));
+    internal static Image Layout => ForTheme(nameof(Layout), () => NewIcon(DrawLayout));
+    internal static Image Detail => ForTheme(nameof(Detail), () => NewIcon(DrawDetail));
+    internal static Image Object => ForTheme(nameof(Object), () => NewIcon(DrawObject));
+    internal static Image AppearanceState => ForTheme(nameof(AppearanceState), () => NewIcon(DrawAppearanceState));
+    internal static Image Conversation => ForTheme(nameof(Conversation), DrawingSetIcon.Create);
 
     internal static void DrawRhino(Graphics graphics, Color color, RectangleF bounds)
     {

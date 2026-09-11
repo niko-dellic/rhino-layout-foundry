@@ -46,11 +46,18 @@ internal sealed class RhinoDocumentOverviewProvider : IDocumentOverviewProvider
             .Where(group => group.Count() > 1)
             .Select(group => group.Key)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        // Enumerate the native tables once per snapshot. Repeating this for each
+        // detail makes a 1,000-detail drawing set scan its own details a million times.
+        var appearanceLayers = document.Layers
+            .Where(layer => !layer.IsDeleted && !layer.IsReference).ToArray();
+        var modelAttributes = document.Objects
+            .Where(item => item is not DetailViewObject && item.Attributes.Space == ActiveSpace.ModelSpace)
+            .Select(item => item.Attributes).ToArray();
         var detailAppearances = pageViews
             .SelectMany(page => page.GetDetailViews())
             .ToDictionary(
                 detail => detail.Viewport.Id,
-                detail => CaptureAppearance(document, detail.Viewport.Id));
+                detail => CaptureAppearance(appearanceLayers, modelAttributes, detail.Viewport.Id));
         var sheets = pageViews
             .Select(page =>
             {
@@ -254,17 +261,14 @@ internal sealed class RhinoDocumentOverviewProvider : IDocumentOverviewProvider
             ? "Untitled Rhino document"
             : Path.GetFileNameWithoutExtension(document.Name);
 
-    private static ViewportAppearanceSummary CaptureAppearance(RhinoDoc document, Guid detailViewportId)
+    private static ViewportAppearanceSummary CaptureAppearance(
+        IReadOnlyList<Layer> layers, IReadOnlyList<ObjectAttributes> modelAttributes, Guid detailViewportId)
     {
-        var visibility = document.Layers
-            .Where(layer => !layer.IsDeleted && !layer.IsReference &&
-                            layer.HasPerViewportSettings(detailViewportId))
+        var visibility = layers
+            .Where(layer => layer.HasPerViewportSettings(detailViewportId))
             .Select(layer => layer.PerViewportIsVisible(detailViewportId))
             .ToArray();
-        var objectCount = document.Objects.Count(item =>
-            item is not DetailViewObject &&
-            item.Attributes.Space == ActiveSpace.ModelSpace &&
-            item.Attributes.HasDisplayModeOverride(detailViewportId));
+        var objectCount = modelAttributes.Count(attributes => attributes.HasDisplayModeOverride(detailViewportId));
         return new ViewportAppearanceSummary(
             visibility.Count(value => value),
             visibility.Count(value => !value),

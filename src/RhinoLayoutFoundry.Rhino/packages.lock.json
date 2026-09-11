@@ -11,6 +11,11 @@
           "System.Drawing.Common": "7.0.0"
         }
       },
+      "Markdig": {
+        "type": "Transitive",
+        "resolved": "0.37.0",
+        "contentHash": "biiu4MTPFjW55qw6v5Aphtj0MjDLJ14x8ndZwkJUHIeqvaSGKeqhLY7S7Vu/S3k7/c9KwhhnaCDP9hdFNUhcNA=="
+      },
       "Microsoft.Win32.SystemEvents": {
         "type": "Transitive",
         "resolved": "7.0.0",
@@ -27,39 +32,40 @@
       "rhinolayoutfoundry.core": {
         "type": "Project",
         "dependencies": {
-          "RhinoFoundry.UI.Primitives": "[0.3.0-preview.7, )"
+          "RhinoFoundry.UI.Primitives": "[0.3.0-preview.40, )"
         }
       },
       "rhinolayoutfoundry.extensibility": {
         "type": "Project",
         "dependencies": {
-          "RhinoLayoutFoundry.Core": "[0.1.0, )"
+          "RhinoLayoutFoundry.Core": "[0.1.0-beta.1, )"
         }
       },
       "rhinolayoutfoundry.ui": {
         "type": "Project",
         "dependencies": {
           "RhinoCommon": "[8.34.26223.11001, )",
-          "RhinoFoundry.UI": "[0.3.0-preview.7, )",
-          "RhinoLayoutFoundry.Core": "[0.1.0, )",
-          "RhinoLayoutFoundry.Extensibility": "[0.1.0, )"
+          "RhinoFoundry.UI": "[0.3.0-preview.40, )",
+          "RhinoLayoutFoundry.Core": "[0.1.0-beta.1, )",
+          "RhinoLayoutFoundry.Extensibility": "[0.1.0-beta.1, )"
         }
       },
       "RhinoFoundry.UI": {
         "type": "CentralTransitive",
-        "requested": "[0.3.0-preview.7, )",
-        "resolved": "0.3.0-preview.7",
-        "contentHash": "jUnNLLbZ7ZbxZK5tJe7bif9S1R1+WvEeefK4+IdZBUPvuJqpyARNQLIvl4lx16MLealn8GQZaaAHNMRF3bxSpg==",
+        "requested": "[0.3.0-preview.40, )",
+        "resolved": "0.3.0-preview.40",
+        "contentHash": "XANM86tjAOFGWlwUeD6wHf8y1rbBU9NJrM7UaeyZ7iug+sm7ebRhUMOjvmbpFFHL1WwgV0op8gSGvRq64FJJdw==",
         "dependencies": {
+          "Markdig": "0.37.0",
           "RhinoCommon": "8.34.26223.11001",
-          "RhinoFoundry.UI.Primitives": "0.3.0-preview.7"
+          "RhinoFoundry.UI.Primitives": "0.3.0-preview.40"
         }
       },
       "RhinoFoundry.UI.Primitives": {
         "type": "CentralTransitive",
-        "requested": "[0.3.0-preview.7, )",
-        "resolved": "0.3.0-preview.7",
-        "contentHash": "mnEjl1YCMndsWWHBkzOaqHRfz1Prbn5M4th6K3QEIFyH6otJk4OCZg1mpzBcGk88YKjqCyu/UpHpg784xPRrZg=="
+        "requested": "[0.3.0-preview.40, )",
+        "resolved": "0.3.0-preview.40",
+        "contentHash": "7ISWrU/x5bbVDOyK3ndsHGYpSQNPilzvRxiVXzNzASNeSRfuu4o7hlR1GHHg3HXSAnZiisPjTFXZm25FUfM12A=="
       }
     }
   }

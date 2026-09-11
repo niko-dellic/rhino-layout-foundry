@@ -33,11 +33,17 @@ internal sealed class RhinoDetailCaptionService(DocumentStateStore store) : IDis
         finally { _updating = false; }
     }
 
-    internal static void Mark(DetailViewObject detail)
+    internal static void Mark(RhinoDoc document, DetailViewObject detail)
     {
-        detail.Attributes.SetUserString(DetailCaptions.ManagedKey, "1");
-        detail.Attributes.SetUserString(DetailCaptions.SourceViewportKey, detail.Viewport.Id.ToString("D"));
-        if (!detail.CommitChanges()) throw new InvalidOperationException("Could not register the detail caption.");
+        // Viewport commits can invalidate the original detail wrapper. Register
+        // attributes on the current native object, without another geometry commit.
+        var current = document.Objects.FindId(detail.Id) as DetailViewObject
+            ?? throw new InvalidOperationException("The detail no longer exists.");
+        using var attributes = current.Attributes.Duplicate();
+        attributes.SetUserString(DetailCaptions.ManagedKey, "1");
+        attributes.SetUserString(DetailCaptions.SourceViewportKey, current.Viewport.Id.ToString("D"));
+        if (!document.Objects.ModifyAttributes(current.Id, attributes, true))
+            throw new InvalidOperationException("Could not register the detail caption.");
     }
 
     internal static void Synchronize(RhinoDoc doc, DocumentState state)

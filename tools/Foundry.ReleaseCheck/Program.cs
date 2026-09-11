@@ -61,7 +61,7 @@ try
     if (platform == "Windows" && File.Exists(Path.Combine(source, "RhinoFoundry.UI.MacOS.dll")))
         throw new InvalidDataException("Windows output contains the Mac adapter; use an isolated platform output.");
     Directory.CreateDirectory(destination);
-    foreach (var file in binaries.Concat(shared).Concat(new[] { "RhinoLayoutFoundry.deps.json", "RhinoLayoutFoundry.runtimeconfig.json" }))
+    foreach (var file in binaries.Concat(shared).Concat(new[] { "Markdig.dll", "RhinoLayoutFoundry.deps.json", "RhinoLayoutFoundry.runtimeconfig.json" }))
         File.Copy(Path.Combine(source, file), Path.Combine(destination, file));
     foreach (var file in new[] { "LICENSE", "CHANGELOG.md", "THIRD_PARTY_NOTICES.md" })
         File.Copy(Path.Combine(repository, file), Path.Combine(destination, file));
@@ -124,7 +124,7 @@ static void VerifyPackage(string repository, string path, string platform)
     {
         "RhinoLayoutFoundry.rhp", "RhinoLayoutFoundry.Core.dll", "RhinoLayoutFoundry.UI.dll",
         "RhinoLayoutFoundry.Extensibility.dll", "RhinoLayoutFoundry.deps.json", "RhinoLayoutFoundry.runtimeconfig.json",
-        "README.md", "LICENSE", "CHANGELOG.md", "THIRD_PARTY_NOTICES.md", "RECOVERY.md", "manifest.yml", "SHA256SUMS",
+        "Markdig.dll", "README.md", "LICENSE", "CHANGELOG.md", "THIRD_PARTY_NOTICES.md", "RECOVERY.md", "manifest.yml", "SHA256SUMS",
     };
     expected.UnionWith(SharedBinaries(platform));
     using var zip = ZipFile.OpenRead(path);

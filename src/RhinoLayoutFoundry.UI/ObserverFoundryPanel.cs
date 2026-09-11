@@ -11,6 +11,7 @@ namespace RhinoLayoutFoundry.UI;
 [Guid("b9bbcc68-9598-4899-96b8-7a79211693b5")]
 public sealed class ObserverFoundryPanel : Panel
 {
+    private readonly List<(FoundryToolbarIconButton Button, Func<Icon> Create)> _themeIcons = [];
     private readonly ObserverCanvasDrawable _canvas;
     private readonly GridView _navigator;
     private readonly Label _status;
@@ -73,39 +74,39 @@ public sealed class ObserverFoundryPanel : Panel
         _status.TextChanged += (_, _) =>
             _status.Visible = !string.IsNullOrWhiteSpace(_status.Text);
 
-        var fitButton = ToolbarButton(FoundryViewIcons.FitAll(), "Fit all layouts in the canvas");
-        var focusButton = ToolbarButton(FoundryViewIcons.FocusSelection(), "Focus the current selection");
-        var tidyButton = ToolbarButton(FoundryViewIcons.Tidy(), "Tidy the selected layouts or folders, or the whole board");
+        var fitButton = ToolbarButton(FoundryViewIcons.FitAll, "Fit all layouts in the canvas");
+        var focusButton = ToolbarButton(FoundryViewIcons.FocusSelection, "Focus the current selection");
+        var tidyButton = ToolbarButton(FoundryViewIcons.Tidy, "Tidy the selected layouts or folders, or the whole board");
         _gridAppearanceButton = ToolbarToggleButton(
-            FoundryViewIcons.GridAppearance(),
+            FoundryViewIcons.GridAppearance,
             "Adjust the canvas grid color and opacity");
-        var zoomOutButton = ToolbarButton(FoundryViewIcons.ZoomOut(), "Zoom out");
-        var zoomInButton = ToolbarButton(FoundryViewIcons.ZoomIn(), "Zoom in");
-        _navigatorButton = ToolbarToggleButton(FoundryViewIcons.Navigator(), "Show or hide the Navigator");
+        var zoomOutButton = ToolbarButton(FoundryViewIcons.ZoomOut, "Zoom out");
+        var zoomInButton = ToolbarButton(FoundryViewIcons.ZoomIn, "Zoom in");
+        _navigatorButton = ToolbarToggleButton(FoundryViewIcons.Navigator, "Show or hide the Navigator");
         _navigatorButton.Checked = true;
-        _namedViewsButton = ToolbarToggleButton(FoundryViewIcons.Properties(), "Show or hide the selection Inspector");
+        _namedViewsButton = ToolbarToggleButton(FoundryViewIcons.Properties, "Show or hide the selection Inspector");
         _nestedPackingButton = ToolbarToggleButton(
-            FoundryViewIcons.NestedPacking(),
+            FoundryViewIcons.NestedPacking,
             "Nest child folder containers inside their parent folders");
         _nestedPackingButton.Checked = true;
         _compactPackingButton = ToolbarToggleButton(
-            FoundryViewIcons.CompactPacking(),
+            FoundryViewIcons.CompactPacking,
             "Hide folder containers and tightly pack every layout");
         _appearanceCardsButton = ToolbarToggleButton(
-            FoundryViewIcons.AppearanceCards(),
+            FoundryViewIcons.AppearanceCards,
             "Show appearance states as standalone cards");
         _appearanceCardsButton.Checked = true;
         _appearanceConnectionsButton = ToolbarToggleButton(
-            FoundryViewIcons.AppearanceConnections(),
+            FoundryViewIcons.AppearanceConnections,
             "Show appearance-state cards with assignment connections");
         _appearanceBadgesButton = ToolbarToggleButton(
-            FoundryViewIcons.AppearanceBadges(),
+            FoundryViewIcons.AppearanceBadges,
             "Show direct appearance-state assignments as target badges");
         _appearancePresentationGroup = new FoundryToolbarButtonGroup(
             _appearanceCardsButton,
             _appearanceConnectionsButton,
             _appearanceBadgesButton);
-        var openButton = ToolbarButton(FoundryViewIcons.OpenSelection(), "Open the selected layout or detail in Rhino");
+        var openButton = ToolbarButton(FoundryViewIcons.OpenSelection, "Open the selected layout or detail in Rhino");
         fitButton.Click += (_, _) => _canvas.FitAll();
         focusButton.Click += (_, _) => _canvas.FocusSelection();
         tidyButton.Click += async (_, _) => await TidyAsync();
@@ -454,11 +455,30 @@ public sealed class ObserverFoundryPanel : Panel
         _overlayLayoutTimer.Start();
     }
 
-    private static FoundryToolbarIconButton ToolbarButton(Image image, string toolTip) =>
-        new(image, toolTip);
+    private FoundryToolbarIconButton ToolbarButton(Func<Icon> create, string toolTip) =>
+        CreateToolbarButton(create, toolTip, false);
 
-    private static FoundryToolbarIconButton ToolbarToggleButton(Image image, string toolTip) =>
-        new(image, toolTip, isToggle: true);
+    private FoundryToolbarIconButton ToolbarToggleButton(Func<Icon> create, string toolTip) =>
+        CreateToolbarButton(create, toolTip, true);
+
+    private FoundryToolbarIconButton CreateToolbarButton(Func<Icon> create, string toolTip, bool toggle)
+    {
+        var button = new FoundryToolbarIconButton(create(), toolTip, toggle);
+        _themeIcons.Add((button, create));
+        return button;
+    }
+
+    internal void RefreshThemeImages()
+    {
+        foreach (var (button, create) in _themeIcons)
+        {
+            var previous = button.Image;
+            button.Image = create();
+            previous.Dispose();
+        }
+        _canvas.Invalidate();
+        Invalidate(true);
+    }
 
     private static Control ToolbarSeparator() => new Panel
     {

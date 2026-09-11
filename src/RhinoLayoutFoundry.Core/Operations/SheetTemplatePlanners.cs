@@ -383,6 +383,33 @@ public sealed class BatchCreateSheetsPlanner : IOperationPlanner<BatchCreateShee
             }
         }
 
+        if (spec.TemplateId is null && details.Length > 0)
+        {
+            // Linked captions extend below each generated frame. Honor larger
+            // requested gaps, but reserve a physical minimum when a frame would
+            // otherwise meet the paper edge, another frame, or the title block.
+            var captionSpace = 6 * AdaptiveTitleBlockLayoutSolver.UnitsPerMillimeter(spec.Paper.UnitSystem);
+            var original = details;
+            details = details.Select(slot =>
+            {
+                var floor = 0.0;
+                if (adaptiveTitleBlock is { } layout && layout.Block.Top <= slot.Bottom + 1e-8
+                    && layout.Block.Left < slot.Right && layout.Block.Right > slot.Left)
+                    floor = layout.Block.Top;
+                foreach (var other in original)
+                    if (other.Id != slot.Id && other.Top <= slot.Bottom + 1e-8
+                        && other.Left < slot.Right && other.Right > slot.Left)
+                        floor = Math.Max(floor, other.Top);
+                return slot with { Bottom = Math.Max(slot.Bottom, floor + captionSpace) };
+            }).ToArray();
+            if (details.Any(slot => slot.Bottom >= slot.Top))
+            {
+                diagnostics.Add(SheetPlanValidation.Error("batch.caption_no_room",
+                    "The paper and spacing leave no room for detail captions. Choose larger paper or fewer details."));
+                return null;
+            }
+        }
+
         var template = source with
         {
             Id = Guid.NewGuid(),

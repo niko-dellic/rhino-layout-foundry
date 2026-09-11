@@ -107,14 +107,15 @@ public sealed class LayoutSpacingTests
     }
 
     [Fact]
-    public void ZeroSpacingAllowsTouchingDetailsAndPaperEdges()
+    public void ZeroSpacingPreservesHorizontalBleedButReservesCaptionSpace()
     {
         var template = Create(new(1, Paper, BuiltInLayoutKind.FourDetailsGrid,
             Spacing: LayoutSpacing.Uniform(0, "Millimeters")));
         Assert.Equal(0, template.DetailSlots[0].Left);
         Assert.Equal(Paper.Height, template.DetailSlots[0].Top);
         Assert.Equal(template.DetailSlots[0].Right, template.DetailSlots[1].Left);
-        Assert.Equal(template.DetailSlots[0].Bottom, template.DetailSlots[2].Top);
+        Assert.Equal(6, template.DetailSlots[0].Bottom - template.DetailSlots[2].Top, 8);
+        Assert.Equal(6, template.DetailSlots.Min(d => d.Bottom), 8);
     }
 
     [Fact]
@@ -216,7 +217,7 @@ public sealed class LayoutSpacingTests
         if (kind == BuiltInTitleBlockKind.RightSidebar)
             Assert.Equal(block.Block.Left, template.DetailSlots.Max(d => d.Right));
         else
-            Assert.Equal(block.Block.Top, template.DetailSlots.Min(d => d.Bottom));
+            Assert.Equal(6, template.DetailSlots.Min(d => d.Bottom) - block.Block.Top, 8);
     }
 
     [Theory]

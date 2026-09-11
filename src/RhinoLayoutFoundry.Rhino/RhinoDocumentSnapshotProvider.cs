@@ -35,6 +35,7 @@ internal sealed class RhinoDocumentSnapshotProvider : IDocumentSnapshotProvider
         }
 
         var pageViews = document.Views.GetPageViews();
+        var detailsByPage = pageViews.ToDictionary(page => page.MainViewport.Id, page => page.GetDetailViews());
         var captionWarnings = document.Objects.GetObjectList(ObjectType.Annotation)
             .Where(o => o.Attributes.GetUserString(DetailCaptions.OwnerKey) is not null)
             .GroupBy(o => o.Attributes.GetUserString(DetailCaptions.OwnerKey)!)
@@ -47,10 +48,10 @@ internal sealed class RhinoDocumentSnapshotProvider : IDocumentSnapshotProvider
                 var folderId = record is not null && folders.ContainsKey(record.FolderId)
                     ? record.FolderId
                     : state.RootFolderId;
-                var detailIds = page.GetDetailViews()
+                var detailIds = detailsByPage[pageId]
                     .Select(detail => detail.Viewport.Id)
                     .ToArray();
-                var detailSettings = page.GetDetailViews()
+                var detailSettings = detailsByPage[pageId]
                     .Select(detail => new DetailSnapshot(
                         detail.Viewport.Id,
                         string.IsNullOrWhiteSpace(detail.DescriptiveTitle)
@@ -175,11 +176,16 @@ internal sealed class RhinoDocumentSnapshotProvider : IDocumentSnapshotProvider
             .ToArray();
         var detailLayerVisibilities = new List<DetailLayerVisibilitySnapshot>();
         var objectOverrides = new List<DetailObjectDisplayOverrideSnapshot>();
-        foreach (var detail in pageViews.SelectMany(page => page.GetDetailViews()))
+        // Capture native wrappers once per snapshot, rather than enumerating the
+        // document and allocating object attributes again for every detail.
+        var overrideLayers = document.Layers.Where(layer => !layer.IsDeleted && !layer.IsReference).ToArray();
+        var modelAttributes = document.Objects.Where(item => item is not DetailViewObject)
+            .Select(item => (item.Id, Attributes: item.Attributes))
+            .Where(item => item.Attributes.Space == ActiveSpace.ModelSpace).ToArray();
+        foreach (var detail in detailsByPage.Values.SelectMany(details => details))
         {
             var detailId = detail.Viewport.Id;
-            foreach (var layer in document.Layers.Where(layer =>
-                         !layer.IsDeleted && !layer.IsReference && layer.HasPerViewportSettings(detailId)))
+            foreach (var layer in overrideLayers.Where(layer => layer.HasPerViewportSettings(detailId)))
             {
                 detailLayerVisibilities.Add(new DetailLayerVisibilitySnapshot(
                     detailId,
@@ -187,10 +193,7 @@ internal sealed class RhinoDocumentSnapshotProvider : IDocumentSnapshotProvider
                     layer.PerViewportIsVisible(detailId),
                     HasExplicitOverride: true));
             }
-            foreach (var item in document.Objects.Where(item =>
-                         item is not DetailViewObject &&
-                         item.Attributes.Space == ActiveSpace.ModelSpace &&
-                         item.Attributes.HasDisplayModeOverride(detailId)))
+            foreach (var item in modelAttributes.Where(item => item.Attributes.HasDisplayModeOverride(detailId)))
             {
                 var modeId = item.Attributes.GetDisplayModeOverride(detailId);
                 objectOverrides.Add(new DetailObjectDisplayOverrideSnapshot(

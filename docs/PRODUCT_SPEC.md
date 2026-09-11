@@ -8,7 +8,7 @@ Foundry presents Rhino layouts through List, Thumbnail, and Canvas views in one 
 
 ## Creation and templates
 
-Create layouts from built-in arrangements or live registered sheet/detail sources. One checkbox registers a source; folders have no template role. Each creation specification owns quantity, paper dimensions/units, per-detail named views, display modes, appearance assignments, and a built-in title-block choice. Snapshots derive recipes from current source geometry. There is no stored recipe library, capture dialog, or live capability-link system.
+Create layouts from built-in arrangements or live registered sheet/detail sources. One checkbox registers a source; folders have no template role. Each creation specification owns quantity, paper dimensions/units, per-detail named views, display modes, appearance assignments, and a built-in title-block choice. Snapshots derive recipes from current source geometry. New built-in arrangements reserve at least 6 mm below detail frames for linked captions; larger requested gaps are retained. Live registered source geometry is not resized for this clearance. There is no stored recipe library, capture dialog, or live capability-link system.
 
 ## Appearance and title blocks
 

@@ -324,7 +324,7 @@ internal sealed partial class RhinoMutationExecutor
             throw new InvalidOperationException($"Rhino did not commit viewport settings for detail '{slot.Name}'.");
         ApplyDetailAppearanceRecipe(document, detail.Viewport.Id, slot);
         var viewportId = detail.Viewport.Id;
-        RhinoDetailCaptionService.Mark(detail);
+        RhinoDetailCaptionService.Mark(document, detail);
         return viewportId;
     }
 

@@ -1,6 +1,15 @@
 # Changelog
 
-## Unreleased — v1 hardening
+## 0.1.0-beta.1 — candidate (unpublished)
+
+- Avoid native hierarchy row reloads when displayed values are unchanged; invalidate cached paper/display-mode labels when source data changes.
+- Reserve caption clearance below generated detail frames.
+- Avoid repeated native object enumeration when refreshing large drawing sets.
+- Include the shared UI Markdown runtime in distributable packages.
+- Register linked captions through current native detail attributes after viewport commits, fixing batch creation rollback caused by stale detail wrappers.
+- Honor PDF cancellation after capture and immediately before replacing the destination file.
+
+## Earlier pre-release hardening
 
 - Make the Canvas Inspector wider and resizable, constrain its scroll content to the pane, wrap help text, and stack paper dimensions when the pane is narrow.
 - Keep Mac table cells transparent so native full-row selection remains visible throughout dragging in the hierarchy, appearance editor, and creation review.

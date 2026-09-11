@@ -39,6 +39,8 @@ From the isolated output's `Debug/net8.0` directory, copy exactly these files in
 - RhinoLayoutFoundry.UI.dll
 - RhinoLayoutFoundry.deps.json
 - RhinoLayoutFoundry.runtimeconfig.json
+- RhinoFoundry.UI.dll, RhinoFoundry.UI.Primitives.dll, RhinoFoundry.UI.MacOS.dll
+- Markdig.dll
 
 Fully quit Rhino, run `./scripts/install-dev-macos.sh Debug`, compare SHA-256 hashes of source and installed binaries, and reopen Rhino. Installation is not live assembly reload. On Windows use the development load directory documented in README.
 
@@ -51,4 +53,4 @@ Fully quit Rhino, run `./scripts/install-dev-macos.sh Debug`, compare SHA-256 ha
 - Persisted identity is explicit: document runtime serial for the live document, page main viewport ID for sheets, detail viewport ID for details. Every numeric page size carries its unit system.
 - Prefer cohesive internal components and shared controls. Do not create a public abstraction merely to reduce a file's line count.
 
-Explain native workarounds, ownership, cancellation, and failure behavior near the code. Update the canonical document when changing a contract, and add changelog entries for observable behavior. Maintain only document schema 16 and package format 6. Do not add historical converters or compatibility aliases. Preserve generic invalid/unsupported-state guards and original-envelope pass-through.
+Explain native workarounds, ownership, cancellation, and failure behavior near the code. Update the canonical document when changing a contract, and add changelog entries for observable behavior. Maintain document schema 17 with schema-16 migration and package format 6. Do not add historical converters or compatibility aliases. Preserve generic invalid/unsupported-state guards and original-envelope pass-through.

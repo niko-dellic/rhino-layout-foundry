@@ -495,9 +495,8 @@ internal sealed partial class ObserverCanvasDrawable : FoundryCanvas
         if (_lassoWorld is { } lasso)
         {
             var screen = ScreenRect(lasso, viewport);
-            var crossing = lasso.Width < 0;
-            graphics.FillRectangle(FoundryTheme.SelectionWindowFill(crossing), screen);
-            graphics.DrawRectangle(new Pen(FoundryTheme.SelectionWindowStroke(crossing), 1), screen);
+            graphics.FillRectangle(LayoutPresentationTheme.SelectionFill, screen);
+            graphics.DrawRectangle(new Pen(LayoutPresentationTheme.SelectionAccent, 1), screen);
         }
 
         DrawNavigator(graphics, viewport);
@@ -535,7 +534,7 @@ internal sealed partial class ObserverCanvasDrawable : FoundryCanvas
         var selected = _selection.Contains(key);
         var emphasized = _filter.Emphasizes(key);
         var outline = selected
-            ? FoundryTheme.SelectionAccent
+            ? LayoutPresentationTheme.SelectionAccent
             : emphasized
                 ? FoundryTheme.CanvasBorder
                 : FoundryTheme.WithAlpha(FoundryTheme.CanvasBorder, 64);
@@ -559,6 +558,7 @@ internal sealed partial class ObserverCanvasDrawable : FoundryCanvas
             bounds.Top + renderedHeaderHeight);
         // Keep the outline above every fill. Drawing it before the opaque folder
         // header causes the top and upper side edges to disappear.
+        if (selected) LayoutPresentationTheme.DrawSelectionKeyline(graphics, bounds, 2);
         graphics.DrawRectangle(new Pen(outline, selected ? 2 : 1), bounds);
         var headerColor = emphasized
             ? FoundryTheme.PrimaryText
@@ -605,10 +605,11 @@ internal sealed partial class ObserverCanvasDrawable : FoundryCanvas
                 : FoundryTheme.WithAlpha(FoundryTheme.CanvasOverlayBackground, 64),
             bounds);
         var border = selected
-            ? FoundryTheme.SelectionAccent
+            ? LayoutPresentationTheme.SelectionAccent
             : emphasized
                 ? FoundryTheme.CanvasBorder
                 : FoundryTheme.WithAlpha(FoundryTheme.CanvasBorder, 64);
+        if (selected) LayoutPresentationTheme.DrawSelectionKeyline(graphics, bounds, 2);
         graphics.DrawRectangle(new Pen(border, selected ? 2 : 1), bounds);
         var text = emphasized
             ? FoundryTheme.PrimaryText
@@ -673,10 +674,12 @@ internal sealed partial class ObserverCanvasDrawable : FoundryCanvas
         }
 
         var border = selected || hasSelectedDetail
-            ? FoundryTheme.SelectionAccent
+            ? LayoutPresentationTheme.SelectionAccent
             : emphasized
                 ? FoundryTheme.CanvasBorder
                 : FoundryTheme.WithAlpha(FoundryTheme.CanvasBorder, 64);
+        if (selected || hasSelectedDetail)
+            LayoutPresentationTheme.DrawSelectionKeyline(graphics, bounds, selected ? 3 : 2);
         graphics.DrawRectangle(new Pen(border, selected ? 3 : hasSelectedDetail ? 2 : 1), bounds);
         if (bounds.Width >= 70 && bounds.Height >= 50)
             DrawDetailOverlays(graphics, card, bounds, selected);
@@ -705,7 +708,7 @@ internal sealed partial class ObserverCanvasDrawable : FoundryCanvas
         if (selected && _dragMode == DragMode.Sheets && _dragWorldDelta != new ObserverPoint())
         {
             graphics.DrawRectangle(
-                new Pen(FoundryTheme.WithAlpha(FoundryTheme.SelectionAccent, 180), 1),
+                new Pen(FoundryTheme.WithAlpha(LayoutPresentationTheme.SelectionAccent, 180), 1),
                 bounds);
         }
     }
@@ -752,7 +755,7 @@ internal sealed partial class ObserverCanvasDrawable : FoundryCanvas
                 : FoundryTheme.WithAlpha(LayoutPresentationTheme.CanvasPreviewBackground, 225),
             bounds);
         var border = selected || hasSelectedDetail
-            ? FoundryTheme.SelectionAccent
+            ? LayoutPresentationTheme.SelectionAccent
             : emphasized
                 ? FoundryTheme.CanvasBorder
                 : FoundryTheme.WithAlpha(FoundryTheme.CanvasBorder, 90);
@@ -771,6 +774,8 @@ internal sealed partial class ObserverCanvasDrawable : FoundryCanvas
             bounds.Top + 1,
             bounds.Left + 1,
             bounds.Bottom - 1);
+        if (selected || hasSelectedDetail)
+            LayoutPresentationTheme.DrawSelectionKeyline(graphics, bounds, selected ? 3 : 2);
         graphics.DrawRectangle(new Pen(border, selected ? 3 : hasSelectedDetail ? 2 : 1), bounds);
         DrawCenteredSheetNameScrim(graphics, bounds, card.Sheet.Name, emphasized);
 
@@ -862,7 +867,7 @@ internal sealed partial class ObserverCanvasDrawable : FoundryCanvas
             bounds.Height);
         graphics.FillRectangle(FoundryTheme.CanvasOverlayBackground, bounds);
         graphics.DrawRectangle(
-            new Pen(selected ? FoundryTheme.SelectionAccent : FoundryTheme.CanvasBorder, selected ? 2 : 1),
+            new Pen(selected ? LayoutPresentationTheme.SelectionAccent : FoundryTheme.CanvasBorder, selected ? 2 : 1),
             bounds);
 
         var iconColor = selected ? FoundryTheme.PrimaryText : FoundryTheme.SecondaryText;
@@ -888,7 +893,7 @@ internal sealed partial class ObserverCanvasDrawable : FoundryCanvas
         var label = count > 99 ? "99+" : count.ToString();
         var diameter = count > 9 ? 22f : 18f;
         graphics.FillEllipse(
-            FoundryTheme.SelectionAccent,
+            LayoutPresentationTheme.SelectionAccent,
             centerX - diameter / 2,
             centerY - diameter / 2,
             diameter,
@@ -965,10 +970,11 @@ internal sealed partial class ObserverCanvasDrawable : FoundryCanvas
             var rect = DetailScreenRect(detail.NormalizedBounds, bounds);
             if (rect.Width < 5 || rect.Height < 5) continue;
             var prominent = sheetSelected || detailSelected || hovered;
+            if (detailSelected) LayoutPresentationTheme.DrawSelectionKeyline(graphics, rect, 3);
             graphics.DrawRectangle(
                 new Pen(
                     FoundryTheme.WithAlpha(
-                        prominent ? FoundryTheme.SelectionAccent : FoundryTheme.CanvasBorder,
+                        prominent ? LayoutPresentationTheme.SelectionAccent : FoundryTheme.CanvasBorder,
                         detailSelected ? 255 : hovered ? 220 : sheetSelected ? 155 : 90),
                     detailSelected ? 3 : hovered ? 2 : 1),
                 rect);
@@ -1009,9 +1015,10 @@ internal sealed partial class ObserverCanvasDrawable : FoundryCanvas
         Color color,
         float x,
         float y,
-        string text)
+        string text,
+        Color? haloColor = null)
     {
-        var halo = FoundryTheme.WithAlpha(Colors.Black, 185);
+        var halo = haloColor ?? LayoutPresentationTheme.CanvasLabelHalo;
         graphics.DrawText(font, halo, x - 1, y, text);
         graphics.DrawText(font, halo, x + 1, y, text);
         graphics.DrawText(font, halo, x, y - 1, text);
@@ -1189,12 +1196,12 @@ internal sealed partial class ObserverCanvasDrawable : FoundryCanvas
                 new OverviewNodeKey(OverviewNodeKind.AppearanceState, state.Id));
             using var path = GraphicsPath.GetRoundRect(badge.ScreenBounds, 5);
             graphics.FillPath(
-                selected ? FoundryTheme.SelectionAccent : FoundryTheme.CanvasOverlayBackground,
+                selected ? LayoutPresentationTheme.SelectionAccent : FoundryTheme.CanvasOverlayBackground,
                 path);
             graphics.DrawPath(
-                new Pen(selected ? FoundryTheme.SelectionAccent : FoundryTheme.CanvasBorder, 1),
+                new Pen(selected ? LayoutPresentationTheme.SelectionAccent : FoundryTheme.CanvasBorder, 1),
                 path);
-            var foreground = selected ? Colors.White : FoundryTheme.PrimaryText;
+            var foreground = selected ? LayoutPresentationTheme.SelectionForeground : FoundryTheme.PrimaryText;
             FoundryHierarchyIcons.DrawAppearanceState(
                 graphics,
                 foreground,
@@ -1333,7 +1340,7 @@ internal sealed partial class ObserverCanvasDrawable : FoundryCanvas
                 graphics.FillRectangle(
                     row.IsDraft
                         ? FoundryTheme.HierarchyInlineEditorRowBackground
-                        : FoundryTheme.WithAlpha(FoundryTheme.CanvasSubtleSurface, 190),
+                        : LayoutPresentationTheme.SelectionAccent,
                     0,
                     y,
                     NavigatorWidth,
@@ -1347,7 +1354,9 @@ internal sealed partial class ObserverCanvasDrawable : FoundryCanvas
                 ? FoundryTheme.HierarchyDropForeground
                 : row.IsDraft
                     ? FoundryTheme.HierarchyInlineEditorRowForeground
-                    : emphasized
+                    : selected
+                        ? LayoutPresentationTheme.SelectionForeground
+                        : emphasized
                         ? FoundryTheme.PrimaryText
                         : FoundryTheme.WithAlpha(FoundryTheme.MutedText, 80);
             if (row.CanExpand)
@@ -1358,7 +1367,8 @@ internal sealed partial class ObserverCanvasDrawable : FoundryCanvas
                     rowColor,
                     disclosureX,
                     y + 5,
-                    row.IsExpanded ? "▾" : "▸");
+                    row.IsExpanded ? "▾" : "▸",
+                    selected && !row.IsDraft && !destinationHighlighted ? LayoutPresentationTheme.SelectionAccent : null);
             }
             DrawNavigatorIcon(graphics, row, rowColor, disclosureX + 14, y + 3);
             if (row.IsDraft)
@@ -1373,7 +1383,8 @@ internal sealed partial class ObserverCanvasDrawable : FoundryCanvas
                     rowColor,
                     disclosureX + 36,
                     y + 5,
-                    row.Label);
+                    row.Label,
+                    selected && !destinationHighlighted ? LayoutPresentationTheme.SelectionAccent : null);
             }
         }
 
@@ -1557,7 +1568,7 @@ internal sealed partial class ObserverCanvasDrawable : FoundryCanvas
         float x2,
         float y2)
     {
-        using var halo = new Pen(FoundryTheme.WithAlpha(Colors.Black, 190), 3);
+        using var halo = new Pen(LayoutPresentationTheme.CanvasConnectorHalo, 3);
         using var line = new Pen(FoundryTheme.WithAlpha(FoundryTheme.MutedText, 145), 1);
         graphics.DrawLine(halo, x1, y1, x2, y2);
         graphics.DrawLine(line, x1, y1, x2, y2);
@@ -1718,7 +1729,7 @@ internal sealed partial class ObserverCanvasDrawable : FoundryCanvas
             }
 
             if (selected)
-                graphics.DrawRectangle(new Pen(FoundryTheme.SelectionAccent, 2), card);
+                graphics.DrawRectangle(new Pen(LayoutPresentationTheme.SelectionAccent, 2), card);
             DrawOverlayText(graphics, _smallFont, FoundryTheme.PrimaryText,
                 card.Left + 4, card.Bottom - 17, CompactNamedViewLabel(name));
         }

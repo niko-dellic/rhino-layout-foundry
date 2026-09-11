@@ -13,22 +13,22 @@
       },
       "RhinoFoundry.UI": {
         "type": "Direct",
-        "requested": "[0.3.0-preview.37, )",
-        "resolved": "0.3.0-preview.37",
-        "contentHash": "Vkivz35s9hKS2f7m5SirW0bySQVghRhMYdohIp1h2g7pajpDqiBCtkBHuPDzqvMzI5Lw4/GrvyhpuyweCSN6mw==",
+        "requested": "[0.3.0-preview.40, )",
+        "resolved": "0.3.0-preview.40",
+        "contentHash": "XANM86tjAOFGWlwUeD6wHf8y1rbBU9NJrM7UaeyZ7iug+sm7ebRhUMOjvmbpFFHL1WwgV0op8gSGvRq64FJJdw==",
         "dependencies": {
           "Markdig": "0.37.0",
           "RhinoCommon": "8.34.26223.11001",
-          "RhinoFoundry.UI.Primitives": "0.3.0-preview.37"
+          "RhinoFoundry.UI.Primitives": "0.3.0-preview.40"
         }
       },
       "RhinoFoundry.UI.MacOS": {
         "type": "Direct",
-        "requested": "[0.3.0-preview.37, )",
-        "resolved": "0.3.0-preview.37",
-        "contentHash": "+t2k6I5rKZrFT6y6wzfmqaRZDLqeZS3MBt2ZVqGlly9qNJoi7rdJZoOBQ+M1Ay1WGJJlkgEw0/Csbt93EQeC9w==",
+        "requested": "[0.3.0-preview.40, )",
+        "resolved": "0.3.0-preview.40",
+        "contentHash": "NZzwOaTId73ApHvqC7UeF0/LWLsNjNAZ2f5BHLMDpvDDZmni4T5O3jpnwmF/CY/e3pZP9FJvs8xE99QcSyQpMA==",
         "dependencies": {
-          "RhinoFoundry.UI": "0.3.0-preview.37"
+          "RhinoFoundry.UI": "0.3.0-preview.40"
         }
       },
       "Markdig": {
@@ -52,20 +52,20 @@
       "rhinolayoutfoundry.core": {
         "type": "Project",
         "dependencies": {
-          "RhinoFoundry.UI.Primitives": "[0.3.0-preview.37, )"
+          "RhinoFoundry.UI.Primitives": "[0.3.0-preview.40, )"
         }
       },
       "rhinolayoutfoundry.extensibility": {
         "type": "Project",
         "dependencies": {
-          "RhinoLayoutFoundry.Core": "[0.1.0, )"
+          "RhinoLayoutFoundry.Core": "[0.1.0-beta.1, )"
         }
       },
       "RhinoFoundry.UI.Primitives": {
         "type": "CentralTransitive",
-        "requested": "[0.3.0-preview.37, )",
-        "resolved": "0.3.0-preview.37",
-        "contentHash": "/PtTsk5lWU3fW+wC8ACzlWfuliAjdhRTTJrTS1bRWi+Enn5z9I0/7TUMrGWQ0hkdbIEPR8npYMUD92XGUc8IGA=="
+        "requested": "[0.3.0-preview.40, )",
+        "resolved": "0.3.0-preview.40",
+        "contentHash": "7ISWrU/x5bbVDOyK3ndsHGYpSQNPilzvRxiVXzNzASNeSRfuu4o7hlR1GHHg3HXSAnZiisPjTFXZm25FUfM12A=="
       }
     }
   }

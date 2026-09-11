@@ -104,20 +104,20 @@
       "rhinolayoutfoundry.core": {
         "type": "Project",
         "dependencies": {
-          "RhinoFoundry.UI.Primitives": "[0.3.0-preview.30, )"
+          "RhinoFoundry.UI.Primitives": "[0.3.0-preview.40, )"
         }
       },
       "rhinolayoutfoundry.extensibility": {
         "type": "Project",
         "dependencies": {
-          "RhinoLayoutFoundry.Core": "[0.1.0, )"
+          "RhinoLayoutFoundry.Core": "[0.1.0-beta.1, )"
         }
       },
       "RhinoFoundry.UI.Primitives": {
         "type": "CentralTransitive",
-        "requested": "[0.3.0-preview.30, )",
-        "resolved": "0.3.0-preview.30",
-        "contentHash": "LmjygciaPO9M9gNFR9OqfUO6rFPYtpQLiI/GCfjeD0k5Rh8hcsQx1bcp9fbNqKkIUXlq8eJpvFS4srOpD18cVg=="
+        "requested": "[0.3.0-preview.40, )",
+        "resolved": "0.3.0-preview.40",
+        "contentHash": "7ISWrU/x5bbVDOyK3ndsHGYpSQNPilzvRxiVXzNzASNeSRfuu4o7hlR1GHHg3HXSAnZiisPjTFXZm25FUfM12A=="
       }
     }
   }

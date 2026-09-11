@@ -2,7 +2,7 @@
 
 An open-source layout manager for Rhino. Foundry organizes folders, layout sheets, detail viewports, reusable templates, and appearance states through List, Thumbnail, and Canvas views.
 
-**Status: pre-release.** The repository includes v1 hardening and candidate tooling. Public Windows and macOS support requires the host checks in [Testing and release](docs/TESTING_AND_RELEASE.md). A passing core test suite is not a Rhino compatibility certificate.
+**Status: 0.1.0-beta.1 candidate, unpublished.** The repository includes v1 hardening and candidate tooling. Public Windows and macOS support requires the host checks in [Testing and release](docs/TESTING_AND_RELEASE.md). A passing core test suite is not a Rhino compatibility certificate.
 
 ## Requirements
 
@@ -33,6 +33,10 @@ Live previews temporarily create Rhino page content. Canceling a preview can lea
 
 PDF and package work run through Rhino's UI thread. Cancellation is checked at safe boundaries, not during every native call. Large-file responsiveness and long-operation behavior must pass the release fixture checks.
 
+Switching the system theme while an existing panel is open can leave cached icons with the previous theme colors. Reopen the panel/document or restart Rhino after changing themes. Newly created panels have been checked in light and dark mode.
+
+Built-in creation reserves at least 6 mm below detail frames for linked captions, including when a smaller vertical gap is requested. Registered source templates retain their source geometry.
+
 ## Installing a published release
 
 When a release is published, use Rhino's `PackageManager` to install `rhino-layout-foundry`, then fully restart Rhino and run `LayoutFoundry`. For a supplied candidate, use its matching Windows or Mac `.yak` package and follow the clean-profile checks in [Testing and release](docs/TESTING_AND_RELEASE.md). A local candidate is not a published release.
@@ -62,6 +66,8 @@ When Rhino is running, build to an isolated `BaseOutputPath`; follow [Contributi
 
 On Windows, build with Rhino closed, set `RHINO_PACKAGE_DIRS` to the host project's `bin/Debug/net8.0` directory, and launch Rhino using `/netcore`. Check `PlugInManager`, then run `LayoutFoundry`.
 
+For candidate results and remaining checks, see [Beta qualification](docs/BETA_QUALIFICATION.md) and [Windows beta testing](docs/WINDOWS_BETA_TESTING.md).
+
 ## Documentation ownership
 
 | Document | Authority |
@@ -79,7 +85,7 @@ Historical milestone and architecture notes live in `docs/history` and are not c
 
 ## Shared UI development dependency
 
-Layout Foundry requires the exact `0.3.0-preview.4` shared UI package set. `RhinoLayoutFoundry.Core` references `RhinoFoundry.UI.Primitives`; `RhinoLayoutFoundry.UI` references `RhinoFoundry.UI`; Mac builds add `RhinoFoundry.UI.MacOS`. The three versions are pinned together in [Directory.Packages.props](Directory.Packages.props). Bootstrap packages and their hash manifest are committed under `packages/`, and [NuGet.Config](NuGet.Config) registers that directory as the first restore source.
+Layout Foundry requires the exact `0.3.0-preview.37` shared UI package set. `RhinoLayoutFoundry.Core` references `RhinoFoundry.UI.Primitives`; `RhinoLayoutFoundry.UI` references `RhinoFoundry.UI`; Mac builds add `RhinoFoundry.UI.MacOS`. The three versions are pinned together in [Directory.Packages.props](Directory.Packages.props). Bootstrap packages and their hash manifest are committed under `packages/`, and [NuGet.Config](NuGet.Config) registers that directory as the first restore source.
 
 A normal Layout checkout does not need a source checkout of `rhino-foundry-ui`. Clone the [Rhino Foundry UI repository](https://github.com/niko-dellic/rhino-foundry-ui) as a sibling only when implementing or debugging a shared component. Consumers must continue to reference the packed artifacts so testing uses the same bytes that will ship. Follow the UI library's [consumer guide](https://github.com/niko-dellic/rhino-foundry-ui/blob/main/docs/USAGE.md) and [component implementation guide](https://github.com/niko-dellic/rhino-foundry-ui/blob/main/docs/IMPLEMENTING_COMPONENTS.md).
 

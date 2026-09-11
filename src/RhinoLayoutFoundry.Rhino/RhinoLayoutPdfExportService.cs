@@ -7,6 +7,13 @@ namespace RhinoLayoutFoundry.Rhino;
 
 internal sealed class RhinoLayoutPdfExportService : ILayoutPdfExportService
 {
+    private readonly Action<string>? _checkpoint;
+
+    public RhinoLayoutPdfExportService() { }
+
+    // Internal deterministic fault/cancellation seam for licensed host checks.
+    internal RhinoLayoutPdfExportService(Action<string> checkpoint) => _checkpoint = checkpoint;
+
     public Task<LayoutPdfExportResult> ExportAsync(
         LayoutPdfExportRequest request,
         CancellationToken cancellationToken = default)
@@ -34,7 +41,7 @@ internal sealed class RhinoLayoutPdfExportService : ILayoutPdfExportService
         return completion.Task;
     }
 
-    private static LayoutPdfExportResult ExportOnUiThread(
+    private LayoutPdfExportResult ExportOnUiThread(
         LayoutPdfExportRequest request,
         CancellationToken cancellationToken)
     {
@@ -132,12 +139,16 @@ internal sealed class RhinoLayoutPdfExportService : ILayoutPdfExportService
                     addedPages++;
                 }
 
+                _checkpoint?.Invoke("pages-captured");
+                cancellationToken.ThrowIfCancellationRequested();
                 pdf.Write(temporaryPath);
                 if (!File.Exists(temporaryPath) || new FileInfo(temporaryPath).Length == 0)
                 {
                     return new LayoutPdfExportResult(false, 0, "Rhino did not create the PDF file.");
                 }
 
+                _checkpoint?.Invoke("temporary-written");
+                cancellationToken.ThrowIfCancellationRequested();
                 File.Move(temporaryPath, finalPath, overwrite: true);
                 return new LayoutPdfExportResult(true, addedPages);
             }
@@ -148,6 +159,10 @@ internal sealed class RhinoLayoutPdfExportService : ILayoutPdfExportService
                     File.Delete(temporaryPath);
                 }
             }
+        }
+        catch (OperationCanceledException)
+        {
+            return new LayoutPdfExportResult(false, 0, "PDF export was cancelled.");
         }
         catch (Exception exception)
         {

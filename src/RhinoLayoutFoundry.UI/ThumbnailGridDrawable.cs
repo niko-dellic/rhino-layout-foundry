@@ -178,8 +178,9 @@ internal sealed class ThumbnailGridDrawable : Drawable
             }
         }
 
+        if (selected) LayoutPresentationTheme.DrawSelectionKeyline(graphics, image, 3);
         graphics.DrawRectangle(
-            new Pen(selected ? FoundryTheme.SelectionAccent : LayoutPresentationTheme.SheetOutline,
+            new Pen(selected ? LayoutPresentationTheme.SelectionAccent : LayoutPresentationTheme.SheetOutline,
                 selected ? 3 : 1),
             image);
         graphics.FillEllipse(

@@ -19,7 +19,7 @@ def run_checks():
     from System.Reflection import BindingFlags
     from System.Collections.Generic import List
     clr.AddReference('RhinoLayoutFoundry.Core')
-    from RhinoLayoutFoundry.Core.Domain import HierarchyScope, HierarchyScopeKind, PaperRecipe, BuiltInTitleBlockKind
+    from RhinoLayoutFoundry.Core.Domain import HierarchyScope, HierarchyScopeKind, PaperRecipe, BuiltInTitleBlockKind, DetailCaptions
     from RhinoLayoutFoundry.Core.Operations import SetLayoutTemplateRegistrationPlanner, SetLayoutTemplateRegistrationRequest, BatchCreateSheetsPlanner, BatchCreateSheetsRequest, LayoutCreationSpec, BuiltInLayoutKind
     from RhinoLayoutFoundry.Core.Overview import OverviewInvalidation
     FLAGS = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic
@@ -72,6 +72,12 @@ def run_checks():
      request=BatchCreateSheetsRequest(snapshot.DocumentRuntimeSerialNumber,snapshot.Revision,snapshot.RootFolderId,specs,'Cleanup-{index}',1,1)
      apply(BatchCreateSheetsPlanner().Plan(request,snapshot))
      state=call(store,'Get',doc)
+     created=[p for p in doc.Views.GetPageViews() if p.PageName.startswith('Cleanup-')]
+     assert len(created)==3, 'Expected every created sheet'
+     for page in created:
+      for detail in page.GetDetailViews():
+       assert detail.Attributes.GetUserString(DetailCaptions.ManagedKey)=='1', 'Caption registration missing'
+       assert detail.Attributes.GetUserString(DetailCaptions.SourceViewportKey)==str(detail.Viewport.Id), 'Caption viewport link mismatch'
      managed=[s for s in state.Sheets.Values if s.TitleBlock is not None]
      assert len(managed)==2
      assert set(str(s.TitleBlock.BuiltInKind) for s in managed)==set(['RightSidebar','FullWidthBottom'])
